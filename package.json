@@ -1,0 +1,69 @@
+{
+  "name": "ferricstore",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for FerricStore and FerricFlow",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "FerricStore",
+  "homepage": "https://github.com/ferricstore/ferricstore-typescript#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ferricstore/ferricstore-typescript.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ferricstore/ferricstore-typescript/issues"
+  },
+  "keywords": [
+    "durable-execution",
+    "ferricflow",
+    "ferricstore",
+    "queue",
+    "redis",
+    "state-machine",
+    "workflow"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "npm@11.6.2",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build && npm run docs:check",
+    "docs": "typedoc",
+    "docs:check": "typedoc --logLevel Warn",
+    "integration:down": "docker compose down -v",
+    "integration:up": "docker compose up -d ferricstore && node scripts/wait-for-ferricstore.mjs",
+    "lint": "eslint .",
+    "pack:dry-run": "npm pack --dry-run",
+    "test": "vitest run",
+    "test:integration": "vitest run tests/integration",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "redis": "^6.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.13.1",
+    "eslint": "^10.4.1",
+    "tsup": "^8.5.1",
+    "typedoc": "^0.28.19",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.60.1",
+    "vitest": "^4.1.8"
+  }
+}
