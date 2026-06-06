@@ -658,7 +658,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       });
       expect(manyJobs).toHaveLength(2);
       await expect(flow.transitionMany(manyPartition, {
-        fromState: "many-transition",
+        fromState: manyJobs[0].state,
         items: manyJobs.map(fenced),
         nowMs: now,
         toState: "many-complete"

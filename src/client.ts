@@ -1369,7 +1369,7 @@ function appendClaimedItems(
       }
     }
   }
-  args.push("ITEMS", items.length);
+  args.push("ITEMS");
   for (const item of items) {
     if (partitionKey == null) {
       args.push(item.id, item.partitionKey ?? "-", item.leaseToken, item.fencingToken);
@@ -1393,7 +1393,7 @@ function appendFencedItems(
       }
     }
   }
-  args.push("ITEMS", items.length);
+  args.push("ITEMS");
   for (const item of items) {
     if (partitionKey == null) {
       args.push(item.id, item.partitionKey ?? "-", item.fencingToken);
