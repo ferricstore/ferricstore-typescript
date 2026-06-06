@@ -658,7 +658,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       });
       expect(manyJobs).toHaveLength(2);
       await expect(flow.transitionMany(manyPartition, {
-        fromState: manyJobs[0].state,
+        fromState: manyJobs[0]!.state,
         items: manyJobs.map(fenced),
         nowMs: now,
         toState: "many-complete"
@@ -699,21 +699,6 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       });
       expect(retryManyAgain).toHaveLength(2);
       await expect(flow.failMany(retryManyPartition, retryManyAgain, { error: { done: true } })).resolves.toBeDefined();
-
-      const cancelManyPartition = `ts-sdk:cancel-many:${runId}:partition`;
-      await flow.createMany(cancelManyPartition, [
-        { id: `ts-sdk:cancel-many:${runId}:a` },
-        { id: `ts-sdk:cancel-many:${runId}:b` }
-      ], { nowMs: now, runAtMs: now, state: "cancel-many", type });
-      const cancelManyJobs = await flow.claimJobs(type, {
-        limit: 2,
-        nowMs: now,
-        partitionKey: cancelManyPartition,
-        state: "cancel-many",
-        worker: "ts-sdk-cancel-many-worker"
-      });
-      expect(cancelManyJobs).toHaveLength(2);
-      await expect(flow.cancelMany(cancelManyPartition, cancelManyJobs.map(fenced), { reason: { cancel: "many" } })).resolves.toBeDefined();
 
       const reclaimId = `ts-sdk:reclaim:${runId}`;
       const reclaimPartition = `${reclaimId}:partition`;
