@@ -412,6 +412,7 @@ export class WorkflowWorker {
         jobOnly: !registration.claimRecord,
         leaseMs: this.options.leaseMs ?? registration.leaseMs,
         limit: this.options.batchSize ?? 10,
+        nowMs: this.options.nowMs,
         payload: registration.claimPayload,
         priority: this.options.priority,
         reclaimExpired: this.options.reclaimExpired,

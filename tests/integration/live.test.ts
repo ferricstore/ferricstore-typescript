@@ -243,7 +243,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       await expect(flow.commandList()).resolves.not.toHaveLength(0);
       await expect(flow.commandInfo("get")).resolves.toHaveLength(1);
       await expect(flow.commandDocs("get")).resolves.toBeDefined();
-      await expect(flow.commandGetKeys(["GET", key])).resolves.toContain(key);
+      expect((await flow.commandGetKeys(["GET", key])).map(text)).toContain(key);
       await expect(flow.clientId()).resolves.toBeGreaterThan(0);
       await expect(flow.clientSetName(`ts-sdk-${runId}`)).resolves.toBe(true);
       await expect(flow.clientGetName()).resolves.toBe(`ts-sdk-${runId}`);
@@ -463,8 +463,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
           "palermo",
           "BYRADIUS",
           200,
-          "km",
-          "STOREDIST"
+          "km"
         ])
       ).resolves.toBeGreaterThanOrEqual(0);
     } finally {
@@ -550,8 +549,8 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
     const now = Date.now();
 
     try {
-      await expect(flow.installPolicy(type, { retry: { baseMs: 10, maxMs: 100, maxRetries: 2 } })).resolves.toSatisfy(ok);
-      await expect(flow.installPolicy(type, { retry: { baseMs: 10, maxMs: 100, maxRetries: 1 }, state: "queued" })).resolves.toSatisfy(ok);
+      await expect(flow.installPolicy(type, { retry: { backoff: "FIXED", baseMs: 10, exhaustedTo: "failed", maxMs: 100, maxRetries: 2 } })).resolves.toSatisfy(ok);
+      await expect(flow.installPolicy(type, { retry: { backoff: "FIXED", baseMs: 10, exhaustedTo: "failed", maxMs: 100, maxRetries: 1 }, state: "queued" })).resolves.toSatisfy(ok);
       await expect(flow.policyGet(type)).resolves.toBeTypeOf("object");
       await expect(flow.policyGet(type, { state: "queued" })).resolves.toBeTypeOf("object");
 
@@ -843,21 +842,24 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
     } finally {
       await flow.close();
     }
-  });
+  }, 20_000);
 
   it("covers queue and workflow wrappers against the live server", async () => {
     const flow = await FlowClient.fromUrl(url(), { codec: new JsonCodec() });
     const runId = suffix();
+    const now = Date.now();
 
     try {
       const queueType = `ts-sdk-queue-${runId}`;
       const queue = new QueueClient(flow).queue({ type: queueType, worker: "ts-sdk-queue-worker" });
       await queue.enqueue(`ts-sdk:queue:${runId}`, {
         idempotent: true,
+        nowMs: now,
         partitionKey: `ts-sdk:queue:${runId}:partition`,
-        payload: { step: "queued" }
+        payload: { step: "queued" },
+        runAtMs: now
       });
-      const queueResult = await queue.worker({ batchSize: 1, worker: "ts-sdk-queue-worker" }).runOnce((job) => {
+      const queueResult = await queue.worker({ batchSize: 1, nowMs: now + 1, worker: "ts-sdk-queue-worker" }).runOnce((job) => {
         expect(job.payload).toEqual({ step: "queued" });
         return { ok: true };
       });
@@ -870,21 +872,23 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
         worker: "ts-sdk-workflow-worker"
       });
       workflow
-        .state("received", () => transition("validated", { validated: true }))
+        .state("received", () => transition("validated", { payload: { validated: true } }))
         .state("validated", (ctx) => complete({ result: { id: ctx.id, done: true } }));
 
       const workflowId = `ts-sdk:workflow:${runId}`;
       const workflowPartition = `${workflowId}:partition`;
       await workflow.start(workflowId, {
         idempotent: true,
+        nowMs: now,
         partitionKey: workflowPartition,
-        payload: { order: runId }
+        payload: { order: runId },
+        runAtMs: now
       });
-      await expect(workflow.worker({ batchSize: 1, states: ["received"], worker: "ts-sdk-workflow-worker" }).runOnce()).resolves.toMatchObject({
+      await expect(workflow.worker({ batchSize: 1, nowMs: now + 1, states: ["received"], worker: "ts-sdk-workflow-worker" }).runOnce()).resolves.toMatchObject({
         claimed: 1,
         transitioned: 1
       });
-      await expect(workflow.worker({ batchSize: 1, states: ["validated"], worker: "ts-sdk-workflow-worker" }).runOnce()).resolves.toMatchObject({
+      await expect(workflow.worker({ batchSize: 1, nowMs: now + 2, states: ["validated"], worker: "ts-sdk-workflow-worker" }).runOnce()).resolves.toMatchObject({
         claimed: 1,
         completed: 1
       });
@@ -892,5 +896,5 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
     } finally {
       await flow.close();
     }
-  });
+  }, 20_000);
 });

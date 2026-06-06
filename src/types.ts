@@ -31,6 +31,7 @@ export interface WorkerConfig {
   batchSize?: number;
   leaseMs?: number;
   priority?: number;
+  nowMs?: number;
   reclaimExpired?: boolean;
   reclaimRatio?: number;
   claimValues?: string[];

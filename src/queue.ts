@@ -100,6 +100,7 @@ export class QueueWorker {
       blockMs: this.options.blockMs,
       leaseMs: this.options.leaseMs ?? 30_000,
       limit: this.options.batchSize ?? 10,
+      nowMs: this.options.nowMs,
       payload: true,
       priority: this.options.priority,
       reclaimExpired: this.options.reclaimExpired,
