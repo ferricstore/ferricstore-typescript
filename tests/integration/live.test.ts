@@ -594,7 +594,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       })).resolves.toMatchObject({ id: transitionJob.id });
       await expect(flow.transition(transitionJob.id, {
         fencingToken: transitionJob.job.fencingToken,
-        fromState: "queued",
+        fromState: transitionJob.job.state,
         leaseToken: transitionJob.job.leaseToken,
         partitionKey: transitionJob.partitionKey,
         payload: { step: "ready" },
