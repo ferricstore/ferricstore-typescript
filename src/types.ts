@@ -32,6 +32,8 @@ export interface WorkerConfig {
   leaseMs?: number;
   priority?: number;
   nowMs?: number;
+  partitionKey?: string;
+  partitionKeys?: string[];
   reclaimExpired?: boolean;
   reclaimRatio?: number;
   claimValues?: string[];

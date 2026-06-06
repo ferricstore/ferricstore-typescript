@@ -413,6 +413,8 @@ export class WorkflowWorker {
         leaseMs: this.options.leaseMs ?? registration.leaseMs,
         limit: this.options.batchSize ?? 10,
         nowMs: this.options.nowMs,
+        partitionKey: this.options.partitionKey,
+        partitionKeys: this.options.partitionKeys,
         payload: registration.claimPayload,
         priority: this.options.priority,
         reclaimExpired: this.options.reclaimExpired,

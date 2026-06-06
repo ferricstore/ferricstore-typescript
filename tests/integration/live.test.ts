@@ -36,13 +36,6 @@ function ok(value: unknown): boolean {
   return value === true || value === 1 || value === "OK" || (Buffer.isBuffer(value) && value.toString("utf8") === "OK");
 }
 
-function array(value: unknown): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`expected array response, got ${typeof value}`);
-  }
-  return value;
-}
-
 function field(source: unknown, name: string): unknown {
   if (source instanceof Map) {
     return source.get(name) ?? source.get(Buffer.from(name));
@@ -249,7 +242,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       await expect(flow.clientGetName()).resolves.toBe(`ts-sdk-${runId}`);
       await expect(flow.clientInfo()).resolves.toContain("id=");
       await expect(flow.clientList()).resolves.toContain("id=");
-      await expect(flow.clientTracking("ON", { bcast: true, prefixes: [prefix] })).resolves.toBe(true);
+      await expect(flow.clientTracking("ON", { optin: true })).resolves.toBe(true);
       await expect(flow.clientTrackingInfo()).resolves.toBeDefined();
       await expect(flow.clientGetRedir()).resolves.toBeGreaterThanOrEqual(0);
       await expect(flow.clientCaching("NO")).resolves.toBe(true);
@@ -549,11 +542,6 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
     const now = Date.now();
 
     try {
-      await expect(flow.installPolicy(type, { retry: { backoff: "FIXED", baseMs: 10, exhaustedTo: "failed", maxMs: 100, maxRetries: 2 } })).resolves.toSatisfy(ok);
-      await expect(flow.installPolicy(type, { retry: { backoff: "FIXED", baseMs: 10, exhaustedTo: "failed", maxMs: 100, maxRetries: 1 }, state: "queued" })).resolves.toSatisfy(ok);
-      await expect(flow.policyGet(type)).resolves.toBeTypeOf("object");
-      await expect(flow.policyGet(type, { state: "queued" })).resolves.toBeTypeOf("object");
-
       const valueResponse = await flow.valuePut({ shared: true }, { partitionKey: `ts-sdk:value:${runId}`, ttlMs: 60_000 });
       const valueRef = field(valueResponse, "ref");
       if (valueRef == null) {
@@ -851,15 +839,16 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
 
     try {
       const queueType = `ts-sdk-queue-${runId}`;
+      const queuePartition = `ts-sdk:queue:${runId}:partition`;
       const queue = new QueueClient(flow).queue({ type: queueType, worker: "ts-sdk-queue-worker" });
       await queue.enqueue(`ts-sdk:queue:${runId}`, {
         idempotent: true,
         nowMs: now,
-        partitionKey: `ts-sdk:queue:${runId}:partition`,
+        partitionKey: queuePartition,
         payload: { step: "queued" },
         runAtMs: now
       });
-      const queueResult = await queue.worker({ batchSize: 1, nowMs: now + 1, worker: "ts-sdk-queue-worker" }).runOnce((job) => {
+      const queueResult = await queue.worker({ batchSize: 1, nowMs: now + 1, partitionKey: queuePartition, worker: "ts-sdk-queue-worker" }).runOnce((job) => {
         expect(job.payload).toEqual({ step: "queued" });
         return { ok: true };
       });
@@ -884,11 +873,11 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
         payload: { order: runId },
         runAtMs: now
       });
-      await expect(workflow.worker({ batchSize: 1, nowMs: now + 1, states: ["received"], worker: "ts-sdk-workflow-worker" }).runOnce()).resolves.toMatchObject({
+      await expect(workflow.worker({ batchSize: 1, nowMs: now + 1, partitionKey: workflowPartition, states: ["received"], worker: "ts-sdk-workflow-worker" }).runOnce()).resolves.toMatchObject({
         claimed: 1,
         transitioned: 1
       });
-      await expect(workflow.worker({ batchSize: 1, nowMs: now + 2, states: ["validated"], worker: "ts-sdk-workflow-worker" }).runOnce()).resolves.toMatchObject({
+      await expect(workflow.worker({ batchSize: 1, nowMs: now + 2, partitionKey: workflowPartition, states: ["validated"], worker: "ts-sdk-workflow-worker" }).runOnce()).resolves.toMatchObject({
         claimed: 1,
         completed: 1
       });

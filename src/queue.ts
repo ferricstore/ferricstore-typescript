@@ -101,6 +101,8 @@ export class QueueWorker {
       leaseMs: this.options.leaseMs ?? 30_000,
       limit: this.options.batchSize ?? 10,
       nowMs: this.options.nowMs,
+      partitionKey: this.options.partitionKey,
+      partitionKeys: this.options.partitionKeys,
       payload: true,
       priority: this.options.priority,
       reclaimExpired: this.options.reclaimExpired,
