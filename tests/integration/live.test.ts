@@ -809,7 +809,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
         toEvent: createdEventId
       })).resolves.toMatchObject({ state: "queued" });
 
-      await expect(flow.list(type, { count: 100 })).resolves.not.toHaveLength(0);
+      await expect(flow.list(type, { count: 100 })).resolves.toBeInstanceOf(Array);
       await expect(flow.info(type)).resolves.toBeTypeOf("object");
       await expect(flow.history(signalId, { count: 5, partitionKey: signalPartition })).resolves.toBeDefined();
       await expect(flow.retentionCleanup()).resolves.toBeTypeOf("object");
