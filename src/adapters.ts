@@ -16,7 +16,7 @@ export interface RedisAdapterOptions {
 export interface NodeRedisClient {
   close?: () => Promise<unknown>;
   destroy?: () => void;
-  sendCommand: (args: Array<string | Buffer>) => Promise<unknown>;
+  sendCommand: (args: (string | Buffer)[]) => Promise<unknown>;
 }
 
 export class RedisAdapter implements RedisCommandExecutor {

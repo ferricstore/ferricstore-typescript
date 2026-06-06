@@ -103,7 +103,7 @@ export class CountMinSketchStore {
     return okResponse(await this.client.command("CMS.INITBYPROB", key, error, probability));
   }
 
-  async incrBy(key: string, entries: Array<[unknown, number]>): Promise<number[]> {
+  async incrBy(key: string, entries: [unknown, number][]): Promise<number[]> {
     return array(await this.client.command("CMS.INCRBY", key, ...flattenEntries(this.client, entries))).map(number);
   }
 
@@ -141,13 +141,13 @@ export class TopKStore {
     return okResponse(await this.client.command(...args));
   }
 
-  async add<T = unknown>(key: string, ...elements: unknown[]): Promise<Array<T | null>> {
+  async add<T = unknown>(key: string, ...elements: unknown[]): Promise<(T | null)[]> {
     return array(await this.client.command("TOPK.ADD", key, ...elements.map((item) => encode(this.client, item)))).map((item) =>
       decode<T>(this.client, item)
     );
   }
 
-  async incrBy<T = unknown>(key: string, entries: Array<[unknown, number]>): Promise<Array<T | null>> {
+  async incrBy<T = unknown>(key: string, entries: [unknown, number][]): Promise<(T | null)[]> {
     return array(await this.client.command("TOPK.INCRBY", key, ...flattenEntries(this.client, entries))).map((item) =>
       decode<T>(this.client, item)
     );
@@ -157,7 +157,7 @@ export class TopKStore {
     return array(await this.client.command("TOPK.QUERY", key, ...elements.map((item) => encode(this.client, item)))).map(number);
   }
 
-  async list<T = unknown>(key: string, options: { withCount?: boolean } = {}): Promise<Array<T | number | null>> {
+  async list<T = unknown>(key: string, options: { withCount?: boolean } = {}): Promise<(T | number | null)[]> {
     return array(await this.client.command("TOPK.LIST", key, ...(options.withCount === true ? ["WITHCOUNT"] : []))).map((item, index) =>
       options.withCount === true && index % 2 === 1 ? number(item) : decode<T>(this.client, item)
     );
@@ -298,7 +298,7 @@ export class JsonStore {
     return number(await this.client.command("JSON.CLEAR", key, ...(path == null ? [] : [path])));
   }
 
-  async mget<T = unknown>(keys: string[], path: string): Promise<Array<T | null>> {
+  async mget<T = unknown>(keys: string[], path: string): Promise<(T | null)[]> {
     return array(await this.client.command("JSON.MGET", ...keys, path)).map((item) => parseJson<T>(item));
   }
 }
@@ -326,7 +326,7 @@ function array(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-function flattenEntries(client: StoreCommandClient, entries: Array<[unknown, number]>): CommandArgument[] {
+function flattenEntries(client: StoreCommandClient, entries: [unknown, number][]): CommandArgument[] {
   return entries.flatMap(([item, value]) => [encode(client, item), value]);
 }
 

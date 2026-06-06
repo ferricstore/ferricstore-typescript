@@ -124,7 +124,7 @@ export class Workflow {
     });
   }
 
-  async startMany(items: Array<{ id: string; payload?: unknown; partitionKey?: string; values?: Record<string, unknown>; valueRefs?: Record<string, string> }>, options: {
+  async startMany(items: { id: string; payload?: unknown; partitionKey?: string; values?: Record<string, unknown>; valueRefs?: Record<string, string> }[], options: {
     state?: string;
     partitionKey?: string;
     runAtMs?: number;

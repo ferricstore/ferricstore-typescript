@@ -2,7 +2,7 @@ import type { Codec } from "./codecs.js";
 import { okResponse, type CommandArgument } from "./internal.js";
 
 export interface StoreCommandClient {
-  readonly codec: Codec<unknown>;
+  readonly codec: Codec;
   command(...args: CommandArgument[]): Promise<unknown>;
 }
 
@@ -84,15 +84,15 @@ export class KeyValueStore {
     return number(await this.client.command("EXISTS", ...keys));
   }
 
-  async mget<T = unknown>(keys: string[]): Promise<Array<T | null>> {
+  async mget<T = unknown>(keys: string[]): Promise<(T | null)[]> {
     return array(await this.client.command("MGET", ...keys)).map((item) => decode<T>(this.client.codec, item));
   }
 
-  async mset(entries: Record<string, unknown> | Array<[string, unknown]>): Promise<boolean> {
+  async mset(entries: Record<string, unknown> | [string, unknown][]): Promise<boolean> {
     return okResponse(await this.client.command("MSET", ...flattenKeyValues(this.client.codec, entries)));
   }
 
-  async msetnx(entries: Record<string, unknown> | Array<[string, unknown]>): Promise<boolean> {
+  async msetnx(entries: Record<string, unknown> | [string, unknown][]): Promise<boolean> {
     return number(await this.client.command("MSETNX", ...flattenKeyValues(this.client.codec, entries))) === 1;
   }
 
@@ -274,7 +274,7 @@ export class KeyValueStore {
 export class HashStore {
   constructor(private readonly client: StoreCommandClient) {}
 
-  async hset(key: string, entries: Record<string, unknown> | Array<[string, unknown]>): Promise<number> {
+  async hset(key: string, entries: Record<string, unknown> | [string, unknown][]): Promise<number> {
     return number(await this.client.command("HSET", key, ...flattenKeyValues(this.client.codec, entries)));
   }
 
@@ -286,7 +286,7 @@ export class HashStore {
     return number(await this.client.command("HDEL", key, ...fields));
   }
 
-  async hmget<T = unknown>(key: string, fields: string[]): Promise<Array<T | null>> {
+  async hmget<T = unknown>(key: string, fields: string[]): Promise<(T | null)[]> {
     return array(await this.client.command("HMGET", key, ...fields)).map((item) => decode<T>(this.client.codec, item));
   }
 
@@ -302,7 +302,7 @@ export class HashStore {
     return array(await this.client.command("HKEYS", key));
   }
 
-  async hvals<T = unknown>(key: string): Promise<Array<T | null>> {
+  async hvals<T = unknown>(key: string): Promise<(T | null)[]> {
     return array(await this.client.command("HVALS", key)).map((item) => decode<T>(this.client.codec, item));
   }
 
@@ -361,19 +361,19 @@ export class HashStore {
     return array(await this.client.command("HEXPIRETIME", key, "FIELDS", fields.length, ...fields));
   }
 
-  async hgetdel<T = unknown>(key: string, fields: string[]): Promise<Array<T | null>> {
+  async hgetdel<T = unknown>(key: string, fields: string[]): Promise<(T | null)[]> {
     return array(await this.client.command("HGETDEL", key, "FIELDS", fields.length, ...fields)).map((item) =>
       decode<T>(this.client.codec, item)
     );
   }
 
-  async hgetex<T = unknown>(key: string, fields: string[], options: GetExOptions = {}): Promise<Array<T | null>> {
+  async hgetex<T = unknown>(key: string, fields: string[], options: GetExOptions = {}): Promise<(T | null)[]> {
     return array(await this.client.command("HGETEX", key, ...getexOptions(options), "FIELDS", fields.length, ...fields)).map((item) =>
       decode<T>(this.client.codec, item)
     );
   }
 
-  async hsetex(key: string, seconds: number, entries: Record<string, unknown> | Array<[string, unknown]>): Promise<number> {
+  async hsetex(key: string, seconds: number, entries: Record<string, unknown> | [string, unknown][]): Promise<number> {
     return number(await this.client.command("HSETEX", key, seconds, ...flattenKeyValues(this.client.codec, entries)));
   }
 }
@@ -389,17 +389,17 @@ export class ListStore {
     return number(await this.client.command("RPUSH", key, ...elements.map((item) => encode(this.client.codec, item))));
   }
 
-  async lpop<T = unknown>(key: string, count?: number): Promise<T | Array<T | null> | null> {
+  async lpop<T = unknown>(key: string, count?: number): Promise<T | (T | null)[] | null> {
     const response = await this.client.command("LPOP", key, ...(count == null ? [] : [count]));
     return Array.isArray(response) ? response.map((item) => decode<T>(this.client.codec, item)) : decode<T>(this.client.codec, response);
   }
 
-  async rpop<T = unknown>(key: string, count?: number): Promise<T | Array<T | null> | null> {
+  async rpop<T = unknown>(key: string, count?: number): Promise<T | (T | null)[] | null> {
     const response = await this.client.command("RPOP", key, ...(count == null ? [] : [count]));
     return Array.isArray(response) ? response.map((item) => decode<T>(this.client.codec, item)) : decode<T>(this.client.codec, response);
   }
 
-  async lrange<T = unknown>(key: string, start: number, stop: number): Promise<Array<T | null>> {
+  async lrange<T = unknown>(key: string, start: number, stop: number): Promise<(T | null)[]> {
     return array(await this.client.command("LRANGE", key, start, stop)).map((item) => decode<T>(this.client.codec, item));
   }
 
@@ -479,7 +479,7 @@ export class SetStore {
     return number(await this.client.command("SREM", key, ...members.map((item) => encode(this.client.codec, item))));
   }
 
-  async smembers<T = unknown>(key: string): Promise<Array<T | null>> {
+  async smembers<T = unknown>(key: string): Promise<(T | null)[]> {
     return array(await this.client.command("SMEMBERS", key)).map((item) => decode<T>(this.client.codec, item));
   }
 
@@ -495,25 +495,25 @@ export class SetStore {
     return number(await this.client.command("SCARD", key));
   }
 
-  async srandmember<T = unknown>(key: string, count?: number): Promise<T | Array<T | null> | null> {
+  async srandmember<T = unknown>(key: string, count?: number): Promise<T | (T | null)[] | null> {
     const response = await this.client.command("SRANDMEMBER", key, ...(count == null ? [] : [count]));
     return Array.isArray(response) ? response.map((item) => decode<T>(this.client.codec, item)) : decode<T>(this.client.codec, response);
   }
 
-  async spop<T = unknown>(key: string, count?: number): Promise<T | Array<T | null> | null> {
+  async spop<T = unknown>(key: string, count?: number): Promise<T | (T | null)[] | null> {
     const response = await this.client.command("SPOP", key, ...(count == null ? [] : [count]));
     return Array.isArray(response) ? response.map((item) => decode<T>(this.client.codec, item)) : decode<T>(this.client.codec, response);
   }
 
-  async sdiff<T = unknown>(keys: string[]): Promise<Array<T | null>> {
+  async sdiff<T = unknown>(keys: string[]): Promise<(T | null)[]> {
     return array(await this.client.command("SDIFF", ...keys)).map((item) => decode<T>(this.client.codec, item));
   }
 
-  async sinter<T = unknown>(keys: string[]): Promise<Array<T | null>> {
+  async sinter<T = unknown>(keys: string[]): Promise<(T | null)[]> {
     return array(await this.client.command("SINTER", ...keys)).map((item) => decode<T>(this.client.codec, item));
   }
 
-  async sunion<T = unknown>(keys: string[]): Promise<Array<T | null>> {
+  async sunion<T = unknown>(keys: string[]): Promise<(T | null)[]> {
     return array(await this.client.command("SUNION", ...keys)).map((item) => decode<T>(this.client.codec, item));
   }
 
@@ -627,7 +627,7 @@ export class SortedSetStore {
 export class StreamStore {
   constructor(private readonly client: StoreCommandClient) {}
 
-  async xadd(key: string, id: string, fields: Record<string, unknown> | Array<[string, unknown]>): Promise<unknown> {
+  async xadd(key: string, id: string, fields: Record<string, unknown> | [string, unknown][]): Promise<unknown> {
     return await this.client.command("XADD", key, id, ...flattenKeyValues(this.client.codec, fields));
   }
 
@@ -754,11 +754,11 @@ export class GeoStore {
   }
 }
 
-function encode(codec: Codec<unknown>, value: unknown): Buffer {
+function encode(codec: Codec, value: unknown): Buffer {
   return codec.encode(value);
 }
 
-function decode<T>(codec: Codec<unknown>, value: unknown): T | null {
+function decode<T>(codec: Codec, value: unknown): T | null {
   if (value == null) return null;
   if (Buffer.isBuffer(value)) return codec.decode(value) as T | null;
   if (value instanceof Uint8Array) return codec.decode(Buffer.from(value)) as T | null;
@@ -777,7 +777,7 @@ function array(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-function flattenKeyValues(codec: Codec<unknown>, entries: Record<string, unknown> | Array<[string, unknown]>): CommandArgument[] {
+function flattenKeyValues(codec: Codec, entries: Record<string, unknown> | [string, unknown][]): CommandArgument[] {
   const pairs = Array.isArray(entries) ? entries : Object.entries(entries);
   return pairs.flatMap(([key, value]) => [key, codec.encode(value)]);
 }

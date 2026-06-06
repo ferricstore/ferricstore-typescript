@@ -37,7 +37,10 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       });
 
       expect(jobs).toHaveLength(1);
-      const job = jobs[0]!;
+      const job = jobs[0];
+      if (job == null) {
+        throw new Error("expected an integration job");
+      }
       expect(job).toMatchObject({
         id,
         partitionKey: id,

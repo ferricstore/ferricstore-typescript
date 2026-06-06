@@ -137,7 +137,7 @@ export function normalizeExceptionPolicy(value: ExceptionPolicy | undefined): Ex
 
 export function claimedItemFromResp<TPayload = unknown>(
   value: unknown,
-  codec?: Codec<unknown>
+  codec?: Codec
 ): ClaimedItem<TPayload> {
   if (Array.isArray(value)) {
     return {
@@ -166,7 +166,7 @@ export function claimedItemFromResp<TPayload = unknown>(
 
 export function flowRecordFromResp<TPayload = unknown>(
   value: unknown,
-  codec?: Codec<unknown>
+  codec?: Codec
 ): FlowRecord<TPayload> {
   const payload = field(value, "payload");
   const values = decodeValues(field(value, "values"), codec);
@@ -221,7 +221,7 @@ export function keyInfoFromResp(value: unknown): KeyInfo {
 
 export function fetchOrComputeResultFromResp<T = unknown>(
   value: unknown,
-  codec: Codec<unknown>
+  codec: Codec
 ): FetchOrComputeResult<T> {
   if (!Array.isArray(value)) {
     throw new TypeError("FETCH_OR_COMPUTE returned an unexpected response");
@@ -243,7 +243,7 @@ export function fetchOrComputeResultFromResp<T = unknown>(
   };
 }
 
-function decodePayload(codec: Codec<unknown> | undefined, value: unknown): unknown {
+function decodePayload(codec: Codec | undefined, value: unknown): unknown {
   if (value == null) {
     return null;
   }
@@ -257,7 +257,7 @@ function decodePayload(codec: Codec<unknown> | undefined, value: unknown): unkno
   return normalizeRefMeta(value);
 }
 
-function decodeValues(value: unknown, codec: Codec<unknown> | undefined): Record<string, unknown> | undefined {
+function decodeValues(value: unknown, codec: Codec | undefined): Record<string, unknown> | undefined {
   const map = toStringKeyMap(value);
   if (map == null) {
     return undefined;

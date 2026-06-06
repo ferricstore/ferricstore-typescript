@@ -59,5 +59,5 @@ export function isOutcome(value: unknown): value is Outcome {
   if (typeof value !== "object" || value == null || !("kind" in value)) {
     return false;
   }
-  return ["transition", "complete", "retry", "fail"].includes(String((value as { kind: unknown }).kind));
+  return ["transition", "complete", "retry", "fail"].includes(String(value.kind));
 }

@@ -7,6 +7,7 @@ import {
   appendEncoded,
   appendNamedValues,
   appendValueReturn,
+  arrayResponse,
   autoPartitionKeyForId,
   expandManyResponse,
   nowMs,
@@ -56,7 +57,7 @@ import {
 } from "./types.js";
 
 export interface FlowClientOptions {
-  codec?: Codec<unknown>;
+  codec?: Codec;
   backpressure?: BackpressurePolicy;
 }
 
@@ -170,7 +171,7 @@ export interface ReadOptions {
 
 export class FlowClient {
   readonly executor: RedisCommandExecutor;
-  readonly codec: Codec<unknown>;
+  readonly codec: Codec;
   readonly backpressure: Required<BackpressurePolicy>;
   readonly bitmap: BitmapStore;
   readonly bloom: BloomFilterStore;
@@ -266,8 +267,7 @@ export class FlowClient {
   }
 
   async slowlogGet(count?: number): Promise<unknown[]> {
-    const response = await this.command("SLOWLOG", "GET", ...(count == null ? [] : [count]));
-    return Array.isArray(response) ? response : [];
+    return arrayResponse(await this.command("SLOWLOG", "GET", ...(count == null ? [] : [count])));
   }
 
   async slowlogLen(): Promise<number> {
@@ -287,13 +287,11 @@ export class FlowClient {
   }
 
   async commandList(): Promise<unknown[]> {
-    const response = await this.command("COMMAND", "LIST");
-    return Array.isArray(response) ? response : [];
+    return arrayResponse(await this.command("COMMAND", "LIST"));
   }
 
   async commandInfo(...names: string[]): Promise<unknown[]> {
-    const response = await this.command("COMMAND", "INFO", ...names);
-    return Array.isArray(response) ? response : [];
+    return arrayResponse(await this.command("COMMAND", "INFO", ...names));
   }
 
   async commandDocs(...names: string[]): Promise<unknown> {
@@ -301,8 +299,7 @@ export class FlowClient {
   }
 
   async commandGetKeys(command: Command): Promise<unknown[]> {
-    const response = await this.command("COMMAND", "GETKEYS", ...command);
-    return Array.isArray(response) ? response : [];
+    return arrayResponse(await this.command("COMMAND", "GETKEYS", ...command));
   }
 
   async clientId(): Promise<number> {
@@ -376,8 +373,7 @@ export class FlowClient {
   }
 
   async moduleList(): Promise<unknown[]> {
-    const response = await this.command("MODULE", "LIST");
-    return Array.isArray(response) ? response : [];
+    return arrayResponse(await this.command("MODULE", "LIST"));
   }
 
   async publish(channel: string, message: CommandArgument): Promise<number> {
@@ -385,13 +381,11 @@ export class FlowClient {
   }
 
   async pubsubChannels(pattern?: string): Promise<unknown[]> {
-    const response = await this.command("PUBSUB", "CHANNELS", ...(pattern == null ? [] : [pattern]));
-    return Array.isArray(response) ? response : [];
+    return arrayResponse(await this.command("PUBSUB", "CHANNELS", ...(pattern == null ? [] : [pattern])));
   }
 
   async pubsubNumSub(...channels: string[]): Promise<unknown[]> {
-    const response = await this.command("PUBSUB", "NUMSUB", ...channels);
-    return Array.isArray(response) ? response : [];
+    return arrayResponse(await this.command("PUBSUB", "NUMSUB", ...channels));
   }
 
   async pubsubNumPat(): Promise<number> {
@@ -411,8 +405,7 @@ export class FlowClient {
   }
 
   async aclList(): Promise<unknown[]> {
-    const response = await this.command("ACL", "LIST");
-    return Array.isArray(response) ? response : [];
+    return arrayResponse(await this.command("ACL", "LIST"));
   }
 
   async aclWhoami(): Promise<string> {
@@ -594,7 +587,7 @@ export class FlowClient {
       });
     }
 
-    const grouped = new Map<string, Array<[number, CreateItem]>>();
+    const grouped = new Map<string, [number, CreateItem][]>();
     items.forEach((item, index) => {
       const bucket = autoPartitionKeyForId(item.id);
       grouped.set(bucket, [...(grouped.get(bucket) ?? []), [index, item]]);
@@ -707,7 +700,7 @@ export class FlowClient {
     if (!Array.isArray(response)) {
       return [];
     }
-    return response.map((item) => (Buffer.isBuffer(item) ? this.codec.decode(item) : item));
+    return (response as unknown[]).map((item) => (Buffer.isBuffer(item) ? this.codec.decode(item) : item));
   }
 
   async signal(id: string, options: {
@@ -746,7 +739,7 @@ export class FlowClient {
     return await this.signal(id, options);
   }
 
-  async claimDue(type: string, options: ClaimDueOptions): Promise<Array<FlowRecord | ClaimedItem>> {
+  async claimDue(type: string, options: ClaimDueOptions): Promise<(FlowRecord | ClaimedItem)[]> {
     if (options.state != null && options.states != null) {
       throw new Error("state and states are mutually exclusive");
     }
@@ -795,10 +788,10 @@ export class FlowClient {
       jobOnly: true,
       limit: options.limit ?? 100,
       priority: options.priority ?? 0
-    })) as ClaimedItem[];
+    }));
   }
 
-  async reclaim(type: string, options: ReclaimOptions): Promise<Array<FlowRecord | ClaimedItem>> {
+  async reclaim(type: string, options: ReclaimOptions): Promise<(FlowRecord | ClaimedItem)[]> {
     if (options.state != null && options.state !== "running") {
       throw new Error("FLOW.RECLAIM only supports running state");
     }
@@ -1155,8 +1148,7 @@ export class FlowClient {
     append(args, "COUNT", options.count);
     append(args, "FROM_EVENT", options.fromEvent);
     appendBool(args, "REV", options.rev);
-    const response = await this.command(...args);
-    return Array.isArray(response) ? response : [];
+    return arrayResponse(await this.command(...args));
   }
 
   async spawnChildren(parentId: string, children: ChildSpec[], options: {
@@ -1314,7 +1306,7 @@ function appendReadOptions(args: CommandArgument[], options: ReadOptions): void 
 
 function appendNamedCounts(
   args: CommandArgument[],
-  codec: Codec<unknown>,
+  codec: Codec,
   values: Record<string, unknown>,
   valueRefs: Record<string, string>
 ): void {

@@ -14,7 +14,7 @@ npm run check
 `npm run check` runs:
 
 - strict TypeScript type checking;
-- ESLint;
+- type-aware strict ESLint;
 - Vitest unit tests;
 - package build and declaration generation;
 - TypeDoc generation.
@@ -42,4 +42,5 @@ docker compose down -v
 - Add or update tests.
 - Update README/docs when changing public API.
 - Run `npm run check`.
+- Run `npm run test:integration` when changing live FerricStore command behavior.
 - Run `npm run pack:dry-run` for packaging changes.

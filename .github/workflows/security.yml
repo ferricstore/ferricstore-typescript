@@ -1,0 +1,46 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "37 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+
+  codeql:
+    name: codeql javascript-typescript
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.x
+          cache: npm
+      - run: npm ci
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          queries: security-and-quality
+      - run: npm run build
+      - uses: github/codeql-action/analyze@v4

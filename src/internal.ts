@@ -26,7 +26,7 @@ export function appendBool(args: CommandArgument[], name: string, value: boolean
 export function appendEncoded(
   args: CommandArgument[],
   name: string,
-  codec: Codec<unknown>,
+  codec: Codec,
   value: unknown
 ): void {
   if (value != null) {
@@ -36,7 +36,7 @@ export function appendEncoded(
 
 export function appendNamedValues(
   args: CommandArgument[],
-  codec: Codec<unknown>,
+  codec: Codec,
   options: {
     values?: Record<string, unknown>;
     valueRefs?: Record<string, string>;
@@ -96,7 +96,22 @@ export function bytes(value: unknown): Buffer {
   if (value instanceof Uint8Array) {
     return Buffer.from(value);
   }
-  return Buffer.from(String(value));
+  if (typeof value === "object") {
+    return Buffer.from(JSON.stringify(value) ?? "");
+  }
+  if (typeof value === "string") {
+    return Buffer.from(value);
+  }
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return Buffer.from(String(value));
+  }
+  if (typeof value === "symbol") {
+    return Buffer.from(value.description ?? "");
+  }
+  if (typeof value === "function") {
+    return Buffer.from(value.name);
+  }
+  return Buffer.alloc(0);
 }
 
 export function integer(value: unknown, defaultValue = 0): number {
@@ -211,9 +226,13 @@ export function autoPartitionKeyForId(id: string): string {
 
 export function expandManyResponse(value: unknown, count: number): unknown[] {
   if (Array.isArray(value) && value.length === count) {
-    return value;
+    return [...(value as unknown[])];
   }
   return Array.from({ length: count }, () => value);
+}
+
+export function arrayResponse(value: unknown): unknown[] {
+  return Array.isArray(value) ? [...(value as unknown[])] : [];
 }
 
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -222,7 +241,7 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   }
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(signal.reason);
+      reject(abortError(signal.reason));
       return;
     }
 
@@ -231,11 +250,18 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       "abort",
       () => {
         clearTimeout(timer);
-        reject(signal.reason);
+        reject(abortError(signal.reason));
       },
       { once: true }
     );
   });
+}
+
+function abortError(reason: unknown): Error {
+  if (reason instanceof Error) {
+    return reason;
+  }
+  return new Error(typeof reason === "string" ? reason : "operation aborted", { cause: reason });
 }
 
 function parseTextSections(value: string): Record<string, unknown> {
