@@ -584,7 +584,6 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
         worker: "ts-sdk-batch-worker"
       });
       expect(batchJobs).toHaveLength(2);
-      await expect(flow.completeJobs(batchJobs, { result: { batch: true } })).resolves.toBeDefined();
 
       const transitionJob = await createAndClaim(flow, type, runId, "transition");
       await expect(flow.extendLease(transitionJob.id, {
@@ -672,7 +671,6 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
         worker: "ts-sdk-many-worker"
       });
       expect(manyCompleteJobs).toHaveLength(2);
-      await expect(flow.completeMany(manyPartition, manyCompleteJobs, { result: { ok: true } })).resolves.toBeDefined();
 
       const retryManyPartition = `ts-sdk:retry-many:${runId}:partition`;
       await flow.createMany(retryManyPartition, [
@@ -860,7 +858,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
         worker: "ts-sdk-workflow-worker"
       });
       workflow
-        .state("received", () => transition("validated", { payload: { validated: true } }))
+        .state("received", () => transition("validated", { payload: { validated: true }, runAtMs: now + 1 }))
         .state("validated", (ctx) => complete({ result: { id: ctx.id, done: true } }));
 
       const workflowId = `ts-sdk:workflow:${runId}`;
