@@ -18,7 +18,7 @@ image.state("received", async (ctx) => {
       { id: `${ctx.id}:small`, type: "resize", payload: { imageId: ctx.id, size: "small" } },
       { id: `${ctx.id}:large`, type: "resize", payload: { imageId: ctx.id, size: "large" } }
     ],
-    { idempotent: true }
+    { wait: "all" }
   );
 
   return transition("waiting_for_resizes");

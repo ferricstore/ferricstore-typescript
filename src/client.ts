@@ -1138,8 +1138,18 @@ export class FlowClient {
     return parseKvResponse(await this.command("FLOW.INFO", type));
   }
 
-  async stuck(type: string, options: ReadOptions = {}): Promise<FlowRecord[]> {
-    return await this.indexQuery("FLOW.STUCK", type, options);
+  async stuck(type: string, options: {
+    partitionKey?: string;
+    count?: number;
+    olderThanMs?: number;
+    nowMs?: number;
+  } = {}): Promise<FlowRecord[]> {
+    const args: CommandArgument[] = ["FLOW.STUCK", type];
+    append(args, "PARTITION", options.partitionKey);
+    append(args, "COUNT", options.count);
+    append(args, "OLDER_THAN", options.olderThanMs);
+    append(args, "NOW", options.nowMs);
+    return this.records(arrayResponse(await this.command(...args)));
   }
 
   async history(id: string, options: { partitionKey?: string; count?: number; fromEvent?: string; rev?: boolean } = {}): Promise<unknown[]> {
@@ -1152,29 +1162,55 @@ export class FlowClient {
   }
 
   async spawnChildren(parentId: string, children: ChildSpec[], options: {
+    groupId?: string;
     partitionKey?: string;
     leaseToken?: Buffer;
     fencingToken?: number;
-    idempotent?: boolean;
+    wait?: string;
+    waitState?: string;
+    success?: string;
+    failure?: string;
+    fromState?: string;
     nowMs?: number;
-    runAtMs?: number;
-    priority?: number;
-    failure?: unknown;
     onChildFailed?: string;
+    onParentClosed?: string;
+    values?: Record<string, unknown>;
+    valueRefs?: Record<string, string>;
   } = {}): Promise<unknown> {
-    const args: CommandArgument[] = ["FLOW.SPAWN_CHILDREN", parentId, "NOW", options.nowMs ?? nowMs()];
+    const args: CommandArgument[] = [
+      "FLOW.SPAWN_CHILDREN",
+      parentId,
+      "GROUP",
+      options.groupId ?? "default",
+      "WAIT",
+      options.wait ?? "all",
+      "NOW",
+      options.nowMs ?? nowMs()
+    ];
     append(args, "PARTITION", options.partitionKey);
     append(args, "LEASE_TOKEN", options.leaseToken);
     append(args, "FENCING", options.fencingToken);
-    appendBool(args, "IDEMPOTENT", options.idempotent);
-    append(args, "RUN_AT", options.runAtMs);
-    append(args, "PRIORITY", options.priority);
-    appendEncoded(args, "FAILURE", this.codec, options.failure);
+    append(args, "WAIT_STATE", options.waitState);
+    append(args, "SUCCESS", options.success);
+    append(args, "FAILURE", options.failure);
+    append(args, "FROM_STATE", options.fromState);
     append(args, "ON_CHILD_FAILED", options.onChildFailed);
-    args.push("CHILDREN", children.length);
+    append(args, "ON_PARENT_CLOSED", options.onParentClosed);
+    appendNamedValues(args, this.codec, options);
+    args.push("ITEMS");
+    const mixed = children.some((child) => child.partitionKey != null);
+    if (mixed) {
+      args.push("MIXED");
+    }
     for (const child of children) {
-      args.push(child.id, child.type, child.partitionKey ?? "-", this.codec.encode(child.payload));
-      appendNamedCounts(args, this.codec, child.values ?? {}, child.valueRefs ?? {});
+      if (mixed) {
+        if (child.partitionKey == null) {
+          throw new Error("mixed spawnChildren children require partitionKey");
+        }
+        args.push(child.id, child.partitionKey, child.type, this.codec.encode(child.payload));
+      } else {
+        args.push(child.id, child.type, this.codec.encode(child.payload));
+      }
     }
     return await this.command(...args);
   }
