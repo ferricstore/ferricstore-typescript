@@ -5,6 +5,7 @@
   "excludePrivate": true,
   "excludeInternal": true,
   "githubPages": false,
+  "gitRevision": "main",
   "hideGenerator": true,
   "plugin": []
 }
