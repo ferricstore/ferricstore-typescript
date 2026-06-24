@@ -26,10 +26,10 @@ npm run bench:kv -- \
 Result:
 
 ```text
-SET: 1,284,527 requests/s
-batch p50: 23.14 ms
-batch p95: 27.28 ms
-batch p99: 31.92 ms
+SET: 1,315,294 requests/s
+batch p50: 22.49 ms
+batch p95: 26.93 ms
+batch p99: 31.62 ms
 errors: 0
 ```
 
@@ -50,10 +50,10 @@ npm run bench:kv -- \
 Result:
 
 ```text
-GET: 2,585,839 requests/s
-batch p50: 24.03 ms
-batch p95: 26.46 ms
-batch p99: 28.04 ms
+GET: 4,473,717 requests/s
+batch p50: 13.62 ms
+batch p95: 20.23 ms
+batch p99: 22.66 ms
 errors: 0
 ```
 
@@ -106,8 +106,8 @@ npm run bench:dbos -- \
 Result:
 
 ```text
-create: 260,468 flows/s
-end-to-end: 84,201 flows/s
+create: 233,040-245,105 flows/s
+end-to-end: 63,240-73,714 flows/s
 claim calls: 384
 empty claims: 128
 completed: 100000 / 100000
@@ -148,3 +148,4 @@ errors: 0
 - Two native client sockets with 64 protocol lanes each performed best for the TypeScript DBOS-style run in this Docker setup. One socket reached roughly 57k-62k/s; four sockets were slower than two.
 - Compact native request bodies are enabled for `FLOW.CREATE_MANY` and compact job-only `FLOW.CLAIM_DUE`.
 - `FLOW.COMPLETE_MANY` stays on the typed direct native opcode and worker completion uses `RETURN OK_ON_SUCCESS` to avoid materializing per-item success responses.
+- Homogeneous native pipeline encoding writes one compact request buffer per batch for `GET`/`SET`, and compact pipeline success responses unwrap without per-item status tuple allocation.

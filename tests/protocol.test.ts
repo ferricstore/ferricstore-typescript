@@ -58,6 +58,22 @@ describe("native protocol codec", () => {
     expect(unwrapPipelineResponse([["ok", Buffer.from("a")], ["ok", null]])).toEqual([Buffer.from("a"), null]);
   });
 
+  it("decodes compact pipeline successes without status tuple allocation", () => {
+    const value = Buffer.from("a");
+    const body = Buffer.concat([
+      Buffer.from([0, 0, 0x95]),
+      u32(2),
+      Buffer.from([0, 1]),
+      binary(value),
+      Buffer.from([0, 0])
+    ]);
+    const decoded = decodeResponse(responseFrame(OPCODES.pipeline, body), OPCODES.pipeline);
+
+    expect(decoded).toEqual([value, null]);
+    expect(unwrapPipelineResponse(decoded)).toBe(decoded);
+    expect(unwrapPipelineResponse(decoded)).toEqual([value, null]);
+  });
+
   it("builds direct native FLOW.CREATE_MANY for mixed partition batches", () => {
     const payload = Buffer.from("payload");
     const command = buildProtocolCommand([

@@ -152,14 +152,19 @@ export class NativeAdapter implements CommandExecutor {
   }
 
   private onData(chunk: Buffer): void {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-    for (;;) {
-      const parsed = tryDecodeFrame(this.buffer);
-      if (parsed == null) {
-        return;
+    try {
+      this.buffer = Buffer.concat([this.buffer, chunk]);
+      for (;;) {
+        const parsed = tryDecodeFrame(this.buffer);
+        if (parsed == null) {
+          return;
+        }
+        this.buffer = parsed.rest;
+        this.handleFrame(parsed.frame);
       }
-      this.buffer = parsed.rest;
-      this.handleFrame(parsed.frame);
+    } catch (error) {
+      this.failAll(error);
+      this.socket.destroy(error instanceof Error ? error : undefined);
     }
   }
 
@@ -167,16 +172,23 @@ export class NativeAdapter implements CommandExecutor {
     if (frame.requestId === 0n) {
       return;
     }
-    const key = `${frame.requestId}:${frame.opcode}:${frame.laneId}`;
     if ((frame.flags & FLAG_MORE_CHUNKS) !== 0) {
+      const key = `${frame.requestId}:${frame.opcode}:${frame.laneId}`;
       this.chunks.set(key, [...(this.chunks.get(key) ?? []), frame.body]);
       return;
     }
 
-    const previous = this.chunks.get(key);
-    this.chunks.delete(key);
-    const body = previous == null ? frame.body : Buffer.concat([...previous, frame.body]);
-    const completeFrame: ResponseFrame = { ...frame, body, bodyLength: body.byteLength };
+    let completeFrame = frame;
+    if (this.chunks.size > 0) {
+      const key = `${frame.requestId}:${frame.opcode}:${frame.laneId}`;
+      const previous = this.chunks.get(key);
+      this.chunks.delete(key);
+      if (previous != null) {
+        const body = Buffer.concat([...previous, frame.body]);
+        completeFrame = { ...frame, body, bodyLength: body.byteLength };
+      }
+    }
+
     const pending = this.pending.get(frame.requestId);
     if (pending == null) {
       return;

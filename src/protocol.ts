@@ -258,19 +258,44 @@ export function unwrapPipelineResponse(value: unknown): unknown[] {
   if (!Array.isArray(value)) {
     return [];
   }
-  return value.map((raw: unknown) => {
-    const item: unknown = raw;
-    if (Array.isArray(item) && item.length >= 2) {
-      const tuple = item as readonly unknown[];
-      const status = asText(tuple[0]).toLowerCase();
-      const payload: unknown = tuple[1];
-      if (status === "ok") {
-        return payload;
-      }
-      throw classifyServerError(errorMessage(status === "busy" ? 4 : 1, payload), payload);
+  const items = value as unknown[];
+
+  let hasStatusTuple = false;
+  for (const item of items) {
+    if (Array.isArray(item) && item.length >= 2 && pipelineStatus(item[0]) != null) {
+      hasStatusTuple = true;
+      break;
     }
-    return item;
-  });
+  }
+  if (!hasStatusTuple) {
+    return items;
+  }
+
+  const out = new Array<unknown>(items.length);
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (Array.isArray(item) && item.length >= 2) {
+      const status = pipelineStatus(item[0]);
+      if (status != null) {
+        const payload: unknown = item[1];
+        if (status === "ok") {
+          out[index] = payload;
+          continue;
+        }
+        throw classifyServerError(errorMessage(status === "busy" ? 4 : 1, payload), payload);
+      }
+    }
+    out[index] = item;
+  }
+  return out;
+}
+
+function pipelineStatus(value: unknown): "busy" | "error" | "ok" | null {
+  if (typeof value !== "string" && !Buffer.isBuffer(value) && !(value instanceof Uint8Array)) {
+    return null;
+  }
+  const status = asText(value).toLowerCase();
+  return status === "ok" || status === "busy" || status === "error" ? status : null;
 }
 
 export function encodeValue(value: unknown): Buffer {
@@ -383,7 +408,7 @@ function tryDecodeCompactResponse(opcode: number, body: Buffer): { readonly foun
   const tag = body.readUInt8(0);
   if (tag === COMPACT_OK_LIST && isOkListOpcode(opcode)) {
     const values = decodeCompactOkList(body);
-    return { found: true, value: opcode === OPCODES.pipeline ? values.map((value) => ["ok", value]) : values.length === 1 ? "OK" : values };
+    return { found: true, value: opcode === OPCODES.pipeline ? values : values.length === 1 ? "OK" : values };
   }
   if (tag === COMPACT_KV_GET && opcode === OPCODES.get) {
     return { found: true, value: decodeCompactKvGet(body) };
@@ -474,24 +499,76 @@ function compactPipelinePayload(commands: readonly Command[]): Buffer | undefine
   if (commands.length === 0) {
     return Buffer.concat([u8(COMPACT_PIPELINE_REQUEST), u8(0x80 | 2), u32(0)]);
   }
-  const names = commands.map((command) => asText(command[0]).toUpperCase());
-  if (names.every((name) => name === "SET")) {
-    const items: Buffer[] = [u8(COMPACT_PIPELINE_REQUEST), u8(0x80 | 1), u32(commands.length)];
-    for (const command of commands) {
-      if (command.length !== 3) return undefined;
-      items.push(compactBinary(command[1]), compactBinary(command[2]));
-    }
-    return Buffer.concat(items);
+  if (commandNameIs(commands[0]?.[0], "SET")) {
+    return compactSetPipelinePayload(commands);
   }
-  if (names.every((name) => name === "GET")) {
-    const items: Buffer[] = [u8(COMPACT_PIPELINE_REQUEST), u8(0x80 | 2), u32(commands.length)];
-    for (const command of commands) {
-      if (command.length !== 2) return undefined;
-      items.push(compactBinary(command[1]));
-    }
-    return Buffer.concat(items);
+  if (commandNameIs(commands[0]?.[0], "GET")) {
+    return compactGetPipelinePayload(commands);
   }
   return undefined;
+}
+
+function compactSetPipelinePayload(commands: readonly Command[]): Buffer | undefined {
+  const keys = new Array<Buffer>(commands.length);
+  const values = new Array<Buffer>(commands.length);
+  let total = 6;
+
+  for (let index = 0; index < commands.length; index += 1) {
+    const command = commands[index];
+    if (command == null) return undefined;
+    if (command.length !== 3 || !commandNameIs(command[0], "SET")) return undefined;
+    const key = toBuffer(command[1]);
+    const value = toBuffer(command[2]);
+    keys[index] = key;
+    values[index] = value;
+    total += 8 + key.byteLength + value.byteLength;
+  }
+
+  const out = Buffer.allocUnsafe(total);
+  let offset = writeCompactPipelineHeader(out, 0x80 | 1, commands.length);
+  for (let index = 0; index < commands.length; index += 1) {
+    const key = keys[index];
+    const value = values[index];
+    if (key == null || value == null) return undefined;
+    offset = writeBinary(out, offset, key);
+    offset = writeBinary(out, offset, value);
+  }
+  return out;
+}
+
+function compactGetPipelinePayload(commands: readonly Command[]): Buffer | undefined {
+  const keys = new Array<Buffer>(commands.length);
+  let total = 6;
+
+  for (let index = 0; index < commands.length; index += 1) {
+    const command = commands[index];
+    if (command == null) return undefined;
+    if (command.length !== 2 || !commandNameIs(command[0], "GET")) return undefined;
+    const key = toBuffer(command[1]);
+    keys[index] = key;
+    total += 4 + key.byteLength;
+  }
+
+  const out = Buffer.allocUnsafe(total);
+  let offset = writeCompactPipelineHeader(out, 0x80 | 2, commands.length);
+  for (const key of keys) {
+    offset = writeBinary(out, offset, key);
+  }
+  return out;
+}
+
+function writeCompactPipelineHeader(out: Buffer, mode: number, count: number): number {
+  out.writeUInt8(COMPACT_PIPELINE_REQUEST, 0);
+  out.writeUInt8(mode, 1);
+  out.writeUInt32BE(count, 2);
+  return 6;
+}
+
+function writeBinary(out: Buffer, offset: number, value: Buffer): number {
+  out.writeUInt32BE(value.byteLength, offset);
+  offset += 4;
+  value.copy(out, offset);
+  return offset + value.byteLength;
 }
 
 function flowCreateManyPayload(args: readonly CommandArgument[]): ProtocolCommand | undefined {
@@ -923,7 +1000,7 @@ function decodeCompactPipeline(data: Buffer): unknown[] {
   requireAvailable(data, 0, 5);
   const count = data.readUInt32BE(1);
   let offset = 5;
-  const values: unknown[] = [];
+  const values = new Array<unknown>(count);
   for (let index = 0; index < count; index += 1) {
     requireAvailable(data, offset, 1);
     const status = data.readUInt8(offset);
@@ -933,41 +1010,41 @@ function decodeCompactPipeline(data: Buffer): unknown[] {
       const kind = data.readUInt8(offset);
       offset += 1;
       if (kind === 0) {
-        values.push(["ok", null]);
+        values[index] = null;
       } else if (kind === 1) {
         const read = readBinary(data, offset);
-        values.push(["ok", read.value]);
+        values[index] = read.value;
         offset = read.offset;
       } else if (kind === 2) {
         const read = readCompactFlowRecord(data, offset);
-        values.push(["ok", read.value]);
+        values[index] = read.value;
         offset = read.offset;
       } else if (kind === 3) {
         const read = readCompactFlowRecordList(data, offset);
-        values.push(["ok", read.value]);
+        values[index] = read.value;
         offset = read.offset;
       } else if (kind === 4) {
         const read = readCompactClaimJob(data, offset);
-        values.push(["ok", read.value]);
+        values[index] = read.value;
         offset = read.offset;
       } else if (kind === 5) {
         const read = readCompactFlowValueRef(data, offset);
-        values.push(["ok", read.value]);
+        values[index] = read.value;
         offset = read.offset;
       } else if (kind === 6) {
         const read = readCompactBinaryList(data, offset);
-        values.push(["ok", read.value]);
+        values[index] = read.value;
         offset = read.offset;
       } else if (kind === 7) {
         const read = readCompactBinaryMap(data, offset);
-        values.push(["ok", read.value]);
+        values[index] = read.value;
         offset = read.offset;
       } else {
         throw new FerricStoreError("unknown compact pipeline success kind");
       }
     } else if (status === 1 || status === 2) {
       const read = readBinary(data, offset);
-      values.push([status === 1 ? "busy" : "error", read.value]);
+      values[index] = [status === 1 ? "busy" : "error", read.value];
       offset = read.offset;
     } else {
       throw new FerricStoreError("unknown compact pipeline status");
@@ -1169,6 +1246,13 @@ function toBuffer(value: unknown): Buffer {
 
 function asText(value: unknown): string {
   return toBuffer(value).toString("utf8");
+}
+
+function commandNameIs(value: unknown, expected: string): boolean {
+  if (typeof value === "string") {
+    return value.toUpperCase() === expected;
+  }
+  return asText(value).toUpperCase() === expected;
 }
 
 function u8(value: number): Buffer {
