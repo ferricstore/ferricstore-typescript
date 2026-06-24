@@ -91,9 +91,9 @@ Higher logical partition/worker shape:
 ```bash
 npm run bench:dbos -- \
   --flows 100000 \
-  --workers 64 \
+  --workers 128 \
   --producers 4 \
-  --partitions 64 \
+  --partitions 128 \
   --create-batch-size 500 \
   --create-async-depth 4 \
   --worker-start-backlog 100000 \
@@ -106,11 +106,39 @@ npm run bench:dbos -- \
 Result:
 
 ```text
-create: 243,714 flows/s
-end-to-end: 69,825 flows/s
-claim calls: 320
-empty claims: 64
+create: 260,468 flows/s
+end-to-end: 84,201 flows/s
+claim calls: 384
+empty claims: 128
 completed: 100000 / 100000
+errors: 0
+```
+
+Sustained 1M live run on the same local Docker setup:
+
+```bash
+npm run bench:dbos -- \
+  --flows 1000000 \
+  --workers 128 \
+  --producers 4 \
+  --partitions 128 \
+  --create-batch-size 500 \
+  --create-async-depth 4 \
+  --worker-start-backlog 0 \
+  --claim-batch-size 500 \
+  --clients 2 \
+  --protocol-lanes 64 \
+  --pretty
+```
+
+Result:
+
+```text
+create: 91,385 flows/s
+end-to-end: 44,427 flows/s
+claim calls: 2541
+empty claims: 370
+completed: 1000000 / 1000000
 errors: 0
 ```
 
