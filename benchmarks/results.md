@@ -4,7 +4,7 @@ Environment:
 - Machine: local macOS development machine
 - Server: `ghcr.io/ferricstore/ferricstore:0.5.2` via `docker compose`
 - Protocol: native `ferric://127.0.0.1:6388`
-- SDK transport: one native socket unless stated otherwise, multiplexed protocol lanes
+- SDK transport: native `ferric://` sockets with multiplexed protocol lanes
 - Date: 2026-06-23
 
 ## KV throughput
@@ -98,7 +98,7 @@ npm run bench:dbos -- \
   --create-async-depth 4 \
   --worker-start-backlog 100000 \
   --claim-batch-size 500 \
-  --clients 1 \
+  --clients 2 \
   --protocol-lanes 64 \
   --pretty
 ```
@@ -106,8 +106,8 @@ npm run bench:dbos -- \
 Result:
 
 ```text
-create: 231,886 flows/s
-end-to-end: 57,971 flows/s
+create: 243,714 flows/s
+end-to-end: 69,825 flows/s
 claim calls: 320
 empty claims: 64
 completed: 100000 / 100000
@@ -117,6 +117,6 @@ errors: 0
 ## Notes
 
 - `--claim-block-ms` is intentionally omitted by default. In FerricStore, `BLOCK 0` means wait forever, so sending `BLOCK 0` from a benchmark can create SDK request timeouts on drained partitions.
-- One native client/socket with many protocol lanes performed better than many client sockets in this Docker setup.
+- Two native client sockets with 64 protocol lanes each performed best for the TypeScript DBOS-style run in this Docker setup. One socket reached roughly 57k-62k/s; four sockets were slower than two.
 - Compact native request bodies are enabled for `FLOW.CREATE_MANY` and compact job-only `FLOW.CLAIM_DUE`.
-- `FLOW.COMPLETE_MANY` stays on the typed direct native opcode because the compact request body was slower in this environment.
+- `FLOW.COMPLETE_MANY` stays on the typed direct native opcode and worker completion uses `RETURN OK_ON_SUCCESS` to avoid materializing per-item success responses.

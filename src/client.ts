@@ -904,6 +904,7 @@ export class FlowClient {
     ttlMs?: number;
     nowMs?: number;
     independent?: boolean;
+    returnOkOnSuccess?: boolean;
   } = {}): Promise<unknown[] | unknown> {
     if (items.length === 0) {
       return [];
@@ -914,6 +915,9 @@ export class FlowClient {
     append(args, "TTL", options.ttlMs);
     append(args, "NOW", options.nowMs ?? nowMs());
     appendBool(args, "INDEPENDENT", options.independent);
+    if (options.returnOkOnSuccess === true) {
+      args.push("RETURN", "OK_ON_SUCCESS");
+    }
     appendNamedValues(args, this.codec, options);
     appendClaimedItems(args, partitionKey, items, "FLOW.COMPLETE_MANY");
     return this.recordsOrResponse(await this.command(...args));
@@ -925,7 +929,11 @@ export class FlowClient {
     }
     const firstPartition = jobs[0]?.partitionKey;
     const partitionKey = firstPartition != null && jobs.every((job) => job.partitionKey === firstPartition) ? firstPartition : undefined;
-    return await this.completeMany(partitionKey, jobs, { ...options, independent: options.independent ?? true });
+    return await this.completeMany(partitionKey, jobs, {
+      ...options,
+      independent: options.independent ?? true,
+      returnOkOnSuccess: options.returnOkOnSuccess ?? true
+    });
   }
 
   async transitionMany(partitionKey: string | undefined, options: {

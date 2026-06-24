@@ -567,7 +567,7 @@ function flowCompleteManyPayload(args: readonly CommandArgument[]): ProtocolComm
   if (itemsIndex < 0) return undefined;
 
   const options = parseFlowOptions(args, 1, itemsIndex, {
-    allowed: new Set(["TTL", "NOW", "INDEPENDENT"])
+    allowed: new Set(["TTL", "NOW", "INDEPENDENT", "RETURN"])
   });
   if (options == null) return undefined;
 

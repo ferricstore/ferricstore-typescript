@@ -155,6 +155,30 @@ describe("native protocol codec", () => {
     });
   });
 
+  it("keeps FLOW.COMPLETE_MANY OK-on-success on the direct native opcode", () => {
+    const lease = Buffer.from("lease-token");
+    const command = buildProtocolCommand([
+      "FLOW.COMPLETE_MANY",
+      "MIXED",
+      "NOW",
+      2000,
+      "INDEPENDENT",
+      true,
+      "RETURN",
+      "OK_ON_SUCCESS",
+      "ITEMS",
+      "flow-1",
+      "p1",
+      lease,
+      7
+    ]);
+
+    expect(command.opcode).toBe(OPCODES.flowCompleteMany);
+    expect(command.payload).toMatchObject({
+      return: "OK_ON_SUCCESS"
+    });
+  });
+
   it("decodes compact claim jobs with attributes", () => {
     const id = Buffer.from("flow-1");
     const partition = Buffer.from("p1");

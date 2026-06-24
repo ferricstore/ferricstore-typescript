@@ -12,6 +12,7 @@ const partitions = Number(arg(args, 'partitions', '16'));
 const createBatchSize = Number(arg(args, 'create-batch-size', '500'));
 const createAsyncDepth = Number(arg(args, 'create-async-depth', '4'));
 const claimBatchSize = Number(arg(args, 'claim-batch-size', '500'));
+const claimPartitionBatchSize = Number(arg(args, 'claim-partition-batch-size', '1'));
 const claimBlockMs = has(args, 'claim-block-ms') ? Number(arg(args, 'claim-block-ms', '0')) : undefined;
 const workerStartBacklog = Number(arg(args, 'worker-start-backlog', '0'));
 const completeAsyncDepth = Number(arg(args, 'complete-async-depth', '1'));
@@ -43,7 +44,8 @@ try {
   const output = {
     benchmark: 'typescript_dbos_style', url, type, flows, producers, workers, partitions,
     create_batch_size: createBatchSize, create_async_depth: createAsyncDepth,
-    claim_batch_size: claimBatchSize, claim_block_ms: claimBlockMs ?? null,
+    claim_batch_size: claimBatchSize, claim_partition_batch_size: claimPartitionBatchSize,
+    claim_block_ms: claimBlockMs ?? null,
     worker_start_backlog: workerStartBacklog,
     complete_async_depth: completeAsyncDepth,
     clients: clientCount, protocol_lanes: protocolLanes,
@@ -78,17 +80,22 @@ async function producer(producerIndex, client) {
 }
 
 async function worker(workerIndex, client) {
-  const partitionKey = `p${workerIndex % partitions}`;
+  const partitionKeys = workerPartitionKeys(workerIndex);
   const pending = new Set();
   while (created < workerStartBacklog && completed < flows) {
     await sleep(1);
   }
   while (completed < flows || created < flows) {
     const jobs = await client.claimDue(type, {
-      state: 'queued', partitionKey, worker: `ts-worker-${workerIndex}`, leaseMs: 30000,
-      limit: claimBatchSize, jobOnly: true, blockMs: claimBlockMs
+      state: 'queued',
+      ...(partitionKeys.length === 1 ? { partitionKey: partitionKeys[0] } : { partitionKeys }),
+      worker: `ts-worker-${workerIndex}`,
+      leaseMs: 30000,
+      limit: claimBatchSize,
+      jobOnly: true,
+      blockMs: claimBlockMs
     }).catch((error) => {
-      throw new Error(`worker ${workerIndex} claim ${partitionKey} failed: ${error?.message ?? error}`);
+      throw new Error(`worker ${workerIndex} claim ${partitionKeys.join(',')} failed: ${error?.message ?? error}`);
     });
     claimCalls += 1;
     if (jobs.length === 0) {
@@ -101,12 +108,21 @@ async function worker(workerIndex, client) {
     const promise = client.completeJobs(jobs, { independent: true })
       .then(() => { completed += jobs.length; })
       .catch((error) => {
-        throw new Error(`worker ${workerIndex} complete ${jobs.length} ${partitionKey} failed: ${error?.message ?? error}`);
+        throw new Error(`worker ${workerIndex} complete ${jobs.length} ${partitionKeys.join(',')} failed: ${error?.message ?? error}`);
       });
     pending.add(promise.finally(() => pending.delete(promise)));
     if (pending.size >= completeAsyncDepth) await Promise.race(pending);
   }
   await Promise.allSettled([...pending]);
+}
+
+function workerPartitionKeys(workerIndex) {
+  const keys = [];
+  const start = workerIndex * claimPartitionBatchSize;
+  for (let offset = 0; offset < claimPartitionBatchSize && start + offset < partitions; offset += 1) {
+    keys.push(`p${start + offset}`);
+  }
+  return keys.length === 0 ? [`p${workerIndex % partitions}`] : keys;
 }
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
