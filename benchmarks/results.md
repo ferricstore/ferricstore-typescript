@@ -26,10 +26,10 @@ npm run bench:kv -- \
 Result:
 
 ```text
-SET: 1,159,974 requests/s
-batch p50: 25.12 ms
-batch p95: 31.66 ms
-batch p99: 40.86 ms
+SET: 1,284,527 requests/s
+batch p50: 23.14 ms
+batch p95: 27.28 ms
+batch p99: 31.92 ms
 errors: 0
 ```
 
@@ -50,10 +50,10 @@ npm run bench:kv -- \
 Result:
 
 ```text
-GET: 2,500,330 requests/s
-batch p50: 24.22 ms
-batch p95: 30.71 ms
-batch p99: 37.65 ms
+GET: 2,585,839 requests/s
+batch p50: 24.03 ms
+batch p95: 26.46 ms
+batch p99: 28.04 ms
 errors: 0
 ```
 
