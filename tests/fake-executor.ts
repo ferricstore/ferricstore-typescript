@@ -1,7 +1,7 @@
-import type { RedisCommandExecutor } from "../src/adapters.js";
+import type { CommandExecutor } from "../src/adapters.js";
 import type { CommandArgument } from "../src/internal.js";
 
-export class FakeExecutor implements RedisCommandExecutor {
+export class FakeExecutor implements CommandExecutor {
   readonly calls: CommandArgument[][] = [];
   private readonly responses: unknown[];
 

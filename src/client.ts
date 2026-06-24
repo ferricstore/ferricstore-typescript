@@ -18,7 +18,7 @@ import {
   type Command,
   type CommandArgument
 } from "./internal.js";
-import { RedisAdapter, type RedisCommandExecutor } from "./adapters.js";
+import { NativeAdapter, type CommandExecutor, type NativeAdapterOptions } from "./adapters.js";
 import {
   BitmapStore,
   GeoStore,
@@ -170,7 +170,7 @@ export interface ReadOptions {
 }
 
 export class FlowClient {
-  readonly executor: RedisCommandExecutor;
+  readonly executor: CommandExecutor;
   readonly codec: Codec;
   readonly backpressure: Required<BackpressurePolicy>;
   readonly bitmap: BitmapStore;
@@ -189,7 +189,7 @@ export class FlowClient {
   readonly topk: TopKStore;
   readonly zset: SortedSetStore;
 
-  constructor(executor: RedisCommandExecutor, options: FlowClientOptions = {}) {
+  constructor(executor: CommandExecutor, options: FlowClientOptions = {}) {
     this.executor = new ErrorMappingExecutor(executor);
     this.codec = options.codec ?? new RawCodec();
     this.backpressure = {
@@ -215,8 +215,8 @@ export class FlowClient {
     this.zset = new SortedSetStore(this);
   }
 
-  static async fromUrl(url: string, options: FlowClientOptions & { redisOptions?: Record<string, unknown> } = {}): Promise<FlowClient> {
-    return new FlowClient(await RedisAdapter.fromUrl(url, options.redisOptions), options);
+  static async fromUrl(url: string, options: FlowClientOptions & { nativeOptions?: NativeAdapterOptions } = {}): Promise<FlowClient> {
+    return new FlowClient(await NativeAdapter.fromUrl(url, options.nativeOptions), options);
   }
 
   async command(...args: CommandArgument[]): Promise<unknown> {
@@ -1301,8 +1301,8 @@ export class FlowClient {
   }
 }
 
-class ErrorMappingExecutor implements RedisCommandExecutor {
-  constructor(private readonly executor: RedisCommandExecutor) {}
+class ErrorMappingExecutor implements CommandExecutor {
+  constructor(private readonly executor: CommandExecutor) {}
 
   async executeCommand(...args: CommandArgument[]): Promise<unknown> {
     try {

@@ -1,4 +1,4 @@
-export { RedisAdapter, type NodeRedisClient, type RedisAdapterOptions, type RedisCommandExecutor } from "./adapters.js";
+export { NativeAdapter, type NativeAdapterOptions, type CommandExecutor } from "./adapters.js";
 export {
   FlowClient,
   type CancelOptions,

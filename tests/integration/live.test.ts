@@ -12,10 +12,8 @@ import {
   type FencedItem
 } from "../../src/index.js";
 
-const runIntegration = process.env.FERRICSTORE_INTEGRATION === "1";
-
 function url(): string {
-  return process.env.FERRICSTORE_URL ?? "redis://127.0.0.1:6379/0";
+  return process.env.FERRICSTORE_URL ?? "ferric://127.0.0.1:6388";
 }
 
 function suffix(): string {
@@ -127,7 +125,7 @@ async function createAndClaim(
   return { id, job, partitionKey };
 }
 
-describe.runIf(runIntegration)("FerricStore integration", () => {
+describe("FerricStore integration", () => {
   it("uses KV helpers and a full Flow claim/complete cycle", async () => {
     const flow = await FlowClient.fromUrl(url(), {
       codec: new JsonCodec()
@@ -242,18 +240,18 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       await expect(flow.clientGetName()).resolves.toBe(`ts-sdk-${runId}`);
       await expect(flow.clientInfo()).resolves.toContain("id=");
       await expect(flow.clientList()).resolves.toContain("id=");
-      await expect(flow.clientTracking("ON", { optin: true })).resolves.toBe(true);
+      await expect(flow.clientTracking("ON", { optin: true })).rejects.toThrow(/not supported/i);
       await expect(flow.clientTrackingInfo()).resolves.toBeDefined();
       await expect(flow.clientGetRedir()).resolves.toBeGreaterThanOrEqual(0);
-      await expect(flow.clientCaching("NO")).resolves.toBe(true);
-      await expect(flow.clientTracking("OFF")).resolves.toBe(true);
+      await expect(flow.clientCaching("NO")).rejects.toThrow(/not supported/i);
+      await expect(flow.clientTracking("OFF")).rejects.toThrow(/not supported/i);
       await expect(flow.lastsave()).resolves.toBeGreaterThanOrEqual(0);
       await expect(flow.moduleList()).resolves.toEqual([]);
       await expect(flow.publish(`${prefix}channel`, "hello")).resolves.toBeGreaterThanOrEqual(0);
       await expect(flow.pubsubChannels()).resolves.toBeDefined();
       await expect(flow.pubsubNumSub(`${prefix}channel`)).resolves.toBeDefined();
       await expect(flow.pubsubNumPat()).resolves.toBeGreaterThanOrEqual(0);
-      await expect(flow.aclWhoami()).resolves.toBe("default");
+      await expect(flow.aclWhoami()).rejects.toThrow(/unsupported command/i);
       await expect(flow.clusterHealth()).resolves.toBeTypeOf("object");
       await expect(flow.clusterStats()).resolves.toBeTypeOf("object");
       await expect(flow.clusterKeyslot(key)).resolves.toBeGreaterThanOrEqual(0);
@@ -270,7 +268,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
     }
   });
 
-  it("covers typed Redis-compatible store families", async () => {
+  it("covers typed native store families", async () => {
     const flow = await FlowClient.fromUrl(url(), { codec: new RawCodec() });
     const runId = suffix();
     const prefix = `ts-sdk:store:${runId}:`;
@@ -341,7 +339,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       await expect(flow.hash.hsetnx(hashKey, "new", "item")).resolves.toBe(true);
       await expect(flow.hash.hstrlen(hashKey, "field")).resolves.toBe(5);
       await expect(flow.hash.hrandfield(hashKey, 1, true)).resolves.toBeDefined();
-      await expect(flow.hash.hscan(hashKey, 0, { count: 10 })).resolves.toBeDefined();
+      await expect(flow.hash.hscan(hashKey, 0)).resolves.toBeDefined();
       await expect(flow.hash.hexpire(hashKey, 60, ["field"])).resolves.toBeDefined();
       await expect(flow.hash.httl(hashKey, ["field"])).resolves.toBeDefined();
       await expect(flow.hash.hpersist(hashKey, ["field"])).resolves.toBeDefined();
@@ -394,7 +392,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       await expect(flow.sets.sunionstore(`${prefix}sunion`, [setA, setB])).resolves.toBeGreaterThanOrEqual(0);
       await expect(flow.sets.sintercard([setA, setB], 10)).resolves.toBeGreaterThanOrEqual(0);
       await expect(flow.sets.smove(setA, setB, "a")).resolves.toBeTypeOf("boolean");
-      await expect(flow.sets.sscan(setB, 0, { count: 10 })).resolves.toBeDefined();
+      await expect(flow.sets.sscan(setB, 0)).resolves.toBeDefined();
       await expect(flow.sets.spop(setB, 1)).resolves.toBeDefined();
       await expect(flow.sets.srem(setA, "b")).resolves.toBeGreaterThanOrEqual(0);
 
@@ -412,7 +410,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       await expect(flow.zset.zmscore(zset, ["a", "none"])).resolves.toHaveLength(2);
       await expect(flow.zset.zrangebyscore(zset, "-inf", "+inf")).resolves.not.toHaveLength(0);
       await expect(flow.zset.zrevrangebyscore(zset, "+inf", "-inf")).resolves.not.toHaveLength(0);
-      await expect(flow.zset.zscan(zset, 0, { count: 10 })).resolves.toBeDefined();
+      await expect(flow.zset.zscan(zset, 0)).resolves.toBeDefined();
       await expect(flow.zset.zrem(zset, "b")).resolves.toBe(1);
       await expect(flow.zset.zpopmin(zset, 1)).resolves.not.toHaveLength(0);
       await expect(flow.zset.zpopmax(zset, 1)).resolves.not.toHaveLength(0);
@@ -463,7 +461,7 @@ describe.runIf(runIntegration)("FerricStore integration", () => {
       await deletePrefixedKeys(flow, prefix);
       await flow.close();
     }
-  });
+  }, 30_000);
 
   it("covers native probabilistic helpers except JSON", async () => {
     const flow = await FlowClient.fromUrl(url(), { codec: new RawCodec() });

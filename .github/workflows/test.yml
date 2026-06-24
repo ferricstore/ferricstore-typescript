@@ -50,8 +50,6 @@ jobs:
       - run: npm ci
       - run: npm run integration:up
       - run: npm run test:integration
-        env:
-          FERRICSTORE_INTEGRATION: "1"
       - if: always()
         run: docker compose logs ferricstore
       - if: always()

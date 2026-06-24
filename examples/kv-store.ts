@@ -1,6 +1,6 @@
 import { FlowClient, JsonCodec } from "../src/index.js";
 
-const client = await FlowClient.fromUrl(process.env.FERRICSTORE_URL ?? "redis://127.0.0.1:6379/0", {
+const client = await FlowClient.fromUrl(process.env.FERRICSTORE_URL ?? "ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
 });
 

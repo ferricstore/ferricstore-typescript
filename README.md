@@ -19,10 +19,10 @@ Requires Node.js 24 or newer. The SDK is ESM-only and tested with Node 24 and 26
 ## Run FerricStore Locally
 
 ```bash
-docker run -p 6379:6379 \
+docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.4.1
+  ghcr.io/ferricstore/ferricstore:0.5.2
 ```
 
 ## Durable Queue
@@ -30,7 +30,7 @@ docker run -p 6379:6379 \
 ```ts
 import { FlowClient, JsonCodec, QueueClient } from "ferricstore";
 
-const flow = await FlowClient.fromUrl("redis://127.0.0.1:6379/0", {
+const flow = await FlowClient.fromUrl("ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
 });
 
@@ -52,7 +52,7 @@ await emails.worker({ batchSize: 100, worker: "email-worker-1" }).run(async (job
 ```ts
 import { FlowClient, JsonCodec, WorkflowClient, complete, transition } from "ferricstore";
 
-const flow = await FlowClient.fromUrl("redis://127.0.0.1:6379/0", {
+const flow = await FlowClient.fromUrl("ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
 });
 
@@ -95,7 +95,7 @@ FerricFlow does not replay TypeScript handler code. Workers claim a durable stat
 ## Low-Level Flow Commands
 
 ```ts
-const flow = await FlowClient.fromUrl("redis://127.0.0.1:6379/0");
+const flow = await FlowClient.fromUrl("ferric://127.0.0.1:6388");
 
 await flow.create("order-1", {
   type: "order",
@@ -128,7 +128,7 @@ for (const job of jobs) {
 The same client exposes typed helpers for FerricStore's Redis-compatible store commands:
 
 ```ts
-const client = await FlowClient.fromUrl("redis://127.0.0.1:6379/0", {
+const client = await FlowClient.fromUrl("ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
 });
 
@@ -176,7 +176,7 @@ Runnable examples live in the `examples/` directory:
 `RawCodec` is the default and works with `Buffer`, `Uint8Array`, and strings. Use `JsonCodec` for language-neutral structured payloads and results.
 
 ```ts
-const flow = await FlowClient.fromUrl("redis://127.0.0.1:6379/0", {
+const flow = await FlowClient.fromUrl("ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
 });
 ```

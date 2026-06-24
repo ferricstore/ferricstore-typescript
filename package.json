@@ -49,13 +49,13 @@
     "integration:up": "docker compose up -d ferricstore && node scripts/wait-for-ferricstore.mjs",
     "lint": "eslint .",
     "pack:dry-run": "npm pack --dry-run",
-    "test": "vitest run",
+    "test": "vitest run tests/*.test.ts",
     "test:integration": "vitest run tests/integration",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bench:kv": "node benchmarks/kv-benchmark.mjs",
+    "bench:dbos": "node benchmarks/dbos-style-benchmark.mjs"
   },
-  "dependencies": {
-    "redis": "^6.0.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.9.2",

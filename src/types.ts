@@ -73,6 +73,7 @@ export interface ClaimedItem<TPayload = unknown> {
   state: string;
   runState?: string;
   payload?: TPayload | null;
+  attributes?: Record<string, unknown>;
 }
 
 export interface FencedItem {
@@ -125,6 +126,7 @@ export interface FlowRecord<TPayload = unknown> {
   valueSizes?: Record<string, unknown>;
   valueOmitted?: Record<string, unknown>;
   valueMissing?: Record<string, unknown>;
+  attributes?: Record<string, unknown>;
   raw?: unknown;
 }
 
@@ -143,12 +145,15 @@ export function claimedItemFromResp<TPayload = unknown>(
   codec?: Codec
 ): ClaimedItem<TPayload> {
   if (Array.isArray(value)) {
+    const tuple = value as unknown[];
+    const attrs = tuple[5] ?? (isPlainObject(tuple[4]) ? tuple[4] : undefined);
     return {
-      id: text(value[0]),
-      partitionKey: optionalString(value[1]),
-      leaseToken: bytes(value[2]),
-      fencingToken: integer(value[3]),
-      runState: optionalString(value[4]),
+      id: text(tuple[0]),
+      partitionKey: optionalString(tuple[1]),
+      leaseToken: bytes(tuple[2]),
+      fencingToken: integer(tuple[3]),
+      runState: optionalString(tuple[4]),
+      attributes: isPlainObject(attrs) ? attrs : undefined,
       type: "",
       state: "running"
     };
@@ -163,6 +168,7 @@ export function claimedItemFromResp<TPayload = unknown>(
     type: text(field(value, "type") ?? ""),
     state: optionalString(field(value, "state")) ?? "running",
     runState: optionalString(field(value, "run_state")),
+    attributes: plainObjectField(value, "attributes"),
     payload: payload == null ? undefined : (decodePayload(codec, payload) as TPayload | null)
   };
 }
@@ -192,6 +198,7 @@ export function flowRecordFromResp<TPayload = unknown>(
     valueSizes: toStringKeyMap(field(value, "value_sizes")),
     valueOmitted: toStringKeyMap(field(value, "value_omitted")),
     valueMissing: toStringKeyMap(field(value, "value_missing")),
+    attributes: plainObjectField(value, "attributes"),
     raw: value
   };
 }
@@ -271,4 +278,13 @@ function decodeValues(value: unknown, codec: Codec | undefined): Record<string, 
     decoded[key] = decodePayload(codec, item);
   }
   return decoded;
+}
+
+function plainObjectField(value: unknown, key: string): Record<string, unknown> | undefined {
+  const item = field(value, key);
+  return isPlainObject(item) ? item : undefined;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value != null && !Buffer.isBuffer(value) && !(value instanceof Uint8Array) && !Array.isArray(value);
 }
