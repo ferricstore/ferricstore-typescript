@@ -50,6 +50,8 @@ const COMPACT_PIPELINE_REQUEST = 0x94;
 const COMPACT_PIPELINE_RESPONSE = 0x95;
 const NULL_U32 = 0xffff_ffff;
 const MIN_I64 = -9_223_372_036_854_775_808n;
+const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE_INTEGER_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
 
 const FLOW_RECORD_FIELD_KEYS = [
   "",
@@ -1189,6 +1191,11 @@ function decodeCompactClaimJobs(data: Buffer): unknown[] {
       return decoded.value;
     }
   }
+  try {
+    readCompactClaimJob(data, 5, "base");
+  } catch (error) {
+    if (error instanceof FerricStoreError && error.message === "unsafe compact Flow fencing token") throw error;
+  }
   throw new FerricStoreError("trailing compact claim jobs bytes");
 }
 
@@ -1221,7 +1228,11 @@ function readCompactClaimJob(
   const partition = readOptionalBinary(data, id.offset);
   const lease = readBinary(data, partition.offset);
   requireAvailable(data, lease.offset, 8);
-  const fencing = Number(data.readBigInt64BE(lease.offset));
+  const fencingBig = data.readBigInt64BE(lease.offset);
+  if (fencingBig > MAX_SAFE_INTEGER_BIGINT || fencingBig < MIN_SAFE_INTEGER_BIGINT) {
+    throw new FerricStoreError("unsafe compact Flow fencing token");
+  }
+  const fencing = Number(fencingBig);
   offset = lease.offset + 8;
   if (mode === "base") {
     return { value: [id.value, partition.value, lease.value, fencing], offset };

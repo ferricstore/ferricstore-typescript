@@ -109,7 +109,7 @@ async function producer(producerIndex, client) {
     pending.add(promise.finally(() => pending.delete(promise)));
     if (pending.size >= createAsyncDepth) await Promise.race(pending);
   }
-  await Promise.allSettled([...pending]);
+  await Promise.all([...pending]);
 }
 
 async function worker(workerIndex, client) {
@@ -175,7 +175,7 @@ async function worker(workerIndex, client) {
       continue;
     }
   }
-  await Promise.allSettled([...pending]);
+  await Promise.all([...pending]);
 }
 
 async function createItems(client, items) {

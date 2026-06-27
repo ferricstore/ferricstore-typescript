@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FerricStoreClient } from "./client.js";
-import { complete, fail, isOutcome, retry, type CompleteOutcome, type FailOutcome, type RetryOutcome } from "./outcomes.js";
+import { complete, fail, isOutcome, retry, type CompleteOutcome, type FailOutcome, type Outcome, type RetryOutcome } from "./outcomes.js";
 import {
   normalizeExceptionPolicy,
   type ClaimedItem,
@@ -113,9 +113,9 @@ export class QueueWorker {
   }
 
   async runOnce(handler: QueueHandler): Promise<QueueWorkerResult> {
+    const completed = await this.drainPendingCompletions(false);
     const jobs = await this.claimJobs();
-    const result: QueueWorkerResult = { claimed: jobs.length, completed: 0, failed: 0, retried: 0 };
-    result.completed += await this.drainPendingCompletions(false);
+    const result: QueueWorkerResult = { claimed: jobs.length, completed, failed: 0, retried: 0 };
     if (jobs.length === 0) {
       return result;
     }
@@ -168,38 +168,30 @@ export class QueueWorker {
       readonly partitionKeys?: string[];
     } = {}
   ): Promise<QueueWorkerResult> {
+    const completed = await this.drainPendingCompletions(false);
     const jobs = await this.claimJobs(claimOptions);
-    const result: QueueWorkerResult = { claimed: jobs.length, completed: 0, failed: 0, retried: 0 };
-    result.completed += await this.drainPendingCompletions(false);
+    const result: QueueWorkerResult = { claimed: jobs.length, completed, failed: 0, retried: 0 };
     if (jobs.length === 0) {
       return result;
     }
 
+    let batchComplete = false;
+    let outcome: CompleteOutcome | RetryOutcome | FailOutcome | undefined;
     try {
       const value = await handler(jobs);
       if (value === undefined) {
-        await this.flushCompletions(jobs, result);
-        return result;
-      }
-      const outcome = isOutcome(value) ? value : complete({ result: value });
-      if (outcome.kind === "transition") {
-        throw new Error("Queue batch handlers cannot return transition(); use Workflow for state transitions");
-      }
-      if (isBatchableComplete(outcome)) {
-        await this.flushCompletions(jobs, result);
-        return result;
-      }
-      for (const job of jobs) {
-        await this.applyOutcome(job, outcome);
-      }
-      if (outcome.kind === "retry") {
-        result.retried += jobs.length;
-      } else if (outcome.kind === "fail") {
-        result.failed += jobs.length;
+        batchComplete = true;
       } else {
-        result.completed += jobs.length;
+        const nextOutcome: Outcome = isOutcome(value) ? value : complete({ result: value });
+        if (nextOutcome.kind === "transition") {
+          throw new Error("Queue batch handlers cannot return transition(); use Workflow for state transitions");
+        }
+        if (isBatchableComplete(nextOutcome)) {
+          batchComplete = true;
+        } else {
+          outcome = nextOutcome;
+        }
       }
-      return result;
     } catch (error) {
       for (const job of jobs) {
         await this.applyException(job, error);
@@ -211,6 +203,26 @@ export class QueueWorker {
       }
       return result;
     }
+
+    if (batchComplete) {
+      await this.flushCompletions(jobs, result);
+      return result;
+    }
+    if (outcome == null) {
+      throw new Error("Queue batch handler did not produce a valid outcome");
+    }
+
+    for (const job of jobs) {
+      await this.applyOutcome(job, outcome);
+    }
+    if (outcome.kind === "retry") {
+      result.retried += jobs.length;
+    } else if (outcome.kind === "fail") {
+      result.failed += jobs.length;
+    } else {
+      result.completed += jobs.length;
+    }
+    return result;
   }
 
   async run(handler: QueueHandler): Promise<void> {
@@ -218,14 +230,18 @@ export class QueueWorker {
     let currentIdleSleepMs = idleSleepMs;
     const maxIdleSleepMs = this.options.maxIdleSleepMs ?? 5_000;
 
-    while (this.options.signal?.aborted !== true) {
-      const result = await this.runOnce(handler);
-      if (result.claimed === 0) {
-        await sleep(currentIdleSleepMs, this.options.signal);
-        currentIdleSleepMs = Math.min(maxIdleSleepMs, currentIdleSleepMs * 2);
-      } else {
-        currentIdleSleepMs = idleSleepMs;
+    try {
+      while (this.options.signal?.aborted !== true) {
+        const result = await this.runOnce(handler);
+        if (result.claimed === 0) {
+          await sleep(currentIdleSleepMs, this.options.signal);
+          currentIdleSleepMs = Math.min(maxIdleSleepMs, currentIdleSleepMs * 2);
+        } else {
+          currentIdleSleepMs = idleSleepMs;
+        }
       }
+    } finally {
+      await this.flush();
     }
   }
 
@@ -263,27 +279,22 @@ export class QueueWorker {
     result: QueueWorkerResult,
     completions: ClaimedItem[]
   ): Promise<void> {
+    let batchComplete = false;
+    let outcome: CompleteOutcome | RetryOutcome | FailOutcome | undefined;
     try {
       const value = await handler(job);
       if (value === undefined) {
-        completions.push(job);
-        return;
-      }
-      const outcome = isOutcome(value) ? value : complete({ result: value });
-      if (outcome.kind === "transition") {
-        throw new Error("Queue handlers cannot return transition(); use Workflow for state transitions");
-      }
-      if (isBatchableComplete(outcome)) {
-        completions.push(job);
-        return;
-      }
-      await this.applyOutcome(job, outcome);
-      if (outcome.kind === "retry") {
-        result.retried += 1;
-      } else if (outcome.kind === "fail") {
-        result.failed += 1;
+        batchComplete = true;
       } else {
-        result.completed += 1;
+        const nextOutcome: Outcome = isOutcome(value) ? value : complete({ result: value });
+        if (nextOutcome.kind === "transition") {
+          throw new Error("Queue handlers cannot return transition(); use Workflow for state transitions");
+        }
+        if (isBatchableComplete(nextOutcome)) {
+          batchComplete = true;
+        } else {
+          outcome = nextOutcome;
+        }
       }
     } catch (error) {
       await this.applyException(job, error);
@@ -292,6 +303,24 @@ export class QueueWorker {
       } else {
         result.retried += 1;
       }
+      return;
+    }
+
+    if (batchComplete) {
+      completions.push(job);
+      return;
+    }
+    if (outcome == null) {
+      throw new Error("Queue handler did not produce a valid outcome");
+    }
+
+    await this.applyOutcome(job, outcome);
+    if (outcome.kind === "retry") {
+      result.retried += 1;
+    } else if (outcome.kind === "fail") {
+      result.failed += 1;
+    } else {
+      result.completed += 1;
     }
   }
 

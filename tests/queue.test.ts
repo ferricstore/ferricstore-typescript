@@ -145,6 +145,76 @@ describe("Queue", () => {
     await expect(worker.flush()).resolves.toBe(2);
   });
 
+  it("drains pending async completions before claiming more jobs", async () => {
+    const executor = new FakeExecutor([
+      [
+        ["email-1", "tenant-a", Buffer.from("lease-1"), 1],
+        ["email-2", "tenant-a", Buffer.from("lease-2"), 2]
+      ],
+      Buffer.from("OK"),
+      []
+    ]);
+    const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");
+    const worker = queue.worker({
+      batchSize: 1,
+      claimPayload: false,
+      completeAsyncDepth: 2,
+      worker: "worker-1"
+    });
+
+    await expect(worker.runBatchOnce(() => undefined)).resolves.toMatchObject({
+      claimed: 2,
+      completed: 0
+    });
+    await expect(worker.runBatchOnce(() => undefined)).resolves.toMatchObject({
+      claimed: 0,
+      completed: 2
+    });
+
+    expect(executor.calls[0]?.[0]).toBe("FLOW.CLAIM_DUE");
+    expect(executor.calls[1]?.[0]).toBe("FLOW.COMPLETE_MANY");
+    expect(executor.calls[2]?.[0]).toBe("FLOW.COMPLETE_MANY");
+    expect(executor.calls[3]?.[0]).toBe("FLOW.CLAIM_DUE");
+  });
+
+  it("flushes pending async completions when run loop stops", async () => {
+    const signal = new AbortController();
+    const executor = new FakeExecutor([
+      [["email-1", "tenant-a", Buffer.from("lease-1"), 1]],
+      Buffer.from("OK")
+    ]);
+    const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");
+    const worker = queue.worker({
+      batchSize: 1,
+      claimPayload: false,
+      completeAsyncDepth: 1,
+      signal: signal.signal,
+      worker: "worker-1"
+    });
+
+    const task = worker.run(() => {
+      signal.abort();
+    });
+
+    await expect(task).resolves.toBeUndefined();
+    expect(executor.calls.map((call) => call[0])).toEqual(["FLOW.CLAIM_DUE", "FLOW.COMPLETE_MANY"]);
+  });
+
+  it("propagates terminal completion write errors instead of retrying completed handler results", async () => {
+    const terminalError = new Error("terminal write failed");
+    const executor = new FakeExecutor([
+      [["email-1", "tenant-a", Buffer.from("lease-1"), 1]],
+      terminalError
+    ]);
+    const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");
+
+    await expect(
+      queue.worker({ batchSize: 1, claimPayload: false, worker: "worker-1" }).runBatchOnce(() => undefined)
+    ).rejects.toThrow("terminal write failed");
+
+    expect(executor.calls.map((call) => call[0])).toEqual(["FLOW.CLAIM_DUE", "FLOW.COMPLETE_MANY"]);
+  });
+
   it("rejects workflow transitions in queue handlers", async () => {
     const executor = new FakeExecutor([[flow("email-1", 1)]]);
     const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");

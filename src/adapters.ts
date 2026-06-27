@@ -29,6 +29,7 @@ export interface ExecutePipelineOptions {
 export interface NativeAdapterOptions {
   clientName?: string;
   connectTimeoutMs?: number;
+  maxChunkBytes?: number;
   protocolLanes?: number;
   timeoutMs?: number;
   username?: string;
@@ -54,15 +55,18 @@ export class NativeAdapter implements CommandExecutor {
   private readonly socket: net.Socket | tls.TLSSocket;
   private readonly pending = new Map<bigint, PendingRequest>();
   private readonly chunks = new Map<string, Buffer[]>();
+  private readonly chunkBytes = new Map<string, number>();
   private buffer: Buffer = Buffer.alloc(0);
   private closed = false;
   private dataLane = 0;
+  private readonly maxChunkBytes: number;
   private requestId = 0n;
   private readonly protocolLanes: number;
   private readonly timeoutMs: number;
 
-  private constructor(socket: net.Socket | tls.TLSSocket, timeoutMs: number, protocolLanes: number) {
+  private constructor(socket: net.Socket | tls.TLSSocket, timeoutMs: number, protocolLanes: number, maxChunkBytes: number) {
     this.socket = socket;
+    this.maxChunkBytes = Math.max(1, Math.trunc(maxChunkBytes));
     this.timeoutMs = timeoutMs;
     this.protocolLanes = Math.max(1, Math.trunc(protocolLanes));
     this.socket.on("data", (chunk: Buffer) => this.onData(chunk));
@@ -73,7 +77,12 @@ export class NativeAdapter implements CommandExecutor {
   static async fromUrl(url: string, options: NativeAdapterOptions = {}): Promise<NativeAdapter> {
     const parsed = parseFerricUrl(url);
     const socket = await connect(parsed, options);
-    const adapter = new NativeAdapter(socket, options.timeoutMs ?? 30_000, options.protocolLanes ?? 64);
+    const adapter = new NativeAdapter(
+      socket,
+      options.timeoutMs ?? 30_000,
+      options.protocolLanes ?? 64,
+      options.maxChunkBytes ?? 64 * 1024 * 1024
+    );
     await adapter.startup(options.clientName);
     const password = options.password ?? parsed.password;
     if (password != null && password !== "") {
@@ -129,6 +138,7 @@ export class NativeAdapter implements CommandExecutor {
     return await new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
+        this.cleanupChunksForRequest(requestId);
         reject(new FerricStoreError(`FerricStore request timed out after ${this.timeoutMs}ms`));
       }, this.timeoutMs);
       timer.unref?.();
@@ -148,6 +158,7 @@ export class NativeAdapter implements CommandExecutor {
       this.socket.write(frame, (error) => {
         if (error != null) {
           this.pending.delete(requestId);
+          this.cleanupChunksForRequest(requestId);
           clearTimeout(timer);
           reject(error);
         }
@@ -157,7 +168,7 @@ export class NativeAdapter implements CommandExecutor {
 
   private onData(chunk: Buffer): void {
     try {
-      this.buffer = Buffer.concat([this.buffer, chunk]);
+      this.buffer = this.buffer.byteLength === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
       for (;;) {
         const parsed = tryDecodeFrame(this.buffer);
         if (parsed == null) {
@@ -178,6 +189,11 @@ export class NativeAdapter implements CommandExecutor {
     }
     if ((frame.flags & FLAG_MORE_CHUNKS) !== 0) {
       const key = `${frame.requestId}:${frame.opcode}:${frame.laneId}`;
+      const bytes = (this.chunkBytes.get(key) ?? 0) + frame.body.byteLength;
+      if (bytes > this.maxChunkBytes) {
+        throw new FerricStoreError(`native protocol chunked response exceeded ${this.maxChunkBytes} bytes`);
+      }
+      this.chunkBytes.set(key, bytes);
       this.chunks.set(key, [...(this.chunks.get(key) ?? []), frame.body]);
       return;
     }
@@ -187,6 +203,7 @@ export class NativeAdapter implements CommandExecutor {
       const key = `${frame.requestId}:${frame.opcode}:${frame.laneId}`;
       const previous = this.chunks.get(key);
       this.chunks.delete(key);
+      this.chunkBytes.delete(key);
       if (previous != null) {
         const body = Buffer.concat([...previous, frame.body]);
         completeFrame = { ...frame, body, bodyLength: body.byteLength };
@@ -198,6 +215,7 @@ export class NativeAdapter implements CommandExecutor {
       return;
     }
     this.pending.delete(frame.requestId);
+    this.cleanupChunksForRequest(frame.requestId);
 
     try {
       pending.resolve(decodeResponse(completeFrame, pending.opcode));
@@ -217,6 +235,17 @@ export class NativeAdapter implements CommandExecutor {
     }
     this.pending.clear();
     this.chunks.clear();
+    this.chunkBytes.clear();
+  }
+
+  private cleanupChunksForRequest(requestId: bigint): void {
+    const prefix = `${requestId}:`;
+    for (const key of this.chunks.keys()) {
+      if (key.startsWith(prefix)) {
+        this.chunks.delete(key);
+        this.chunkBytes.delete(key);
+      }
+    }
   }
 
   private nextRequestId(): bigint {

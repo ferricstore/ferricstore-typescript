@@ -27,8 +27,40 @@ test("NativeAdapter handles fragmented response frames", async () => {
   }
 });
 
-async function startFragmentingServer(): Promise<net.Server> {
-  const server = net.createServer((socket) => handleSocket(socket));
+test("NativeAdapter cleans chunk buffers when a chunked request times out", async () => {
+  const server = await startFragmentingServer({ chunkOnlyPing: true });
+  const address = server.address() as AddressInfo;
+  const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
+    protocolLanes: 4,
+    timeoutMs: 20
+  });
+
+  try {
+    await expect(adapter.executeCommand("PING")).rejects.toThrow("timed out");
+    expect((adapter as unknown as { chunks: Map<string, Buffer[]> }).chunks.size).toBe(0);
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("NativeAdapter rejects oversized chunked responses", async () => {
+  const server = await startFragmentingServer({ chunkOnlyPing: true });
+  const address = server.address() as AddressInfo;
+  const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
+    maxChunkBytes: 4,
+    protocolLanes: 4,
+    timeoutMs: 100
+  });
+
+  try {
+    await expect(adapter.executeCommand("PING")).rejects.toThrow("chunked response exceeded");
+  } finally {
+    await adapter.close();
+  }
+});
+
+async function startFragmentingServer(options: { chunkOnlyPing?: boolean } = {}): Promise<net.Server> {
+  const server = net.createServer((socket) => handleSocket(socket, options));
   servers.push(server);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -40,7 +72,7 @@ async function startFragmentingServer(): Promise<net.Server> {
   return server;
 }
 
-function handleSocket(socket: Socket): void {
+function handleSocket(socket: Socket, options: { chunkOnlyPing?: boolean }): void {
   let input: Buffer = Buffer.alloc(0);
   socket.on("data", (chunk) => {
     input = Buffer.concat([input, chunk]);
@@ -51,7 +83,11 @@ function handleSocket(socket: Socket): void {
       }
       input = request.rest;
       const value = request.opcode === OPCODES.ping ? "PONG" : "OK";
-      writeFragmented(socket, responseFrame(request.opcode, request.laneId, request.requestId, value));
+      if (options.chunkOnlyPing === true && request.opcode === OPCODES.ping) {
+        socket.write(responseFrame(request.opcode, request.laneId, request.requestId, "partial-response", 0x20));
+      } else {
+        writeFragmented(socket, responseFrame(request.opcode, request.laneId, request.requestId, value));
+      }
     }
   });
 }
@@ -81,7 +117,7 @@ function readRequest(input: Buffer): {
   };
 }
 
-function responseFrame(opcode: number, laneId: number, requestId: bigint, value: unknown): Buffer {
+function responseFrame(opcode: number, laneId: number, requestId: bigint, value: unknown, flags = 0): Buffer {
   const encoded = encodeValue(value);
   const body = Buffer.allocUnsafe(2 + encoded.byteLength);
   body.writeUInt16BE(0, 0);
@@ -90,7 +126,7 @@ function responseFrame(opcode: number, laneId: number, requestId: bigint, value:
   const frame = Buffer.allocUnsafe(HEADER_SIZE + body.byteLength);
   frame.write(MAGIC, 0, "ascii");
   frame.writeUInt8(RESPONSE_VERSION, 4);
-  frame.writeUInt8(0, 5);
+  frame.writeUInt8(flags, 5);
   frame.writeUInt32BE(laneId, 6);
   frame.writeUInt16BE(opcode, 10);
   frame.writeBigUInt64BE(requestId, 12);

@@ -326,6 +326,25 @@ describe("native protocol codec", () => {
     expect(decoded).toEqual([[id, partition, lease, 9, null, attrs]]);
   });
 
+  it("rejects compact claim fencing tokens outside safe integer range", () => {
+    const id = Buffer.from("flow-1");
+    const partition = Buffer.from("p1");
+    const lease = Buffer.from("lease-token");
+    const unsafe = BigInt(Number.MAX_SAFE_INTEGER) + 1n;
+    const body = Buffer.concat([
+      Buffer.from([0, 0, 0x80]),
+      u32(1),
+      binary(id),
+      binary(partition),
+      binary(lease),
+      i64(unsafe)
+    ]);
+
+    expect(() => decodeResponse(responseFrame(OPCODES.flowClaimDue, body), OPCODES.flowClaimDue)).toThrow(
+      "unsafe compact Flow fencing token"
+    );
+  });
+
   it("preserves raw compact claimed item buffers for follow-up completion", () => {
     const id = Buffer.from("flow-1");
     const partition = Buffer.from("p1");
