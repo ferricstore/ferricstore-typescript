@@ -1,11 +1,63 @@
 import { describe, expect, it } from "vitest";
-import { FlowClient, FlowAlreadyExistsError, JsonCodec, OverloadedError, StaleLeaseError } from "../src/index.js";
+import { FerricStoreClient, FlowAlreadyExistsError, JsonCodec, OverloadedError, StaleLeaseError } from "../src/index.js";
+import type { CommandExecutor } from "../src/adapters.js";
 import { FakeExecutor } from "./fake-executor.js";
 
-describe("FlowClient", () => {
+describe("FerricStoreClient", () => {
+  it("auto-batches concurrent safe commands when enabled", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+
+    await Promise.all([
+      client.command("SET", "auto-batch:a", "1"),
+      client.command("SET", "auto-batch:b", "2")
+    ]);
+
+    expect(executor.pipelineCalls).toEqual([
+      [
+        ["SET", "auto-batch:a", "1"],
+        ["SET", "auto-batch:b", "2"]
+      ]
+    ]);
+  });
+
+  it("does not auto-batch blocking claim commands", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+
+    await Promise.all([
+      client.command("FLOW.CLAIM_DUE", "email", "WORKER", "worker-1"),
+      client.command("SET", "auto-batch:claim-safe", "1")
+    ]);
+
+    expect(executor.calls[0]).toEqual(["FLOW.CLAIM_DUE", "email", "WORKER", "worker-1"]);
+    expect(executor.pipelineCalls).toEqual([[["SET", "auto-batch:claim-safe", "1"]]]);
+  });
+
+  it("rejects only the failed promise for auto-batched item errors", async () => {
+    const itemError = new Error("ERR item failed");
+    const executor: CommandExecutor = {
+      async executeCommand() {
+        return Buffer.from("OK");
+      },
+      async executePipeline() {
+        return [Buffer.from("OK"), itemError];
+      }
+    };
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+
+    const [first, second] = await Promise.allSettled([
+      client.command("SET", "auto-batch:ok", "1"),
+      client.command("SET", "auto-batch:error", "2")
+    ]);
+
+    expect(first).toMatchObject({ status: "fulfilled", value: Buffer.from("OK") });
+    expect(second).toMatchObject({ status: "rejected", reason: itemError });
+  });
+
   it("builds FLOW.CREATE with explicit state-machine data", async () => {
     const executor = new FakeExecutor();
-    const client = new FlowClient(executor, { codec: new JsonCodec() });
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
 
     await client.create("order-1", {
       correlationId: "cart-1",
@@ -47,7 +99,7 @@ describe("FlowClient", () => {
     ]);
   });
 
-  it("decodes claimed flow records from RESP maps", async () => {
+  it("decodes claimed flow records from wire maps", async () => {
     const executor = new FakeExecutor([
       [
         new Map<unknown, unknown>([
@@ -62,7 +114,7 @@ describe("FlowClient", () => {
         ])
       ]
     ]);
-    const client = new FlowClient(executor, { codec: new JsonCodec() });
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
 
     const records = await client.claimDue("order", {
       leaseMs: 30_000,
@@ -91,7 +143,7 @@ describe("FlowClient", () => {
     const overloaded = new Error("BUSY FerricStore overloaded: retry_after_ms=25 reason=rss_pressure");
     overloaded.name = "ResponseError";
     const executor = new FakeExecutor([alreadyExists, staleLease, overloaded]);
-    const client = new FlowClient(executor);
+    const client = new FerricStoreClient(executor);
 
     await expect(client.command("FLOW.CREATE", "f1")).rejects.toBeInstanceOf(FlowAlreadyExistsError);
     await expect(client.command("FLOW.COMPLETE", "f1")).rejects.toBeInstanceOf(StaleLeaseError);
@@ -116,7 +168,7 @@ describe("FlowClient", () => {
       Buffer.from("OK"),
       ["status", "ok"]
     ]);
-    const client = new FlowClient(executor);
+    const client = new FerricStoreClient(executor);
 
     await client.clusterJoin("node-b", { replace: true });
     await client.clusterLeave();
@@ -157,7 +209,7 @@ describe("FlowClient", () => {
       3,
       "user-1"
     ]);
-    const client = new FlowClient(executor);
+    const client = new FerricStoreClient(executor);
 
     await client.ping();
     await client.serverInfo("server");

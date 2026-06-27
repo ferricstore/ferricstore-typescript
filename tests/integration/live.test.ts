@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  FlowClient,
+  FerricStoreClient,
   JsonCodec,
   QueueClient,
   RawCodec,
@@ -65,7 +65,7 @@ function fenced(job: ClaimedItem): FencedItem {
   };
 }
 
-async function deletePrefixedKeys(flow: FlowClient, prefix: string): Promise<void> {
+async function deletePrefixedKeys(flow: FerricStoreClient, prefix: string): Promise<void> {
   const keys = (await flow.kv.keys(`${prefix}*`)).map(text);
   if (keys.length > 0) {
     await flow.kv.del(...keys);
@@ -73,7 +73,7 @@ async function deletePrefixedKeys(flow: FlowClient, prefix: string): Promise<voi
 }
 
 async function claimOne(
-  flow: FlowClient,
+  flow: FerricStoreClient,
   type: string,
   state: string,
   partitionKey: string,
@@ -100,7 +100,7 @@ async function claimOne(
 }
 
 async function createAndClaim(
-  flow: FlowClient,
+  flow: FerricStoreClient,
   type: string,
   runId: string,
   name: string,
@@ -127,7 +127,7 @@ async function createAndClaim(
 
 describe("FerricStore integration", () => {
   it("uses KV helpers and a full Flow claim/complete cycle", async () => {
-    const flow = await FlowClient.fromUrl(url(), {
+    const flow = await FerricStoreClient.fromUrl(url(), {
       codec: new JsonCodec()
     });
 
@@ -186,7 +186,7 @@ describe("FerricStore integration", () => {
   });
 
   it("covers native helpers and read-only diagnostics", async () => {
-    const flow = await FlowClient.fromUrl(url(), { codec: new JsonCodec() });
+    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
     const runId = suffix();
     const prefix = `ts-sdk:native:${runId}:`;
     const key = `${prefix}cas`;
@@ -251,7 +251,7 @@ describe("FerricStore integration", () => {
       await expect(flow.pubsubChannels()).resolves.toBeDefined();
       await expect(flow.pubsubNumSub(`${prefix}channel`)).resolves.toBeDefined();
       await expect(flow.pubsubNumPat()).resolves.toBeGreaterThanOrEqual(0);
-      await expect(flow.aclWhoami()).rejects.toThrow(/unsupported command/i);
+      await expect(flow.aclWhoami()).rejects.toThrow(/unsupported command|unknown ACL subcommand/i);
       await expect(flow.clusterHealth()).resolves.toBeTypeOf("object");
       await expect(flow.clusterStats()).resolves.toBeTypeOf("object");
       await expect(flow.clusterKeyslot(key)).resolves.toBeGreaterThanOrEqual(0);
@@ -269,7 +269,7 @@ describe("FerricStore integration", () => {
   });
 
   it("covers typed native store families", async () => {
-    const flow = await FlowClient.fromUrl(url(), { codec: new RawCodec() });
+    const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
     const runId = suffix();
     const prefix = `ts-sdk:store:${runId}:`;
 
@@ -464,7 +464,7 @@ describe("FerricStore integration", () => {
   }, 30_000);
 
   it("covers native probabilistic helpers except JSON", async () => {
-    const flow = await FlowClient.fromUrl(url(), { codec: new RawCodec() });
+    const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
     const runId = suffix();
     const prefix = `ts-sdk:prob:${runId}:`;
 
@@ -534,7 +534,7 @@ describe("FerricStore integration", () => {
   });
 
   it("covers Flow state-machine repair and index commands", async () => {
-    const flow = await FlowClient.fromUrl(url(), { codec: new JsonCodec() });
+    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
     const runId = suffix();
     const type = `ts-sdk-flow-${runId}`;
     const now = Date.now();
@@ -817,7 +817,7 @@ describe("FerricStore integration", () => {
   }, 20_000);
 
   it("covers queue and workflow wrappers against the live server", async () => {
-    const flow = await FlowClient.fromUrl(url(), { codec: new JsonCodec() });
+    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
     const runId = suffix();
     const now = Date.now();
 
@@ -870,4 +870,66 @@ describe("FerricStore integration", () => {
       await flow.close();
     }
   }, 20_000);
+
+  it("auto-batches concurrent safe API calls over the native protocol", async () => {
+    const flow = await FerricStoreClient.fromUrl(url(), {
+      autoBatch: true,
+      codec: new RawCodec()
+    });
+    const runId = suffix();
+    const prefix = `ts-sdk:autobatch:${runId}`;
+    const kvA = `${prefix}:a`;
+    const kvB = `${prefix}:b`;
+    const hashKey = `${prefix}:hash`;
+    const setKey = `${prefix}:set`;
+    const zsetKey = `${prefix}:zset`;
+    const type = `ts-sdk-autobatch-${runId}`;
+    const flowA = `${prefix}:flow:a`;
+    const flowB = `${prefix}:flow:b`;
+
+    try {
+      await Promise.all([
+        flow.kv.set(kvA, Buffer.from("1")),
+        flow.kv.set(kvB, Buffer.from("2")),
+        flow.hash.hset(hashKey, { field: Buffer.from("value") }),
+        flow.sets.sadd(setKey, Buffer.from("member")),
+        flow.zset.zadd(zsetKey, [{ member: Buffer.from("member"), score: 1 }])
+      ]);
+
+      await expect(flow.kv.get(kvA)).resolves.toEqual(Buffer.from("1"));
+      await expect(flow.kv.get(kvB)).resolves.toEqual(Buffer.from("2"));
+      await expect(flow.hash.hget(hashKey, "field")).resolves.toEqual(Buffer.from("value"));
+      await expect(flow.sets.sismember(setKey, Buffer.from("member"))).resolves.toBe(true);
+      expect(Number(await flow.zset.zscore(zsetKey, Buffer.from("member")))).toBe(1);
+
+      await Promise.all([
+        flow.create(flowA, { partitionKey: flowA, state: "queued", type }),
+        flow.create(flowB, { partitionKey: flowB, state: "queued", type })
+      ]);
+
+      const jobs = await flow.claimJobs(type, {
+        leaseMs: 30_000,
+        limit: 2,
+        partitionKeys: [flowA, flowB],
+        state: "queued",
+        worker: `ts-sdk-autobatch-${runId}`
+      });
+      expect(jobs).toHaveLength(2);
+
+      await Promise.all(jobs.map((job) => flow.complete(job.id, {
+        fencingToken: job.fencingToken,
+        leaseToken: job.leaseToken,
+        partitionKey: job.partitionKey
+      })));
+
+      const records = await Promise.all([
+        flow.get(flowA, { partitionKey: flowA }),
+        flow.get(flowB, { partitionKey: flowB })
+      ]);
+      expect(records.map((record) => record?.state).sort()).toEqual(["completed", "completed"]);
+    } finally {
+      await deletePrefixedKeys(flow, prefix);
+      await flow.close();
+    }
+  });
 });

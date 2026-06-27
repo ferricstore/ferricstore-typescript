@@ -26,7 +26,9 @@ export const OPCODES = {
   mget: 0x0104,
   mset: 0x0105,
   pipeline: 0x000e,
+  flowCreate: 0x0201,
   flowClaimDue: 0x0203,
+  flowComplete: 0x0204,
   flowCreateMany: 0x020f,
   flowCompleteMany: 0x0210
 } as const;
@@ -40,6 +42,8 @@ const COMPACT_FLOW_RECORD_LIST = 0x85;
 const COMPACT_KV_MGET_FIXED = 0x89;
 const COMPACT_FLOW_CREATE_MANY_REQUEST = 0x90;
 const COMPACT_FLOW_CLAIM_DUE_REQUEST = 0x91;
+const COMPACT_FLOW_COMPLETE_MANY_REQUEST = 0x92;
+const COMPACT_FLOW_COMPLETE_MANY_OK_REQUEST = 0x93;
 const COMPACT_FLOW_CREATE_MANY_PARTITION_REQUEST = 0x96;
 const COMPACT_FLOW_CREATE_MANY_MIXED_REQUEST = 0x9e;
 const COMPACT_PIPELINE_REQUEST = 0x94;
@@ -204,11 +208,17 @@ export function buildProtocolCommand(args: readonly CommandArgument[]): Protocol
   if (command === "DEL") {
     return { opcode: OPCODES.del, payload: { keys: commandArgs } };
   }
+  if (command === "FLOW.CREATE") {
+    return flowCreatePayload(commandArgs) ?? commandExec(args);
+  }
   if (command === "FLOW.CREATE_MANY") {
     return flowCreateManyPayload(commandArgs) ?? commandExec(args);
   }
   if (command === "FLOW.CLAIM_DUE") {
     return flowClaimDuePayload(commandArgs) ?? commandExec(args);
+  }
+  if (command === "FLOW.COMPLETE") {
+    return flowCompletePayload(commandArgs) ?? commandExec(args);
   }
   if (command === "FLOW.COMPLETE_MANY") {
     return flowCompleteManyPayload(commandArgs) ?? commandExec(args);
@@ -254,7 +264,10 @@ export function pipelineCommand(commands: readonly Command[]): ProtocolCommand {
   };
 }
 
-export function unwrapPipelineResponse(value: unknown): unknown[] {
+export function unwrapPipelineResponse(
+  value: unknown,
+  options: { readonly throwOnItemError?: boolean } = {}
+): unknown[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -282,7 +295,12 @@ export function unwrapPipelineResponse(value: unknown): unknown[] {
           out[index] = payload;
           continue;
         }
-        throw classifyServerError(errorMessage(status === "busy" ? 4 : 1, payload), payload);
+        const error = classifyServerError(errorMessage(status === "busy" ? 4 : 1, payload), payload);
+        if (options.throwOnItemError !== false) {
+          throw error;
+        }
+        out[index] = error;
+        continue;
       }
     }
     out[index] = item;
@@ -571,6 +589,28 @@ function writeBinary(out: Buffer, offset: number, value: Buffer): number {
   return offset + value.byteLength;
 }
 
+function writeOptionalBinary(out: Buffer, offset: number, value: Buffer | null): number {
+  if (value == null) {
+    out.writeUInt32BE(NULL_U32, offset);
+    return offset + 4;
+  }
+  return writeBinary(out, offset, value);
+}
+
+function flowCreatePayload(args: readonly CommandArgument[]): ProtocolCommand | undefined {
+  if (args.length < 7) return undefined;
+  const id = args[0];
+  if (hasToken(args, "PAYLOAD", 1) || hasToken(args, "VALUES", 1) || hasToken(args, "VALUE_REFS", 1)) {
+    return undefined;
+  }
+  const options = parseFlowOptions(args, 1, args.length, {
+    allowed: new Set(["TYPE", "STATE", "NOW", "PARTITION", "RUN_AT", "PRIORITY", "IDEMPOTENT", "RETENTION_TTL_MS"]),
+    required: new Set(["TYPE", "STATE", "NOW"])
+  });
+  if (options == null) return undefined;
+  return { opcode: OPCODES.flowCreate, payload: { id, ...options } };
+}
+
 function flowCreateManyPayload(args: readonly CommandArgument[]): ProtocolCommand | undefined {
   if (args.length < 2) return undefined;
   const partition = asText(args[0]);
@@ -637,6 +677,26 @@ function flowClaimDuePayload(args: readonly CommandArgument[]): ProtocolCommand 
   return { opcode: OPCODES.flowClaimDue, payload: { ...options, type: args[0] } };
 }
 
+function flowCompletePayload(args: readonly CommandArgument[]): ProtocolCommand | undefined {
+  if (args.length < 6) return undefined;
+  const id = args[0];
+  const leaseToken = args[1];
+  if (
+    hasToken(args, "RESULT", 2) ||
+    hasToken(args, "PAYLOAD", 2) ||
+    hasToken(args, "VALUES", 2) ||
+    hasToken(args, "VALUE_REFS", 2)
+  ) {
+    return undefined;
+  }
+  const options = parseFlowOptions(args, 2, args.length, {
+    allowed: new Set(["FENCING", "NOW", "PARTITION", "TTL"]),
+    required: new Set(["FENCING", "NOW"])
+  });
+  if (options == null) return undefined;
+  return { opcode: OPCODES.flowComplete, payload: { id, lease_token: leaseToken, ...options } };
+}
+
 function flowCompleteManyPayload(args: readonly CommandArgument[]): ProtocolCommand | undefined {
   if (args.length < 2) return undefined;
   const partition = asText(args[0]);
@@ -653,6 +713,9 @@ function flowCompleteManyPayload(args: readonly CommandArgument[]): ProtocolComm
   const rawItems = args.slice(itemsIndex + 1);
   const width = mixed ? 4 : 3;
   if (rawItems.length === 0 || rawItems.length % width !== 0) return undefined;
+
+  const compact = compactFlowCompleteManyPayload(partition, rawItems, mixed, auto, options);
+  if (compact != null) return compact;
 
   const items: unknown[][] = [];
   for (let index = 0; index < rawItems.length; index += width) {
@@ -751,6 +814,65 @@ function compactFlowClaimDuePayload(type: CommandArgument, options: Record<strin
   return { flags: FLAG_CUSTOM_PAYLOAD, opcode: OPCODES.flowClaimDue, payload: Buffer.concat(items) };
 }
 
+function compactFlowCompleteManyPayload(
+  partition: string,
+  rawItems: readonly CommandArgument[],
+  mixed: boolean,
+  auto: boolean,
+  options: Record<string, unknown>
+): ProtocolCommand | undefined {
+  if ("ttl_ms" in options || typeof options.now_ms !== "number") {
+    return undefined;
+  }
+  const returnMode = options.return == null ? "" : asText(options.return).toUpperCase();
+  if (returnMode !== "" && returnMode !== "OK_ON_SUCCESS") {
+    return undefined;
+  }
+  const width = mixed ? 4 : 3;
+  const count = rawItems.length / width;
+  const items = new Array<{
+    readonly id: Buffer;
+    readonly partition: Buffer | null;
+    readonly lease: Buffer;
+    readonly fencing: bigint;
+  }>(count);
+
+  let total = 1 + 4 + 8 + 1 + 4;
+  const headerPartition = !auto && !mixed ? toBuffer(partition) : null;
+  if (headerPartition != null) {
+    total += headerPartition.byteLength;
+  }
+
+  for (let rawIndex = 0, itemIndex = 0; rawIndex < rawItems.length; rawIndex += width, itemIndex += 1) {
+    const id = toBuffer(rawItems[rawIndex]);
+    const itemPartition = mixed ? toBuffer(rawItems[rawIndex + 1]) : null;
+    const lease = toBuffer(rawItems[rawIndex + width - 2]);
+    const fencing = BigInt(numberArg(rawItems[rawIndex + width - 1]));
+    items[itemIndex] = { id, partition: itemPartition, lease, fencing };
+    total += 4 + id.byteLength + 4 + (itemPartition?.byteLength ?? 0) + 4 + lease.byteLength + 8;
+  }
+
+  const out = Buffer.allocUnsafe(total);
+  let offset = 0;
+  out.writeUInt8(returnMode === "OK_ON_SUCCESS" ? COMPACT_FLOW_COMPLETE_MANY_OK_REQUEST : COMPACT_FLOW_COMPLETE_MANY_REQUEST, offset);
+  offset += 1;
+  offset = writeOptionalBinary(out, offset, headerPartition);
+  out.writeBigInt64BE(BigInt(options.now_ms), offset);
+  offset += 8;
+  out.writeUInt8(independentMode(options.independent), offset);
+  offset += 1;
+  out.writeUInt32BE(count, offset);
+  offset += 4;
+  for (const item of items) {
+    offset = writeBinary(out, offset, item.id);
+    offset = writeOptionalBinary(out, offset, item.partition);
+    offset = writeBinary(out, offset, item.lease);
+    out.writeBigInt64BE(item.fencing, offset);
+    offset += 8;
+  }
+  return { flags: FLAG_CUSTOM_PAYLOAD, opcode: OPCODES.flowCompleteMany, payload: out };
+}
+
 function parseFlowOptions(
   args: readonly CommandArgument[],
   start: number,
@@ -820,6 +942,10 @@ function parseFlowOptions(
         break;
       case "TTL":
         if (!putNumber(payload, "ttl_ms", args, index + 1, end)) return undefined;
+        index += 2;
+        break;
+      case "FENCING":
+        if (!putNumber(payload, "fencing_token", args, index + 1, end)) return undefined;
         index += 2;
         break;
       case "BLOCK":

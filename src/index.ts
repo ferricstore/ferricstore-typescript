@@ -1,13 +1,14 @@
-export { NativeAdapter, type NativeAdapterOptions, type CommandExecutor } from "./adapters.js";
+export { NativeAdapter, type CommandExecutor, type ExecutePipelineOptions, type NativeAdapterOptions } from "./adapters.js";
 export {
-  FlowClient,
+  FerricStoreClient,
+  type AutoBatchOptions,
   type CancelOptions,
   type ClaimDueOptions,
   type CompleteOptions,
   type CreateManyOptions,
   type CreateOptions,
   type FailOptions,
-  type FlowClientOptions,
+  type FerricStoreClientOptions,
   type MutateOptions,
   type ReadOptions,
   type ReclaimOptions,
@@ -54,7 +55,7 @@ export {
   type TDigestMergeOptions,
   type TopKReserveOptions
 } from "./modules.js";
-export { Queue, QueueClient, QueueWorker, type QueueHandler, type QueueOptions, type QueueWorkerResult } from "./queue.js";
+export { Queue, QueueClient, QueueWorker, type QueueBatchHandler, type QueueHandler, type QueueOptions, type QueueWorkerResult } from "./queue.js";
 export {
   BitmapStore,
   GeoStore,

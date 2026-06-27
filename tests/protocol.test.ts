@@ -10,6 +10,7 @@ import {
   unwrapPipelineResponse,
   type ResponseFrame
 } from "../src/protocol.js";
+import { CLAIMED_ITEM_WIRE, claimedItemFromResp } from "../src/types.js";
 
 describe("native protocol codec", () => {
   it("encodes request frames with FerricStore native header", () => {
@@ -146,6 +147,93 @@ describe("native protocol codec", () => {
     expect(command.opcode).toBe(OPCODES.commandExec);
   });
 
+  it("builds direct native FLOW.CREATE for simple queue creates", () => {
+    const command = buildProtocolCommand([
+      "FLOW.CREATE",
+      "flow-1",
+      "TYPE",
+      "email",
+      "STATE",
+      "queued",
+      "NOW",
+      1000,
+      "PARTITION",
+      "p1",
+      "RUN_AT",
+      1000,
+      "PRIORITY",
+      1
+    ]);
+
+    expect(command.opcode).toBe(OPCODES.flowCreate);
+    expect(command.payload).toMatchObject({
+      id: "flow-1",
+      type: "email",
+      state: "queued",
+      now_ms: 1000,
+      partition_key: "p1",
+      run_at_ms: 1000,
+      priority: 1
+    });
+  });
+
+  it("keeps payload-bearing FLOW.CREATE on generic execution", () => {
+    const command = buildProtocolCommand([
+      "FLOW.CREATE",
+      "flow-1",
+      "TYPE",
+      "email",
+      "STATE",
+      "queued",
+      "NOW",
+      1000,
+      "PAYLOAD",
+      Buffer.from("payload")
+    ]);
+
+    expect(command.opcode).toBe(OPCODES.commandExec);
+  });
+
+  it("builds direct native FLOW.COMPLETE for simple claimed completions", () => {
+    const lease = Buffer.from("lease-token");
+    const command = buildProtocolCommand([
+      "FLOW.COMPLETE",
+      "flow-1",
+      lease,
+      "FENCING",
+      7,
+      "NOW",
+      2000,
+      "PARTITION",
+      "p1"
+    ]);
+
+    expect(command.opcode).toBe(OPCODES.flowComplete);
+    expect(command.payload).toMatchObject({
+      id: "flow-1",
+      lease_token: lease,
+      fencing_token: 7,
+      now_ms: 2000,
+      partition_key: "p1"
+    });
+  });
+
+  it("keeps result-bearing FLOW.COMPLETE on generic execution", () => {
+    const command = buildProtocolCommand([
+      "FLOW.COMPLETE",
+      "flow-1",
+      Buffer.from("lease-token"),
+      "FENCING",
+      7,
+      "NOW",
+      2000,
+      "RESULT",
+      Buffer.from("result")
+    ]);
+
+    expect(command.opcode).toBe(OPCODES.commandExec);
+  });
+
   it("builds direct native FLOW.COMPLETE_MANY for claimed mixed batches", () => {
     const lease = Buffer.from("lease-token");
     const command = buildProtocolCommand([
@@ -163,12 +251,9 @@ describe("native protocol codec", () => {
     ]);
 
     expect(command.opcode).toBe(OPCODES.flowCompleteMany);
-    expect(command.flags).toBeUndefined();
-    expect(command.payload).toMatchObject({
-      independent: true,
-      items: [["flow-1", "p1", lease, 7]],
-      now_ms: 2000
-    });
+    expect(command.flags).toBe(0x02);
+    expect(Buffer.isBuffer(command.payload)).toBe(true);
+    expect((command.payload as Buffer).readUInt8(0)).toBe(0x92);
   });
 
   it("keeps FLOW.COMPLETE_MANY OK-on-success on the direct native opcode", () => {
@@ -190,8 +275,34 @@ describe("native protocol codec", () => {
     ]);
 
     expect(command.opcode).toBe(OPCODES.flowCompleteMany);
+    expect(command.flags).toBe(0x02);
+    expect(Buffer.isBuffer(command.payload)).toBe(true);
+    expect((command.payload as Buffer).readUInt8(0)).toBe(0x93);
+  });
+
+  it("keeps TTL-bearing FLOW.COMPLETE_MANY on generic native encoding", () => {
+    const lease = Buffer.from("lease-token");
+    const command = buildProtocolCommand([
+      "FLOW.COMPLETE_MANY",
+      "MIXED",
+      "NOW",
+      2000,
+      "TTL",
+      5000,
+      "RETURN",
+      "OK_ON_SUCCESS",
+      "ITEMS",
+      "flow-1",
+      "p1",
+      lease,
+      7
+    ]);
+
+    expect(command.opcode).toBe(OPCODES.flowCompleteMany);
+    expect(command.flags).toBeUndefined();
     expect(command.payload).toMatchObject({
-      return: "OK_ON_SUCCESS"
+      return: "OK_ON_SUCCESS",
+      ttl_ms: 5000
     });
   });
 
@@ -213,6 +324,22 @@ describe("native protocol codec", () => {
     const decoded = decodeResponse(responseFrame(OPCODES.flowClaimDue, body), OPCODES.flowClaimDue);
 
     expect(decoded).toEqual([[id, partition, lease, 9, null, attrs]]);
+  });
+
+  it("preserves raw compact claimed item buffers for follow-up completion", () => {
+    const id = Buffer.from("flow-1");
+    const partition = Buffer.from("p1");
+    const lease = Buffer.from("lease-token");
+    const item = claimedItemFromResp([id, partition, lease, 9]);
+
+    expect(item.id).toBe("flow-1");
+    expect(item.partitionKey).toBe("p1");
+    expect(item[CLAIMED_ITEM_WIRE]).toMatchObject({
+      id,
+      partitionKey: partition,
+      leaseToken: lease,
+      fencingToken: 9
+    });
   });
 
   it("round-trips typed protocol maps", () => {

@@ -18,7 +18,7 @@ import {
   type Command,
   type CommandArgument
 } from "./internal.js";
-import { NativeAdapter, type CommandExecutor, type NativeAdapterOptions } from "./adapters.js";
+import { NativeAdapter, type CommandExecutor, type ExecutePipelineOptions, type NativeAdapterOptions } from "./adapters.js";
 import {
   BitmapStore,
   GeoStore,
@@ -39,6 +39,7 @@ import {
   TopKStore
 } from "./modules.js";
 import {
+  CLAIMED_ITEM_WIRE,
   claimedItemFromResp,
   fetchOrComputeResultFromResp,
   flowRecordFromResp,
@@ -56,7 +57,15 @@ import {
   type RetryPolicy
 } from "./types.js";
 
-export interface FlowClientOptions {
+export interface AutoBatchOptions {
+  enabled?: boolean;
+  maxCommands?: number;
+  maxDelayMs?: number;
+  mode?: "safe" | "all";
+}
+
+export interface FerricStoreClientOptions {
+  autoBatch?: boolean | AutoBatchOptions;
   codec?: Codec;
   backpressure?: BackpressurePolicy;
 }
@@ -169,7 +178,7 @@ export interface ReadOptions {
   consistentProjection?: boolean;
 }
 
-export class FlowClient {
+export class FerricStoreClient {
   readonly executor: CommandExecutor;
   readonly codec: Codec;
   readonly backpressure: Required<BackpressurePolicy>;
@@ -189,8 +198,9 @@ export class FlowClient {
   readonly topk: TopKStore;
   readonly zset: SortedSetStore;
 
-  constructor(executor: CommandExecutor, options: FlowClientOptions = {}) {
-    this.executor = new ErrorMappingExecutor(executor);
+  constructor(executor: CommandExecutor, options: FerricStoreClientOptions = {}) {
+    const mapped = new ErrorMappingExecutor(executor);
+    this.executor = maybeAutoBatchExecutor(mapped, options.autoBatch);
     this.codec = options.codec ?? new RawCodec();
     this.backpressure = {
       baseDelayMs: options.backpressure?.baseDelayMs ?? 25,
@@ -215,8 +225,11 @@ export class FlowClient {
     this.zset = new SortedSetStore(this);
   }
 
-  static async fromUrl(url: string, options: FlowClientOptions & { nativeOptions?: NativeAdapterOptions } = {}): Promise<FlowClient> {
-    return new FlowClient(await NativeAdapter.fromUrl(url, options.nativeOptions), options);
+  static async fromUrl(
+    url: string,
+    options: FerricStoreClientOptions & { nativeOptions?: NativeAdapterOptions } = {}
+  ): Promise<FerricStoreClient> {
+    return new FerricStoreClient(await NativeAdapter.fromUrl(url, options.nativeOptions), options);
   }
 
   async command(...args: CommandArgument[]): Promise<unknown> {
@@ -735,7 +748,7 @@ export class FlowClient {
     return await this.command(...args);
   }
 
-  async flowSignal(id: string, options: Parameters<FlowClient["signal"]>[1]): Promise<unknown> {
+  async flowSignal(id: string, options: Parameters<FerricStoreClient["signal"]>[1]): Promise<unknown> {
     return await this.signal(id, options);
   }
 
@@ -923,7 +936,7 @@ export class FlowClient {
     return this.recordsOrResponse(await this.command(...args));
   }
 
-  async completeJobs(jobs: ClaimedItem[], options: Parameters<FlowClient["completeMany"]>[2] = {}): Promise<unknown[] | unknown> {
+  async completeJobs(jobs: ClaimedItem[], options: Parameters<FerricStoreClient["completeMany"]>[2] = {}): Promise<unknown[] | unknown> {
     if (jobs.length === 0) {
       return [];
     }
@@ -1320,10 +1333,10 @@ class ErrorMappingExecutor implements CommandExecutor {
     }
   }
 
-  async executePipeline(commands: readonly Command[]): Promise<unknown[]> {
+  async executePipeline(commands: readonly Command[], options?: ExecutePipelineOptions): Promise<unknown[]> {
     try {
       if (this.executor.executePipeline != null) {
-        return await this.executor.executePipeline(commands);
+        return await this.executor.executePipeline(commands, options);
       }
       return await Promise.all(commands.map((command) => this.executor.executeCommand(...command)));
     } catch (error) {
@@ -1334,6 +1347,282 @@ class ErrorMappingExecutor implements CommandExecutor {
   async close(): Promise<void> {
     await this.executor.close?.();
   }
+}
+
+interface NormalizedAutoBatchOptions {
+  readonly maxCommands: number;
+  readonly maxDelayMs: number;
+  readonly mode: "safe" | "all";
+}
+
+interface AutoBatchItem {
+  readonly command: Command;
+  readonly reject: (reason: unknown) => void;
+  readonly resolve: (value: unknown) => void;
+}
+
+class AutoBatchExecutor implements CommandExecutor {
+  private readonly pending: AutoBatchItem[] = [];
+  private scheduled = false;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(
+    private readonly executor: CommandExecutor,
+    private readonly options: NormalizedAutoBatchOptions
+  ) {}
+
+  async executeCommand(...args: CommandArgument[]): Promise<unknown> {
+    const command = args.slice() as Command;
+
+    if (this.executor.executePipeline == null || !autoBatchCommandAllowed(command, this.options.mode)) {
+      return await this.executor.executeCommand(...args);
+    }
+
+    return await new Promise<unknown>((resolve, reject) => {
+      this.pending.push({ command, reject, resolve });
+
+      if (this.pending.length >= this.options.maxCommands) {
+        void this.flushNow();
+      } else {
+        this.scheduleFlush();
+      }
+    });
+  }
+
+  async executePipeline(commands: readonly Command[], options?: ExecutePipelineOptions): Promise<unknown[]> {
+    await this.flushNow();
+
+    if (this.executor.executePipeline != null) {
+      return await this.executor.executePipeline(commands, options);
+    }
+
+    return await Promise.all(commands.map((command) => this.executor.executeCommand(...command)));
+  }
+
+  async close(): Promise<void> {
+    this.scheduled = false;
+    if (this.timer != null) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+    this.failPending(new Error("FerricStore client closed before auto-batch flush"));
+    await this.executor.close?.();
+  }
+
+  private scheduleFlush(): void {
+    if (this.scheduled) {
+      return;
+    }
+
+    this.scheduled = true;
+
+    if (this.options.maxDelayMs <= 0) {
+      queueMicrotask(() => {
+        this.scheduled = false;
+        void this.flushNow();
+      });
+      return;
+    }
+
+    this.timer = setTimeout(() => {
+      this.scheduled = false;
+      this.timer = undefined;
+      void this.flushNow();
+    }, this.options.maxDelayMs);
+    this.timer.unref?.();
+  }
+
+  private async flushNow(): Promise<void> {
+    this.scheduled = false;
+
+    if (this.timer != null) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+
+    if (this.pending.length === 0) {
+      return;
+    }
+
+    const batch = this.pending.splice(0, this.options.maxCommands);
+    if (this.pending.length > 0) {
+      this.scheduleFlush();
+    }
+
+    await this.sendBatch(batch);
+  }
+
+  private async sendBatch(batch: readonly AutoBatchItem[]): Promise<void> {
+    try {
+      const results = await this.executor.executePipeline?.(
+        batch.map((item) => item.command),
+        { throwOnItemError: false }
+      );
+
+      if (results?.length !== batch.length) {
+        const error = new Error("FerricStore auto-batch response length mismatch");
+        for (const item of batch) item.reject(error);
+        return;
+      }
+
+      for (let index = 0; index < batch.length; index += 1) {
+        const item = batch[index];
+        const result = results[index];
+        if (item == null) continue;
+        if (result instanceof Error) {
+          item.reject(result);
+        } else {
+          item.resolve(result);
+        }
+      }
+    } catch (error) {
+      for (const item of batch) item.reject(error);
+    }
+  }
+
+  private failPending(error: Error): void {
+    const pending = this.pending.splice(0);
+    for (const item of pending) item.reject(error);
+  }
+}
+
+function maybeAutoBatchExecutor(
+  executor: CommandExecutor,
+  options: boolean | AutoBatchOptions | undefined
+): CommandExecutor {
+  const normalized = normalizeAutoBatchOptions(options);
+  return normalized == null ? executor : new AutoBatchExecutor(executor, normalized);
+}
+
+function normalizeAutoBatchOptions(
+  options: boolean | AutoBatchOptions | undefined
+): NormalizedAutoBatchOptions | null {
+  if (options == null || options === false) {
+    return null;
+  }
+
+  if (options === true) {
+    return { maxCommands: 512, maxDelayMs: 0, mode: "safe" };
+  }
+
+  if (options.enabled === false) {
+    return null;
+  }
+
+  return {
+    maxCommands: Math.max(1, Math.trunc(options.maxCommands ?? 512)),
+    maxDelayMs: Math.max(0, Math.trunc(options.maxDelayMs ?? 0)),
+    mode: options.mode ?? "safe"
+  };
+}
+
+const safeAutoBatchCommands = new Set([
+  "DEL",
+  "EXISTS",
+  "GET",
+  "HGET",
+  "HGETALL",
+  "HMGET",
+  "HSET",
+  "LPOP",
+  "LPUSH",
+  "LRANGE",
+  "MGET",
+  "MSET",
+  "RPOP",
+  "RPUSH",
+  "SADD",
+  "SISMEMBER",
+  "SMEMBERS",
+  "SREM",
+  "SET",
+  "ZADD",
+  "ZRANGE",
+  "ZREM",
+  "ZSCORE",
+  "FLOW.CANCEL",
+  "FLOW.CANCEL_MANY",
+  "FLOW.COMPLETE",
+  "FLOW.COMPLETE_MANY",
+  "FLOW.CREATE",
+  "FLOW.CREATE_MANY",
+  "FLOW.FAIL",
+  "FLOW.FAIL_MANY",
+  "FLOW.GET",
+  "FLOW.HISTORY",
+  "FLOW.LIST",
+  "FLOW.RETRY",
+  "FLOW.RETRY_MANY",
+  "FLOW.SIGNAL",
+  "FLOW.START_AND_CLAIM",
+  "FLOW.TRANSITION",
+  "FLOW.TRANSITION_MANY",
+  "FLOW.VALUE.MGET",
+  "FLOW.VALUE.PUT"
+]);
+
+const neverAutoBatchCommandPrefixes = new Set([
+  "AUTH",
+  "BACKPRESSURE",
+  "BLPOP",
+  "BRPOP",
+  "CLIENT",
+  "GOAWAY",
+  "HELLO",
+  "PIPELINE",
+  "QUIT",
+  "ROUTE",
+  "ROUTE_BATCH",
+  "SHARDS",
+  "STARTUP",
+  "SUBSCRIBE",
+  "SUBSCRIBE_EVENTS",
+  "UNSUBSCRIBE",
+  "UNSUBSCRIBE_EVENTS",
+  "WINDOW_UPDATE",
+  "XREAD"
+]);
+
+const neverAutoBatchCommands = new Set(["FLOW.CLAIM_DUE", "FLOW.RECLAIM"]);
+
+function autoBatchCommandAllowed(command: Command, mode: "safe" | "all"): boolean {
+  const name = commandName(command);
+  if (name == null || neverAutoBatchCommands.has(name)) {
+    return false;
+  }
+
+  const prefix = name.includes(".") ? name.slice(0, name.indexOf(".")) : name;
+  if (neverAutoBatchCommandPrefixes.has(prefix)) {
+    return false;
+  }
+
+  return mode === "all" || safeAutoBatchCommands.has(name);
+}
+
+function commandName(command: Command): string | null {
+  const first = commandPart(command[0]);
+  if (first == null) {
+    return null;
+  }
+
+  if (first === "FLOW" && command.length > 1) {
+    const second = commandPart(command[1]);
+    return second == null ? first : `${first}.${second}`;
+  }
+
+  return first;
+}
+
+function commandPart(value: CommandArgument): string | null {
+  if (typeof value === "string") {
+    return value.toUpperCase();
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return Buffer.from(value).toString("utf8").toUpperCase();
+  }
+
+  return null;
 }
 
 function appendReadOptions(args: CommandArgument[], options: ReadOptions): void {
@@ -1379,10 +1668,11 @@ function appendClaimedItems(
   }
   args.push("ITEMS");
   for (const item of items) {
+    const wire = item[CLAIMED_ITEM_WIRE];
     if (partitionKey == null) {
-      args.push(item.id, item.partitionKey ?? "-", item.leaseToken, item.fencingToken);
+      args.push(wire?.id ?? item.id, wire?.partitionKey ?? item.partitionKey ?? "-", wire?.leaseToken ?? item.leaseToken, wire?.fencingToken ?? item.fencingToken);
     } else {
-      args.push(item.id, item.leaseToken, item.fencingToken);
+      args.push(wire?.id ?? item.id, wire?.leaseToken ?? item.leaseToken, wire?.fencingToken ?? item.fencingToken);
     }
   }
 }

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { FlowClient, JsonCodec, WorkflowClient, fail } from "../src/index.js";
+import { FerricStoreClient, JsonCodec, WorkflowClient, fail } from "../src/index.js";
 import { FakeExecutor } from "./fake-executor.js";
 
-describe("FlowClient edge cases", () => {
+describe("FerricStoreClient edge cases", () => {
   it("rejects mutually exclusive claim options before sending a command", async () => {
     const executor = new FakeExecutor();
-    const client = new FlowClient(executor);
+    const client = new FerricStoreClient(executor);
 
     await expect(
       client.claimDue("order", {
@@ -29,7 +29,7 @@ describe("FlowClient edge cases", () => {
 
   it("rejects empty claim lists before sending a command", async () => {
     const executor = new FakeExecutor();
-    const client = new FlowClient(executor);
+    const client = new FerricStoreClient(executor);
 
     await expect(client.claimDue("order", { states: [], worker: "worker-1" })).rejects.toThrow(
       "states must be non-empty"
@@ -43,7 +43,7 @@ describe("FlowClient edge cases", () => {
 
   it("rejects reclaim for non-running states", async () => {
     const executor = new FakeExecutor();
-    const client = new FlowClient(executor);
+    const client = new FerricStoreClient(executor);
 
     await expect(
       client.reclaim("order", {
@@ -57,7 +57,7 @@ describe("FlowClient edge cases", () => {
 
   it("rejects batch partition mismatches before sending a command", async () => {
     const executor = new FakeExecutor();
-    const client = new FlowClient(executor);
+    const client = new FerricStoreClient(executor);
 
     await expect(
       client.createMany(
@@ -85,7 +85,7 @@ describe("FlowClient edge cases", () => {
 
   it("auto-partitions enqueueMany items with no explicit partition", async () => {
     const executor = new FakeExecutor([Buffer.from("OK"), Buffer.from("OK")]);
-    const client = new FlowClient(executor);
+    const client = new FerricStoreClient(executor);
 
     await client.enqueueMany(
       [
@@ -106,7 +106,7 @@ describe("FlowClient edge cases", () => {
 
   it("builds extended createMany items with named values and value refs", async () => {
     const executor = new FakeExecutor();
-    const client = new FlowClient(executor, { codec: new JsonCodec() });
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
 
     await client.createMany(
       "tenant-a",
@@ -154,7 +154,7 @@ describe("FlowClient edge cases", () => {
 
   it("decodes compact job-only claim responses", async () => {
     const executor = new FakeExecutor([[["order-1", "tenant-a", Buffer.from("lease"), 7, "created"]]]);
-    const client = new FlowClient(executor);
+    const client = new FerricStoreClient(executor);
 
     const jobs = await client.claimJobs("order", {
       includeState: true,
@@ -179,7 +179,7 @@ describe("FlowClient edge cases", () => {
 
   it("does not send FLOW.VALUE.MGET for an empty ref list", async () => {
     const executor = new FakeExecutor();
-    const client = new FlowClient(executor, { codec: new JsonCodec() });
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
 
     await expect(client.valueMGet([])).resolves.toEqual([]);
     expect(executor.calls).toEqual([]);
@@ -187,7 +187,7 @@ describe("FlowClient edge cases", () => {
 
   it("decodes FLOW.VALUE.MGET payloads through the configured codec", async () => {
     const executor = new FakeExecutor([[Buffer.from('{"ok":true}'), null]]);
-    const client = new FlowClient(executor, { codec: new JsonCodec() });
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
 
     await expect(client.valueMGet(["ref-1", "ref-2"], { maxBytes: 1024 })).resolves.toEqual([
       { ok: true },
@@ -200,7 +200,7 @@ describe("FlowClient edge cases", () => {
     const overloaded = new Error("BUSY FerricStore overloaded: retry_after_ms=0 reason=rss_pressure");
     overloaded.name = "ResponseError";
     const executor = new FakeExecutor([overloaded, Buffer.from("OK")]);
-    const client = new FlowClient(executor, {
+    const client = new FerricStoreClient(executor, {
       backpressure: {
         baseDelayMs: 0,
         jitterPct: 0,
@@ -233,7 +233,7 @@ describe("Workflow edge cases", () => {
       [Buffer.from('{"id":"c1"}')],
       Buffer.from("OK")
     ]);
-    const workflow = new WorkflowClient(new FlowClient(executor, { codec: new JsonCodec() })).workflow({
+    const workflow = new WorkflowClient(new FerricStoreClient(executor, { codec: new JsonCodec() })).workflow({
       type: "order"
     });
 
@@ -263,7 +263,7 @@ describe("Workflow edge cases", () => {
       ],
       Buffer.from("OK")
     ]);
-    const workflow = new WorkflowClient(new FlowClient(executor, { codec: new JsonCodec() })).workflow({
+    const workflow = new WorkflowClient(new FerricStoreClient(executor, { codec: new JsonCodec() })).workflow({
       type: "order"
     });
 

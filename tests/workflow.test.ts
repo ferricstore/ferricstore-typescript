@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FlowClient, JsonCodec, WorkflowClient, complete, transition } from "../src/index.js";
+import { FerricStoreClient, JsonCodec, WorkflowClient, complete, transition } from "../src/index.js";
 import { FakeExecutor } from "./fake-executor.js";
 
 describe("Workflow", () => {
@@ -18,7 +18,7 @@ describe("Workflow", () => {
       ],
       Buffer.from("OK")
     ]);
-    const flow = new FlowClient(executor, { codec: new JsonCodec() });
+    const flow = new FerricStoreClient(executor, { codec: new JsonCodec() });
     const workflow = new WorkflowClient(flow).workflow({
       initialState: "created",
       type: "order",
@@ -68,7 +68,7 @@ describe("Workflow", () => {
       ],
       Buffer.from("OK")
     ]);
-    const flow = new FlowClient(executor, { codec: new JsonCodec() });
+    const flow = new FerricStoreClient(executor, { codec: new JsonCodec() });
     const workflow = new WorkflowClient(flow).workflow({ initialState: "created", type: "order" });
 
     workflow.state("charged", () => ({ done: true }));
@@ -94,7 +94,7 @@ describe("Workflow", () => {
       ],
       Buffer.from("OK")
     ]);
-    const flow = new FlowClient(executor, { codec: new JsonCodec() });
+    const flow = new FerricStoreClient(executor, { codec: new JsonCodec() });
     const workflow = new WorkflowClient(flow).workflow({ type: "order" });
 
     workflow.state("charged", () => complete({ result: { ok: true }, ttlMs: 60_000 }));

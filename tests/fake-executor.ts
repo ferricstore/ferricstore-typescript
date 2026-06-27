@@ -3,6 +3,7 @@ import type { CommandArgument } from "../src/internal.js";
 
 export class FakeExecutor implements CommandExecutor {
   readonly calls: CommandArgument[][] = [];
+  readonly pipelineCalls: CommandArgument[][][] = [];
   private readonly responses: unknown[];
 
   constructor(responses: unknown[] = []) {
@@ -22,6 +23,7 @@ export class FakeExecutor implements CommandExecutor {
   }
 
   async executePipeline(commands: readonly (readonly CommandArgument[])[]): Promise<unknown[]> {
+    this.pipelineCalls.push(commands.map((command) => [...command]));
     return await Promise.all(commands.map((command) => this.executeCommand(...command)));
   }
 }

@@ -18,8 +18,12 @@ import {
 
 export interface CommandExecutor {
   executeCommand(...args: CommandArgument[]): Promise<unknown>;
-  executePipeline?(commands: readonly Command[]): Promise<unknown[]>;
+  executePipeline?(commands: readonly Command[], options?: ExecutePipelineOptions): Promise<unknown[]>;
   close?(): Promise<void> | void;
+}
+
+export interface ExecutePipelineOptions {
+  throwOnItemError?: boolean;
 }
 
 export interface NativeAdapterOptions {
@@ -83,11 +87,11 @@ export class NativeAdapter implements CommandExecutor {
     return await this.request(command);
   }
 
-  async executePipeline(commands: readonly Command[]): Promise<unknown[]> {
+  async executePipeline(commands: readonly Command[], options: ExecutePipelineOptions = {}): Promise<unknown[]> {
     if (commands.length === 0) {
       return [];
     }
-    return unwrapPipelineResponse(await this.request(pipelineCommand(commands)));
+    return unwrapPipelineResponse(await this.request(pipelineCommand(commands)), options);
   }
 
   async close(): Promise<void> {

@@ -1,6 +1,6 @@
-import { FlowClient, JsonCodec, WorkflowClient, complete, transition } from "../src/index.js";
+import { FerricStoreClient, JsonCodec, WorkflowClient, complete, transition } from "../src/index.js";
 
-const flow = await FlowClient.fromUrl(process.env.FERRICSTORE_URL ?? "ferric://127.0.0.1:6388", {
+const flow = await FerricStoreClient.fromUrl(process.env.FERRICSTORE_URL ?? "ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
 });
 

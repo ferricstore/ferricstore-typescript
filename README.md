@@ -28,9 +28,9 @@ docker run -p 6388:6388 \
 ## Durable Queue
 
 ```ts
-import { FlowClient, JsonCodec, QueueClient } from "ferricstore";
+import { FerricStoreClient, JsonCodec, QueueClient } from "ferricstore";
 
-const flow = await FlowClient.fromUrl("ferric://127.0.0.1:6388", {
+const flow = await FerricStoreClient.fromUrl("ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
 });
 
@@ -50,9 +50,9 @@ await emails.worker({ batchSize: 100, worker: "email-worker-1" }).run(async (job
 ## Explicit Workflow
 
 ```ts
-import { FlowClient, JsonCodec, WorkflowClient, complete, transition } from "ferricstore";
+import { FerricStoreClient, JsonCodec, WorkflowClient, complete, transition } from "ferricstore";
 
-const flow = await FlowClient.fromUrl("ferric://127.0.0.1:6388", {
+const flow = await FerricStoreClient.fromUrl("ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
 });
 
@@ -95,7 +95,7 @@ FerricFlow does not replay TypeScript handler code. Workers claim a durable stat
 ## Low-Level Flow Commands
 
 ```ts
-const flow = await FlowClient.fromUrl("ferric://127.0.0.1:6388");
+const flow = await FerricStoreClient.fromUrl("ferric://127.0.0.1:6388");
 
 await flow.create("order-1", {
   type: "order",
@@ -128,7 +128,7 @@ for (const job of jobs) {
 The same client exposes typed helpers for FerricStore's Redis-compatible store commands:
 
 ```ts
-const client = await FlowClient.fromUrl("ferric://127.0.0.1:6388", {
+const client = await FerricStoreClient.fromUrl("ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
 });
 
@@ -158,7 +158,31 @@ Available store helpers:
 - `client.bloom`, `client.cuckoo`, `client.cms`, `client.topk`, `client.tdigest` — probabilistic data structures.
 - `client.json` — RedisJSON-compatible JSON commands.
 
-For connection-mode commands such as raw subscription flows or transactions, use `client.command(...)` directly so the RESP behavior stays explicit.
+For connection-mode commands such as raw subscription flows or transactions, use `client.command(...)` directly so protocol behavior stays explicit.
+
+## Auto-Batching
+
+The default client is latency-first: each SDK call sends its own native request.
+
+For high-throughput services that issue many independent calls concurrently, enable SDK auto-batching:
+
+```ts
+const client = await FerricStoreClient.fromUrl("ferric://127.0.0.1:6388", {
+  autoBatch: {
+    enabled: true,
+    maxCommands: 512,
+    maxDelayMs: 0
+  }
+});
+
+await Promise.all([
+  client.kv.set("a", "1"),
+  client.kv.set("b", "2"),
+  client.hash.hset("user:1", { email: "ada@example.com" })
+]);
+```
+
+Auto-batching groups eligible concurrent commands into native `PIPELINE` frames and resolves each original promise independently. Blocking/session commands such as `FLOW.CLAIM_DUE`, `AUTH`, `QUIT`, `SUBSCRIBE`, and client-control commands bypass auto-batching.
 
 ## Examples
 
@@ -176,7 +200,7 @@ Runnable examples live in the `examples/` directory:
 `RawCodec` is the default and works with `Buffer`, `Uint8Array`, and strings. Use `JsonCodec` for language-neutral structured payloads and results.
 
 ```ts
-const flow = await FlowClient.fromUrl("ferric://127.0.0.1:6388", {
+const flow = await FerricStoreClient.fromUrl("ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
 });
 ```
@@ -188,7 +212,7 @@ The SDK borrows a familiar TypeScript registration style from workflow libraries
 - handlers are normal application code;
 - workflow progress is stored as state transitions, not as a replayed execution stack;
 - current state, owner, lease token, fencing token, retry data, history, values, and next claimable state are workflow data;
-- the same Flow can be processed by services in different languages through RESP.
+- the same Flow can be processed by services in different languages through FerricStore's native protocol.
 
 See [docs/design.md](docs/design.md) for more detail.
 

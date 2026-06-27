@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { FlowClient, JsonCodec, QueueClient, fail, retry, transition } from "../src/index.js";
+import { FerricStoreClient, JsonCodec, QueueClient, fail, retry, transition } from "../src/index.js";
 import { FakeExecutor } from "./fake-executor.js";
 
 describe("Queue", () => {
   it("enqueues a durable queue item through FLOW.CREATE", async () => {
     const executor = new FakeExecutor();
-    const queue = new QueueClient(new FlowClient(executor, { codec: new JsonCodec() })).queue("email");
+    const queue = new QueueClient(new FerricStoreClient(executor, { codec: new JsonCodec() })).queue("email");
 
     await queue.enqueue("email-1", {
       idempotent: true,
@@ -42,7 +42,7 @@ describe("Queue", () => {
       Buffer.from("OK"),
       Buffer.from("OK")
     ]);
-    const queue = new QueueClient(new FlowClient(executor)).queue("email");
+    const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");
 
     const result = await queue.worker({ batchSize: 2, worker: "worker-1" }).runOnce((job) => {
       if (job.id === "email-1") {
@@ -56,9 +56,98 @@ describe("Queue", () => {
     expect(executor.calls.at(2)?.[0]).toBe("FLOW.FAIL");
   });
 
+  it("uses compact claims and batched completion when payload is not requested", async () => {
+    const lease1 = Buffer.from("lease-1");
+    const lease2 = Buffer.from("lease-2");
+    const executor = new FakeExecutor([
+      [
+        ["email-1", "tenant-a", lease1, 1],
+        ["email-2", "tenant-a", lease2, 2]
+      ],
+      Buffer.from("OK")
+    ]);
+    const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");
+
+    const result = await queue.worker({
+      batchSize: 2,
+      claimPayload: false,
+      worker: "worker-1"
+    }).runOnce(() => undefined);
+
+    expect(result).toEqual({ claimed: 2, completed: 2, failed: 0, retried: 0 });
+    expect(executor.calls[0]).toContain("RETURN");
+    expect(executor.calls[0]).toContain("JOBS_COMPACT");
+    expect(executor.calls[0]).toContain("NOPAYLOAD");
+    expect(executor.calls[1]).toEqual([
+      "FLOW.COMPLETE_MANY",
+      "tenant-a",
+      "NOW",
+      expect.any(Number),
+      "INDEPENDENT",
+      "true",
+      "RETURN",
+      "OK_ON_SUCCESS",
+      "ITEMS",
+      Buffer.from("email-1"),
+      lease1,
+      1,
+      Buffer.from("email-2"),
+      lease2,
+      2
+    ]);
+  });
+
+  it("runs queue batch handlers with one handler call and one completion batch", async () => {
+    const executor = new FakeExecutor([
+      [
+        ["email-1", "tenant-a", Buffer.from("lease-1"), 1],
+        ["email-2", "tenant-a", Buffer.from("lease-2"), 2]
+      ],
+      Buffer.from("OK")
+    ]);
+    const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");
+    const seen: string[][] = [];
+
+    const result = await queue.worker({
+      batchSize: 2,
+      claimPayload: false,
+      worker: "worker-1"
+    }).runBatchOnce((jobs) => {
+      seen.push(jobs.map((job) => job.id));
+    });
+
+    expect(seen).toEqual([["email-1", "email-2"]]);
+    expect(result).toEqual({ claimed: 2, completed: 2, failed: 0, retried: 0 });
+    expect(executor.calls).toHaveLength(2);
+    expect(executor.calls[1]?.[0]).toBe("FLOW.COMPLETE_MANY");
+  });
+
+  it("drains async queue completions with explicit flush", async () => {
+    const executor = new FakeExecutor([
+      [
+        ["email-1", "tenant-a", Buffer.from("lease-1"), 1],
+        ["email-2", "tenant-a", Buffer.from("lease-2"), 2]
+      ],
+      Buffer.from("OK")
+    ]);
+    const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");
+    const worker = queue.worker({
+      batchSize: 1,
+      claimPayload: false,
+      completeAsyncDepth: 2,
+      worker: "worker-1"
+    });
+
+    await expect(worker.runBatchOnce(() => undefined)).resolves.toMatchObject({
+      claimed: 2,
+      completed: 0
+    });
+    await expect(worker.flush()).resolves.toBe(2);
+  });
+
   it("rejects workflow transitions in queue handlers", async () => {
     const executor = new FakeExecutor([[flow("email-1", 1)]]);
-    const queue = new QueueClient(new FlowClient(executor)).queue("email");
+    const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");
 
     await expect(
       queue.worker({ exceptionPolicy: "raise", worker: "worker-1" }).runOnce(() => transition("next"))

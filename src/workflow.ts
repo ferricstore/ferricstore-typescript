@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { FlowClient } from "./client.js";
+import type { FerricStoreClient } from "./client.js";
 import type { CompleteOutcome, FailOutcome, Outcome, RetryOutcome, TransitionOutcome } from "./outcomes.js";
 import { complete, fail, isOutcome, retry } from "./outcomes.js";
 import {
@@ -55,9 +55,9 @@ export interface StateRegistration {
 }
 
 export class WorkflowClient {
-  readonly flow: FlowClient;
+  readonly flow: FerricStoreClient;
 
-  constructor(flow: FlowClient) {
+  constructor(flow: FerricStoreClient) {
     this.flow = flow;
   }
 
@@ -67,14 +67,14 @@ export class WorkflowClient {
 }
 
 export class Workflow {
-  readonly client: FlowClient;
+  readonly client: FerricStoreClient;
   readonly type: string;
   readonly initialState: string;
   readonly valueConfig: ValueConfig & { localCache: boolean };
   readonly defaultWorker: string;
   private readonly states = new Map<string, StateRegistration>();
 
-  constructor(client: FlowClient, options: WorkflowOptions) {
+  constructor(client: FerricStoreClient, options: WorkflowOptions) {
     this.client = client;
     this.type = options.type;
     this.initialState = options.initialState ?? "queued";
@@ -143,15 +143,15 @@ export class Workflow {
     });
   }
 
-  async signal(id: string, options: Parameters<FlowClient["signal"]>[1]): Promise<unknown> {
+  async signal(id: string, options: Parameters<FerricStoreClient["signal"]>[1]): Promise<unknown> {
     return await this.client.signal(id, options);
   }
 
-  async get(id: string, options: Parameters<FlowClient["get"]>[1] = {}): Promise<FlowRecord | undefined> {
+  async get(id: string, options: Parameters<FerricStoreClient["get"]>[1] = {}): Promise<FlowRecord | undefined> {
     return await this.client.get(id, options);
   }
 
-  async history(id: string, options: Parameters<FlowClient["history"]>[1] = {}): Promise<unknown[]> {
+  async history(id: string, options: Parameters<FerricStoreClient["history"]>[1] = {}): Promise<unknown[]> {
     return await this.client.history(id, options);
   }
 
@@ -182,7 +182,7 @@ export class WorkflowContext {
     this.flow = new WorkflowFlowCommands(this);
   }
 
-  get client(): FlowClient {
+  get client(): FerricStoreClient {
     return this.workflow.client;
   }
 
@@ -294,14 +294,14 @@ export class WorkflowFlowCommands {
     });
   }
 
-  async history(id = this.ctx.id, options: Parameters<FlowClient["history"]>[1] = {}): Promise<unknown[]> {
+  async history(id = this.ctx.id, options: Parameters<FerricStoreClient["history"]>[1] = {}): Promise<unknown[]> {
     return await this.ctx.client.history(id, {
       ...options,
       partitionKey: options.partitionKey ?? this.ctx.partitionKey
     });
   }
 
-  async create(id: string, options: Omit<Parameters<FlowClient["create"]>[1], "type"> & { type?: string } = {}): Promise<FlowRecord | Buffer | unknown> {
+  async create(id: string, options: Omit<Parameters<FerricStoreClient["create"]>[1], "type"> & { type?: string } = {}): Promise<FlowRecord | Buffer | unknown> {
     return await this.ctx.client.create(id, {
       ...options,
       partitionKey: options.partitionKey ?? this.ctx.partitionKey,
@@ -310,7 +310,7 @@ export class WorkflowFlowCommands {
     });
   }
 
-  async transition(toState: string, options: Partial<Omit<Parameters<FlowClient["transition"]>[1], "toState" | "fromState" | "leaseToken" | "fencingToken">> & { fromState?: string } = {}): Promise<FlowRecord | Buffer | unknown> {
+  async transition(toState: string, options: Partial<Omit<Parameters<FerricStoreClient["transition"]>[1], "toState" | "fromState" | "leaseToken" | "fencingToken">> & { fromState?: string } = {}): Promise<FlowRecord | Buffer | unknown> {
     return await this.ctx.client.transition(this.ctx.id, {
       ...options,
       fencingToken: this.ctx.fencingToken,
@@ -321,7 +321,7 @@ export class WorkflowFlowCommands {
     });
   }
 
-  async complete(options: Partial<Omit<Parameters<FlowClient["complete"]>[1], "leaseToken" | "fencingToken">> = {}): Promise<FlowRecord | Buffer | unknown> {
+  async complete(options: Partial<Omit<Parameters<FerricStoreClient["complete"]>[1], "leaseToken" | "fencingToken">> = {}): Promise<FlowRecord | Buffer | unknown> {
     return await this.ctx.client.complete(this.ctx.id, {
       ...options,
       fencingToken: this.ctx.fencingToken,
@@ -330,7 +330,7 @@ export class WorkflowFlowCommands {
     });
   }
 
-  async retry(options: Partial<Omit<Parameters<FlowClient["retry"]>[1], "leaseToken" | "fencingToken">> = {}): Promise<FlowRecord | Buffer | unknown> {
+  async retry(options: Partial<Omit<Parameters<FerricStoreClient["retry"]>[1], "leaseToken" | "fencingToken">> = {}): Promise<FlowRecord | Buffer | unknown> {
     return await this.ctx.client.retry(this.ctx.id, {
       ...options,
       fencingToken: this.ctx.fencingToken,
@@ -339,7 +339,7 @@ export class WorkflowFlowCommands {
     });
   }
 
-  async fail(options: Partial<Omit<Parameters<FlowClient["fail"]>[1], "leaseToken" | "fencingToken">> = {}): Promise<FlowRecord | Buffer | unknown> {
+  async fail(options: Partial<Omit<Parameters<FerricStoreClient["fail"]>[1], "leaseToken" | "fencingToken">> = {}): Promise<FlowRecord | Buffer | unknown> {
     return await this.ctx.client.fail(this.ctx.id, {
       ...options,
       fencingToken: this.ctx.fencingToken,
@@ -348,7 +348,7 @@ export class WorkflowFlowCommands {
     });
   }
 
-  async signal(signal: string, options: Omit<Parameters<FlowClient["signal"]>[1], "signal"> = {}): Promise<unknown> {
+  async signal(signal: string, options: Omit<Parameters<FerricStoreClient["signal"]>[1], "signal"> = {}): Promise<unknown> {
     return await this.ctx.client.signal(this.ctx.id, {
       ...options,
       partitionKey: options.partitionKey ?? this.ctx.partitionKey,
@@ -356,7 +356,7 @@ export class WorkflowFlowCommands {
     });
   }
 
-  async putValue(name: string, value: unknown, options: Parameters<FlowClient["valuePut"]>[1] = {}): Promise<unknown> {
+  async putValue(name: string, value: unknown, options: Parameters<FerricStoreClient["valuePut"]>[1] = {}): Promise<unknown> {
     return await this.ctx.client.valuePut(value, {
       ...options,
       name,
@@ -373,7 +373,7 @@ export class WorkflowFlowCommands {
     return await this.ctx.valueMany(names, options);
   }
 
-  async spawnChildren(children: ChildSpec[], options: Parameters<FlowClient["spawnChildren"]>[2] = {}): Promise<unknown> {
+  async spawnChildren(children: ChildSpec[], options: Parameters<FerricStoreClient["spawnChildren"]>[2] = {}): Promise<unknown> {
     return await this.ctx.client.spawnChildren(this.ctx.id, children, {
       ...options,
       fencingToken: options.fencingToken ?? this.ctx.fencingToken,
@@ -481,7 +481,7 @@ export class WorkflowWorker {
 }
 
 async function applyOutcome(
-  client: FlowClient,
+  client: FerricStoreClient,
   ctx: WorkflowContext,
   outcome: Outcome,
   returnRecord: boolean
@@ -503,7 +503,7 @@ async function applyOutcome(
 }
 
 async function applyTransition(
-  client: FlowClient,
+  client: FerricStoreClient,
   ctx: WorkflowContext,
   outcome: TransitionOutcome,
   returnRecord: boolean
@@ -526,7 +526,7 @@ async function applyTransition(
 }
 
 async function applyComplete(
-  client: FlowClient,
+  client: FerricStoreClient,
   ctx: WorkflowContext,
   outcome: CompleteOutcome,
   returnRecord: boolean
@@ -547,7 +547,7 @@ async function applyComplete(
 }
 
 async function applyRetry(
-  client: FlowClient,
+  client: FerricStoreClient,
   ctx: WorkflowContext,
   outcome: RetryOutcome,
   returnRecord: boolean
@@ -568,7 +568,7 @@ async function applyRetry(
 }
 
 async function applyFail(
-  client: FlowClient,
+  client: FerricStoreClient,
   ctx: WorkflowContext,
   outcome: FailOutcome,
   returnRecord: boolean

@@ -36,13 +36,16 @@ export interface WorkerConfig {
   partitionKeys?: string[];
   reclaimExpired?: boolean;
   reclaimRatio?: number;
+  claimPayload?: boolean;
   claimValues?: string[];
   valueMaxBytes?: number;
   blockMs?: number;
   idleSleepMs?: number;
   maxIdleSleepMs?: number;
   exceptionPolicy?: ExceptionPolicy;
+  completeAsyncDepth?: number;
   completeIndependent?: boolean;
+  claimDrainBatches?: number;
   signal?: AbortSignal;
   worker?: string;
 }
@@ -64,6 +67,15 @@ export interface CreateItem {
   valueRefs?: Record<string, string>;
 }
 
+export const CLAIMED_ITEM_WIRE: unique symbol = Symbol("ferricstore.claimedItemWire");
+
+export interface ClaimedItemWire {
+  id: Buffer;
+  partitionKey?: Buffer | null;
+  leaseToken: Buffer;
+  fencingToken: number;
+}
+
 export interface ClaimedItem<TPayload = unknown> {
   id: string;
   leaseToken: Buffer;
@@ -74,6 +86,7 @@ export interface ClaimedItem<TPayload = unknown> {
   runState?: string;
   payload?: TPayload | null;
   attributes?: Record<string, unknown>;
+  [CLAIMED_ITEM_WIRE]?: ClaimedItemWire;
 }
 
 export interface FencedItem {
@@ -146,17 +159,26 @@ export function claimedItemFromResp<TPayload = unknown>(
 ): ClaimedItem<TPayload> {
   if (Array.isArray(value)) {
     const tuple = value as unknown[];
+    const id = bytes(tuple[0]);
+    const partition = tuple[1] == null ? null : bytes(tuple[1]);
+    const leaseToken = bytes(tuple[2]);
+    const fencingToken = integer(tuple[3]);
     const attrs = tuple[5] ?? (isPlainObject(tuple[4]) ? tuple[4] : undefined);
-    return {
-      id: text(tuple[0]),
-      partitionKey: optionalString(tuple[1]),
-      leaseToken: bytes(tuple[2]),
-      fencingToken: integer(tuple[3]),
+    const item: ClaimedItem<TPayload> = {
+      id: text(id),
+      partitionKey: optionalString(partition),
+      leaseToken,
+      fencingToken,
       runState: optionalString(tuple[4]),
       attributes: isPlainObject(attrs) ? attrs : undefined,
       type: "",
       state: "running"
     };
+    Object.defineProperty(item, CLAIMED_ITEM_WIRE, {
+      enumerable: false,
+      value: { id, partitionKey: partition, leaseToken, fencingToken }
+    });
+    return item;
   }
 
   const payload = field(value, "payload");

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { FlowClient, JsonCodec } from "../src/index.js";
+import { FerricStoreClient, JsonCodec } from "../src/index.js";
 import { FakeExecutor } from "./fake-executor.js";
 
 describe("typed data stores", () => {
-  it("exposes typed store helpers from FlowClient", () => {
-    const client = new FlowClient(new FakeExecutor());
+  it("exposes typed store helpers from FerricStoreClient", () => {
+    const client = new FerricStoreClient(new FakeExecutor());
 
     expect(client.kv).toBeDefined();
     expect(client.bloom).toBeDefined();
@@ -25,7 +25,7 @@ describe("typed data stores", () => {
 
   it("builds string KV commands with SET options and codec encoding", async () => {
     const executor = new FakeExecutor([Buffer.from("OK"), Buffer.from('{"ok":true}')]);
-    const client = new FlowClient(executor, { codec: new JsonCodec() });
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
 
     await client.kv.set("k1", { ok: true }, { get: true, nx: true, px: 1000 });
     await expect(client.kv.get("k1")).resolves.toEqual({ ok: true });
@@ -44,7 +44,7 @@ describe("typed data stores", () => {
 
   it("builds hash commands from object entries", async () => {
     const executor = new FakeExecutor([2, [Buffer.from('{"id":1}'), null]]);
-    const client = new FlowClient(executor, { codec: new JsonCodec() });
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
 
     await expect(client.hash.hset("user:1", { email: "a@example.com", profile: { id: 1 } })).resolves.toBe(2);
     await expect(client.hash.hmget("user:1", ["profile", "missing"])).resolves.toEqual([{ id: 1 }, null]);
@@ -62,7 +62,7 @@ describe("typed data stores", () => {
 
   it("builds list and set commands with encoded members", async () => {
     const executor = new FakeExecutor([2, 1]);
-    const client = new FlowClient(executor, { codec: new JsonCodec() });
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
 
     await expect(client.lists.lpush("jobs", { id: 1 }, { id: 2 })).resolves.toBe(2);
     await expect(client.sets.sadd("seen", { id: 1 })).resolves.toBe(1);
@@ -78,7 +78,7 @@ describe("typed data stores", () => {
 
   it("builds sorted set and stream commands", async () => {
     const executor = new FakeExecutor([1, "0-1"]);
-    const client = new FlowClient(executor, { codec: new JsonCodec() });
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
 
     await client.zset.zadd("rank", [{ member: { id: "a" }, score: 10 }], { ch: true, nx: true });
     await client.stream.xadd("events", "*", { type: "created", payload: { id: 1 } });
@@ -104,7 +104,7 @@ describe("typed data stores", () => {
 
   it("builds bitmap, hyperloglog, and geo commands", async () => {
     const executor = new FakeExecutor([0, 1, 1]);
-    const client = new FlowClient(executor, { codec: new JsonCodec() });
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
 
     await client.bitmap.bitcount("bits", 0, 10, "BIT");
     await client.hyperloglog.pfadd("hll", { id: 1 });
@@ -125,7 +125,7 @@ describe("typed data stores", () => {
 
   it("builds object and blocking list command variants", async () => {
     const executor = new FakeExecutor(["raw", ["list", "value"]]);
-    const client = new FlowClient(executor);
+    const client = new FerricStoreClient(executor);
 
     await expect(client.kv.objectEncoding("k1")).resolves.toBe("raw");
     await client.lists.blpop(["q1", "q2"], 5);
@@ -136,7 +136,7 @@ describe("typed data stores", () => {
 
   it("builds probabilistic data-structure commands", async () => {
     const executor = new FakeExecutor([1, 1, [2], [null], Buffer.from("OK")]);
-    const client = new FlowClient(executor, { codec: new JsonCodec() });
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
 
     await client.bloom.add("bf:users", { id: 1 });
     await client.cuckoo.addnx("cf:users", { id: 1 });
@@ -153,7 +153,7 @@ describe("typed data stores", () => {
 
   it("builds JSON commands and parses JSON results", async () => {
     const executor = new FakeExecutor([Buffer.from("OK"), Buffer.from('{"id":1}')]);
-    const client = new FlowClient(executor);
+    const client = new FerricStoreClient(executor);
 
     await client.json.set("json:user:1", "$", { id: 1 }, { nx: true });
     await expect(client.json.get("json:user:1")).resolves.toEqual({ id: 1 });

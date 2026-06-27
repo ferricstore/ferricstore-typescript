@@ -13,9 +13,9 @@ return fail({ error: "bad input" });
 
 ## What The SDK Does
 
-- Builds typed `FLOW.*` commands over RESP.
-- Uses node-redis with RESP3 and Buffer blob-string mapping.
-- Provides a low-level `FlowClient` for direct command control.
+- Builds typed `FLOW.*` commands over FerricStore's native protocol.
+- Uses the SDK native adapter with Buffer-safe binary values.
+- Provides a low-level `FerricStoreClient` for direct command control.
 - Provides `QueueClient` for durable queue-shaped workloads.
 - Provides `WorkflowClient` for explicit state-machine workflows.
 - Keeps payload serialization in an SDK codec, not in FerricStore.
@@ -52,7 +52,7 @@ The SDK keeps the hot path thin:
 
 - no local replay sandbox;
 - no generated wrappers around handler code;
-- RESP commands use existing node-redis pooling and auto-pipelining behavior;
+- Native commands use FerricStore's multiplexed `ferric://` protocol;
 - batch APIs such as `enqueueMany`, `completeMany`, `retryMany`, and `failMany` are exposed directly;
 - value refs let workers hydrate only the named values they need.
 

@@ -12,20 +12,20 @@ Legend:
 
 | Python SDK Surface | TypeScript Status | Notes |
 | --- | --- | --- |
-| `FlowClient.from_url` | Done | `FlowClient.fromUrl` over node-redis RESP3. |
-| `command` | Done | Raw RESP escape hatch. |
+| `FerricStoreClient.from_url` | Done | `FerricStoreClient.fromUrl` over FerricStore native protocol. |
+| `command` | Done | Raw native command escape hatch. |
 | `pipeline` | Done | Takes command arrays. |
 | `close` | Done | Closes owned adapter. |
 | `RawCodec` / `JsonCodec` / custom codec | Done | `Codec` interface. |
 | Typed server error mapping | Done | Common FerricStore errors mapped. |
 | Backpressure on producer writes | Done | Retry on overload for create/enqueue paths. |
-| `autobatch` | Partial | Not implemented as a separate TS helper yet. Use `enqueueMany` / batch mutation helpers. |
+| `autobatch` | Done | `autoBatch` client option groups eligible concurrent commands into native `PIPELINE` frames. |
 
-## Server/RESP Commands
+## Server Commands
 
 | Command Family | TypeScript Status | Notes |
 | --- | --- | --- |
-| `PING`, `ECHO`, `INFO` | Done | `ping`, `echo`, `serverInfo`. `FlowClient.info(type)` remains the `FLOW.INFO` helper. |
+| `PING`, `ECHO`, `INFO` | Done | `ping`, `echo`, `serverInfo`. `FerricStoreClient.info(type)` remains the `FLOW.INFO` helper. |
 | `CONFIG` | Done | `configGet`, `configSet`, `configGetLocal`, `configResetStat`, `configRewrite`. |
 | `SLOWLOG`, `COMMAND`, `CLIENT` introspection | Done | Thin typed helpers for supported subcommands. |
 | `PUBLISH`, `PUBSUB` introspection | Done | Subscription-mode commands stay raw because they change connection behavior. |
