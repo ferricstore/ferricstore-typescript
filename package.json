@@ -1,5 +1,5 @@
 {
-  "name": "ferricstore",
+  "name": "@ferricstore/ferricstore",
   "version": "0.1.0",
   "description": "TypeScript SDK for FerricStore and FerricFlow",
   "type": "module",

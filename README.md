@@ -11,7 +11,7 @@ FLOW.CREATE -> FLOW.CLAIM_DUE -> handler -> FLOW.TRANSITION / COMPLETE / FAIL / 
 ## Install
 
 ```bash
-npm install ferricstore
+npm install @ferricstore/ferricstore
 ```
 
 Requires Node.js 24 or newer. The SDK is ESM-only and tested with Node 24 and 26.
@@ -28,7 +28,7 @@ docker run -p 6388:6388 \
 ## Durable Queue
 
 ```ts
-import { FerricStoreClient, JsonCodec, QueueClient } from "ferricstore";
+import { FerricStoreClient, JsonCodec, QueueClient } from "@ferricstore/ferricstore";
 
 const flow = await FerricStoreClient.fromUrl("ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
@@ -50,7 +50,7 @@ await emails.worker({ batchSize: 100, worker: "email-worker-1" }).run(async (job
 ## Explicit Workflow
 
 ```ts
-import { FerricStoreClient, JsonCodec, WorkflowClient, complete, transition } from "ferricstore";
+import { FerricStoreClient, JsonCodec, WorkflowClient, complete, transition } from "@ferricstore/ferricstore";
 
 const flow = await FerricStoreClient.fromUrl("ferric://127.0.0.1:6388", {
   codec: new JsonCodec()
