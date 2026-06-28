@@ -86,7 +86,7 @@ async function startFragmentingServer(options: { chunkOnlyPing?: boolean } = {})
 
 function handleSocket(socket: Socket, options: { chunkOnlyPing?: boolean }): void {
   let input: Buffer = Buffer.alloc(0);
-  socket.on("data", (chunk) => {
+  socket.on("data", (chunk: Buffer) => {
     input = Buffer.concat([input, chunk]);
     for (;;) {
       const request = readRequest(input);
