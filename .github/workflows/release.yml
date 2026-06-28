@@ -19,13 +19,21 @@ jobs:
         with:
           node-version: 24.x
           cache: npm
-          registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm run check
       - run: npm run pack:dry-run
-      - run: npm publish --provenance --access public
+      - name: Configure npm token fallback
+        run: |
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+            echo "Using NPM_TOKEN secret for npm publish."
+          else
+            echo "::notice::NPM_TOKEN is not configured. Attempting npm trusted publishing via GitHub OIDC."
+            echo "::notice::OIDC publish requires the package to already exist on npm with this workflow configured as a trusted publisher."
+          fi
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish --provenance --access public
       - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
