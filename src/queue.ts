@@ -109,7 +109,7 @@ export class QueueWorker {
 
   constructor(queue: Queue, options: WorkerConfig) {
     this.queue = queue;
-    this.options = options;
+    this.options = normalizeWorkerConfig(options);
   }
 
   async runOnce(handler: QueueHandler): Promise<QueueWorkerResult> {
@@ -490,4 +490,17 @@ function isBatchableComplete(outcome: CompleteOutcome | RetryOutcome | FailOutco
     outcome.dropValues === undefined &&
     outcome.overrideValues === undefined
   );
+}
+
+function normalizeWorkerConfig(options: WorkerConfig): WorkerConfig {
+  if (options.profile !== "throughput") {
+    return options;
+  }
+  return {
+    batchSize: 500,
+    claimPayload: false,
+    completeAsyncDepth: 8,
+    completeIndependent: true,
+    ...options
+  };
 }

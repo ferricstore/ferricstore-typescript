@@ -103,5 +103,6 @@ export type {
   RateLimitResult,
   RetryPolicy,
   ValueConfig,
-  WorkerConfig
+  WorkerConfig,
+  WorkerProfile
 } from "./types.js";

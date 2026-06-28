@@ -184,6 +184,16 @@ await Promise.all([
 
 Auto-batching groups eligible concurrent commands into native `PIPELINE` frames and resolves each original promise independently. Blocking/session commands such as `FLOW.CLAIM_DUE`, `AUTH`, `QUIT`, `SUBSCRIBE`, and client-control commands bypass auto-batching.
 
+Queue workers are latency-first by default. For high-throughput queue workers, use one profile flag:
+
+```ts
+await emails.worker({ profile: "throughput" }).run(async (job) => {
+  await sendEmail(job.id);
+});
+```
+
+The throughput profile uses compact claims, larger claim batches, and async completion batching. Explicit worker options still override the profile.
+
 ## Examples
 
 Runnable examples live in the `examples/` directory:

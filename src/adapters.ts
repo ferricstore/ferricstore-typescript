@@ -80,7 +80,7 @@ export class NativeAdapter implements CommandExecutor {
     const adapter = new NativeAdapter(
       socket,
       options.timeoutMs ?? 30_000,
-      options.protocolLanes ?? 64,
+      options.protocolLanes ?? 8,
       options.maxChunkBytes ?? 64 * 1024 * 1024
     );
     await adapter.startup(options.clientName);

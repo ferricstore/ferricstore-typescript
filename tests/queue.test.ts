@@ -97,6 +97,46 @@ describe("Queue", () => {
     ]);
   });
 
+  it("expands throughput profile to compact claims and async completion defaults", async () => {
+    const executor = new FakeExecutor([
+      [["email-1", "tenant-a", Buffer.from("lease-1"), 1]],
+      Buffer.from("OK")
+    ]);
+    const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");
+    const worker = queue.worker({ profile: "throughput", worker: "worker-1" });
+
+    await expect(worker.runBatchOnce(() => undefined)).resolves.toMatchObject({
+      claimed: 1,
+      completed: 0
+    });
+    await expect(worker.flush()).resolves.toBe(1);
+
+    expect(executor.calls[0]).toContain("LIMIT");
+    expect(executor.calls[0]).toContain(500);
+    expect(executor.calls[0]).toContain("RETURN");
+    expect(executor.calls[0]).toContain("JOBS_COMPACT");
+    expect(executor.calls[1]?.[0]).toBe("FLOW.COMPLETE_MANY");
+  });
+
+  it("lets explicit worker options override throughput profile defaults", async () => {
+    const executor = new FakeExecutor([
+      [["email-1", "tenant-a", Buffer.from("lease-1"), 1]],
+      Buffer.from("OK")
+    ]);
+    const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");
+
+    await queue.worker({
+      batchSize: 2,
+      claimPayload: false,
+      completeAsyncDepth: 0,
+      profile: "throughput",
+      worker: "worker-1"
+    }).runBatchOnce(() => undefined);
+
+    expect(executor.calls[0]).toContain("LIMIT");
+    expect(executor.calls[0]).toContain(2);
+  });
+
   it("runs queue batch handlers with one handler call and one completion batch", async () => {
     const executor = new FakeExecutor([
       [

@@ -27,6 +27,18 @@ test("NativeAdapter handles fragmented response frames", async () => {
   }
 });
 
+test("NativeAdapter defaults to latency-first eight protocol lanes", async () => {
+  const server = await startFragmentingServer();
+  const address = server.address() as AddressInfo;
+  const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`);
+
+  try {
+    expect((adapter as unknown as { protocolLanes: number }).protocolLanes).toBe(8);
+  } finally {
+    await adapter.close();
+  }
+});
+
 test("NativeAdapter cleans chunk buffers when a chunked request times out", async () => {
   const server = await startFragmentingServer({ chunkOnlyPing: true });
   const address = server.address() as AddressInfo;

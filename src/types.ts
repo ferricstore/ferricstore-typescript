@@ -3,6 +3,7 @@ import { bytes, field, integer, normalizeRefMeta, optionalString, text, toString
 
 export type ExceptionPolicy = "retry" | "fail" | "raise";
 export type BackoffKind = "fixed" | "linear" | "exponential";
+export type WorkerProfile = "latency" | "throughput";
 
 export interface RetryPolicy {
   maxRetries?: number;
@@ -26,6 +27,7 @@ export interface ValueConfig {
 }
 
 export interface WorkerConfig {
+  profile?: WorkerProfile;
   workers?: number;
   concurrency?: number;
   batchSize?: number;

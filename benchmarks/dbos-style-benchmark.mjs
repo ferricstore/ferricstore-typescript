@@ -19,6 +19,8 @@ const claimDrainBatches = Number(arg(args, 'claim-drain-batches', '1'));
 const claimBlockMs = has(args, 'claim-block-ms') ? Number(arg(args, 'claim-block-ms', '0')) : undefined;
 const workerStartBacklog = Number(arg(args, 'worker-start-backlog', '0'));
 const completeAsyncDepth = Number(arg(args, 'complete-async-depth', '1'));
+const hasCompleteAsyncDepth = has(args, 'complete-async-depth');
+const workerProfile = has(args, 'worker-profile') ? arg(args, 'worker-profile', 'latency') : undefined;
 const clientCount = Number(arg(args, 'clients', '2'));
 const protocolLanes = Number(arg(args, 'protocol-lanes', '64'));
 const autoBatchMaxCommands = Number(arg(args, 'auto-batch-max-commands', String(Math.max(createBatchSize, claimBatchSize))));
@@ -68,7 +70,8 @@ try {
     claim_drain_batches: claimDrainBatches,
     claim_block_ms: claimBlockMs ?? null,
     worker_start_backlog: workerStartBacklog,
-    complete_async_depth: completeAsyncDepth,
+    complete_async_depth: workerProfile === 'throughput' && !hasCompleteAsyncDepth ? 8 : completeAsyncDepth,
+    worker_profile: workerProfile ?? null,
     clients: clientCount, protocol_lanes: protocolLanes,
     track_duplicates: trackDuplicates,
     wake_credits: wakeCoordinator != null,
@@ -211,9 +214,9 @@ async function queueWorker(workerIndex, client, partitionKeys) {
   const worker = queue.worker({
     batchSize: claimBatchSize,
     blockMs: claimBlockMs,
-    claimPayload: false,
-    completeAsyncDepth,
-    completeIndependent: true,
+    ...(workerProfile == null
+      ? { claimPayload: false, completeAsyncDepth, completeIndependent: true }
+      : { profile: workerProfile, ...(hasCompleteAsyncDepth ? { completeAsyncDepth } : {}) }),
     leaseMs: 30000,
     ...(wakeCoordinator == null ? (partitionKeys.length === 1 ? { partitionKey: partitionKeys[0] } : { partitionKeys }) : {}),
     worker: `ts-worker-${workerIndex}`
