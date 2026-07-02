@@ -210,6 +210,9 @@ export function buildProtocolCommand(args: readonly CommandArgument[]): Protocol
   if (command === "DEL") {
     return { opcode: OPCODES.del, payload: { keys: commandArgs } };
   }
+  if (command.startsWith("FLOW.") && hasFlowCommandOnlyOption(commandArgs)) {
+    return commandExec(args);
+  }
   if (command === "FLOW.CREATE") {
     return flowCreatePayload(commandArgs) ?? commandExec(args);
   }
@@ -597,6 +600,16 @@ function writeOptionalBinary(out: Buffer, offset: number, value: Buffer | null):
     return offset + 4;
   }
   return writeBinary(out, offset, value);
+}
+
+function hasFlowCommandOnlyOption(args: readonly CommandArgument[]): boolean {
+  return args.some((arg) => {
+    if (typeof arg !== "string" && !Buffer.isBuffer(arg)) {
+      return false;
+    }
+    const token = asText(arg).toUpperCase();
+    return token === "STATE_META" || token === "INDEXED_STATE_META";
+  });
 }
 
 function flowCreatePayload(args: readonly CommandArgument[]): ProtocolCommand | undefined {

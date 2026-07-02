@@ -102,6 +102,8 @@ export type {
   KeyInfo,
   RateLimitResult,
   RetryPolicy,
+  StateMeta,
+  StateMetaValue,
   ValueConfig,
   WorkerConfig,
   WorkerProfile

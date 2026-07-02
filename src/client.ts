@@ -54,7 +54,8 @@ import {
   type FlowRecord,
   type KeyInfo,
   type RateLimitResult,
-  type RetryPolicy
+  type RetryPolicy,
+  type StateMeta
 } from "./types.js";
 
 export interface AutoBatchOptions {
@@ -85,6 +86,7 @@ export interface CreateOptions {
   retentionTtlMs?: number;
   values?: Record<string, unknown>;
   valueRefs?: Record<string, string>;
+  stateMeta?: StateMeta;
   returnRecord?: boolean;
 }
 
@@ -125,6 +127,7 @@ export interface MutateOptions {
   valueRefs?: Record<string, string>;
   dropValues?: string[];
   overrideValues?: string[];
+  stateMeta?: StateMeta;
   nowMs?: number;
   returnRecord?: boolean;
 }
@@ -163,6 +166,7 @@ export interface CancelOptions {
   reason?: unknown;
   ttlMs?: number;
   nowMs?: number;
+  stateMeta?: StateMeta;
   returnRecord?: boolean;
 }
 
@@ -569,6 +573,7 @@ export class FerricStoreClient {
     append(args, "PRIORITY", options.priority);
     appendBool(args, "IDEMPOTENT", options.idempotent);
     append(args, "RETENTION_TTL_MS", options.retentionTtlMs);
+    appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
 
     const response = await this.executeProducerWrite(args);
@@ -637,6 +642,7 @@ export class FerricStoreClient {
     }
 
     const currentNowMs = options.nowMs ?? nowMs();
+    const stateMeta = sharedCreateManyStateMeta(items, options.stateMeta);
     const mixed = partitionKey == null && items.some((item) => item.partitionKey != null);
     const auto = partitionKey == null && !mixed;
     const wirePartition = mixed ? "MIXED" : auto ? "AUTO" : partitionKey;
@@ -655,6 +661,7 @@ export class FerricStoreClient {
     appendBool(args, "IDEMPOTENT", options.idempotent);
     appendBool(args, "INDEPENDENT", options.independent);
     append(args, "RETENTION_TTL_MS", options.retentionTtlMs);
+    appendStateMeta(args, stateMeta);
 
     const extendedItems = items.some((item) => item.values != null || item.valueRefs != null) || (mixed && items.some((item) => item.partitionKey == null));
     if (extendedItems) {
@@ -877,6 +884,7 @@ export class FerricStoreClient {
     appendEncoded(args, "PAYLOAD", this.codec, options.payload);
     append(args, "RUN_AT", options.runAtMs ?? currentNowMs);
     append(args, "PRIORITY", options.priority);
+    appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
     const response = await this.command(...args);
     if (options.returnRecord === true) {
@@ -899,6 +907,7 @@ export class FerricStoreClient {
     appendEncoded(args, "RESULT", this.codec, options.result);
     appendEncoded(args, "PAYLOAD", this.codec, options.payload);
     append(args, "TTL", options.ttlMs);
+    appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
     const response = await this.command(...args);
     if (options.returnRecord === true) {
@@ -914,6 +923,7 @@ export class FerricStoreClient {
     valueRefs?: Record<string, string>;
     dropValues?: string[];
     overrideValues?: string[];
+    stateMeta?: StateMeta;
     ttlMs?: number;
     nowMs?: number;
     independent?: boolean;
@@ -931,6 +941,7 @@ export class FerricStoreClient {
     if (options.returnOkOnSuccess === true) {
       args.push("RETURN", "OK_ON_SUCCESS");
     }
+    appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
     appendClaimedItems(args, partitionKey, items, "FLOW.COMPLETE_MANY");
     return this.recordsOrResponse(await this.command(...args));
@@ -958,6 +969,7 @@ export class FerricStoreClient {
     valueRefs?: Record<string, string>;
     dropValues?: string[];
     overrideValues?: string[];
+    stateMeta?: StateMeta;
     runAtMs?: number;
     nowMs?: number;
     priority?: number;
@@ -972,6 +984,7 @@ export class FerricStoreClient {
     append(args, "PRIORITY", options.priority);
     append(args, "NOW", options.nowMs ?? nowMs());
     appendBool(args, "INDEPENDENT", options.independent);
+    appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
     appendFencedItems(args, partitionKey, options.items, "FLOW.TRANSITION_MANY", true);
     return this.recordsOrResponse(await this.command(...args));
@@ -991,6 +1004,7 @@ export class FerricStoreClient {
     appendEncoded(args, "ERROR", this.codec, options.error);
     appendEncoded(args, "PAYLOAD", this.codec, options.payload);
     append(args, "RUN_AT", options.runAtMs);
+    appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
     const response = await this.command(...args);
     if (options.returnRecord === true) {
@@ -1006,6 +1020,7 @@ export class FerricStoreClient {
     valueRefs?: Record<string, string>;
     dropValues?: string[];
     overrideValues?: string[];
+    stateMeta?: StateMeta;
     runAtMs?: number;
     nowMs?: number;
     independent?: boolean;
@@ -1019,6 +1034,7 @@ export class FerricStoreClient {
     append(args, "RUN_AT", options.runAtMs);
     append(args, "NOW", options.nowMs ?? nowMs());
     appendBool(args, "INDEPENDENT", options.independent);
+    appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
     appendClaimedItems(args, partitionKey, items, "FLOW.RETRY_MANY");
     return this.recordsOrResponse(await this.command(...args));
@@ -1038,6 +1054,7 @@ export class FerricStoreClient {
     appendEncoded(args, "ERROR", this.codec, options.error);
     appendEncoded(args, "PAYLOAD", this.codec, options.payload);
     append(args, "TTL", options.ttlMs);
+    appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
     const response = await this.command(...args);
     if (options.returnRecord === true) {
@@ -1053,6 +1070,7 @@ export class FerricStoreClient {
     valueRefs?: Record<string, string>;
     dropValues?: string[];
     overrideValues?: string[];
+    stateMeta?: StateMeta;
     ttlMs?: number;
     nowMs?: number;
     independent?: boolean;
@@ -1066,6 +1084,7 @@ export class FerricStoreClient {
     append(args, "TTL", options.ttlMs);
     append(args, "NOW", options.nowMs ?? nowMs());
     appendBool(args, "INDEPENDENT", options.independent);
+    appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
     appendClaimedItems(args, partitionKey, items, "FLOW.FAIL_MANY");
     return this.recordsOrResponse(await this.command(...args));
@@ -1077,6 +1096,7 @@ export class FerricStoreClient {
     append(args, "PARTITION", options.partitionKey);
     appendEncoded(args, "REASON", this.codec, options.reason);
     append(args, "TTL", options.ttlMs);
+    appendStateMeta(args, options.stateMeta);
     const response = await this.command(...args);
     if (options.returnRecord === true) {
       return await this.recordOrGet(response, id, options.partitionKey);
@@ -1086,6 +1106,7 @@ export class FerricStoreClient {
 
   async cancelMany(partitionKey: string | undefined, items: FencedItem[], options: {
     reason?: unknown;
+    stateMeta?: StateMeta;
     ttlMs?: number;
     nowMs?: number;
     independent?: boolean;
@@ -1098,7 +1119,8 @@ export class FerricStoreClient {
     append(args, "TTL", options.ttlMs);
     append(args, "NOW", options.nowMs ?? nowMs());
     appendBool(args, "INDEPENDENT", options.independent);
-    appendFencedItems(args, partitionKey, items, "FLOW.CANCEL_MANY", true);
+    appendStateMeta(args, options.stateMeta);
+    appendFencedItems(args, partitionKey, items, "FLOW.CANCEL_MANY", false);
     return this.recordsOrResponse(await this.command(...args));
   }
 
@@ -1236,8 +1258,14 @@ export class FerricStoreClient {
     return await this.command(...args);
   }
 
-  async installPolicy(type: string, options: { state?: string; retry?: RetryPolicy; retentionTtlMs?: number } = {}): Promise<unknown> {
+  async installPolicy(type: string, options: {
+    state?: string;
+    retry?: RetryPolicy;
+    retentionTtlMs?: number;
+    indexedStateMeta?: string;
+  } = {}): Promise<unknown> {
     const args: CommandArgument[] = ["FLOW.POLICY.SET", type];
+    append(args, "INDEXED_STATE_META", options.indexedStateMeta);
     append(args, "STATE", options.state);
     if (options.retry != null) {
       appendRetryPolicy(args, options.retry);
@@ -1635,6 +1663,46 @@ function appendReadOptions(args: CommandArgument[], options: ReadOptions): void 
   appendBool(args, "TERMINAL_ONLY", options.terminalOnly);
   appendBool(args, "INCLUDE_COLD", options.includeCold);
   appendBool(args, "CONSISTENT_PROJECTION", options.consistentProjection);
+}
+
+function appendStateMeta(args: CommandArgument[], stateMeta: StateMeta | undefined): void {
+  for (const [name, value] of Object.entries(stateMeta ?? {})) {
+    args.push("STATE_META", name, value);
+  }
+}
+
+function sharedCreateManyStateMeta(items: readonly CreateItem[], stateMeta: StateMeta | undefined): StateMeta | undefined {
+  const itemMetas = items.map((item) => item.stateMeta).filter((meta): meta is StateMeta => meta != null);
+  if (itemMetas.length === 0) {
+    return stateMeta;
+  }
+
+  const first = itemMetas[0];
+  if (first == null) {
+    return stateMeta;
+  }
+  if (itemMetas.some((meta) => !stateMetaEquals(meta, first))) {
+    throw new Error("createMany supports shared stateMeta only; use stateMeta or separate create calls for per-item stateMeta");
+  }
+  if (stateMeta != null && !stateMetaEquals(stateMeta, first)) {
+    throw new Error("createMany item stateMeta must match shared stateMeta when both are provided");
+  }
+  return first;
+}
+
+function stateMetaEquals(left: StateMeta, right: StateMeta): boolean {
+  const leftEntries = Object.entries(left);
+  if (leftEntries.length !== Object.keys(right).length) {
+    return false;
+  }
+  return leftEntries.every(([key, value]) => stateMetaValueEquals(value, right[key]));
+}
+
+function stateMetaValueEquals(left: StateMeta[keyof StateMeta], right: StateMeta[keyof StateMeta] | undefined): boolean {
+  if (Buffer.isBuffer(left) || Buffer.isBuffer(right)) {
+    return Buffer.isBuffer(left) && Buffer.isBuffer(right) && left.equals(right);
+  }
+  return Object.is(left, right);
 }
 
 function appendNamedCounts(

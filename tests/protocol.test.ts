@@ -194,6 +194,62 @@ describe("native protocol codec", () => {
     expect(command.opcode).toBe(OPCODES.commandExec);
   });
 
+  it("keeps state metadata flow commands on generic execution", () => {
+    const create = buildProtocolCommand([
+      "FLOW.CREATE",
+      "flow-1",
+      "TYPE",
+      "email",
+      "STATE",
+      "queued",
+      "NOW",
+      1000,
+      "STATE_META",
+      "version",
+      "1"
+    ]);
+    const complete = buildProtocolCommand([
+      "FLOW.COMPLETE",
+      "flow-1",
+      Buffer.from("lease-token"),
+      "FENCING",
+      7,
+      "NOW",
+      2000,
+      "STATE_META",
+      "version",
+      "2"
+    ]);
+    const policy = buildProtocolCommand([
+      "FLOW.POLICY.SET",
+      "email",
+      "INDEXED_STATE_META",
+      "version"
+    ]);
+
+    expect(create).toMatchObject({
+      opcode: OPCODES.commandExec,
+      payload: {
+        args: ["flow-1", "TYPE", "email", "STATE", "queued", "NOW", 1000, "STATE_META", "version", "1"],
+        command: "FLOW.CREATE"
+      }
+    });
+    expect(complete).toMatchObject({
+      opcode: OPCODES.commandExec,
+      payload: {
+        args: ["flow-1", Buffer.from("lease-token"), "FENCING", 7, "NOW", 2000, "STATE_META", "version", "2"],
+        command: "FLOW.COMPLETE"
+      }
+    });
+    expect(policy).toMatchObject({
+      opcode: OPCODES.commandExec,
+      payload: {
+        args: ["email", "INDEXED_STATE_META", "version"],
+        command: "FLOW.POLICY.SET"
+      }
+    });
+  });
+
   it("builds direct native FLOW.COMPLETE for simple claimed completions", () => {
     const lease = Buffer.from("lease-token");
     const command = buildProtocolCommand([

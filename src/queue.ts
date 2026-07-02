@@ -7,6 +7,7 @@ import {
   type CreateItem,
   type ExceptionPolicy,
   type FlowRecord,
+  type StateMeta,
   type WorkerConfig
 } from "./types.js";
 import { sleep } from "./internal.js";
@@ -70,6 +71,7 @@ export class Queue {
     retentionTtlMs?: number;
     values?: Record<string, unknown>;
     valueRefs?: Record<string, string>;
+    stateMeta?: StateMeta;
     returnRecord?: boolean;
   } = {}): Promise<FlowRecord | Buffer | unknown> {
     return await this.client.enqueue(id, {
@@ -89,6 +91,7 @@ export class Queue {
     retentionTtlMs?: number;
     values?: Record<string, unknown>;
     valueRefs?: Record<string, string>;
+    stateMeta?: StateMeta;
   } = {}): Promise<unknown[] | unknown> {
     return await this.client.enqueueMany(items, {
       ...options,
@@ -435,6 +438,7 @@ export class QueueWorker {
         partitionKey: job.partitionKey,
         payload: outcome.payload,
         runAtMs: outcome.runAtMs,
+        stateMeta: outcome.stateMeta,
         valueRefs: outcome.valueRefs,
         values: outcome.values
       });
@@ -447,6 +451,7 @@ export class QueueWorker {
         leaseToken: job.leaseToken,
         partitionKey: job.partitionKey,
         payload: outcome.payload,
+        stateMeta: outcome.stateMeta,
         ttlMs: outcome.ttlMs,
         valueRefs: outcome.valueRefs,
         values: outcome.values
@@ -459,6 +464,7 @@ export class QueueWorker {
       partitionKey: job.partitionKey,
       payload: outcome.payload,
       result: outcome.result,
+      stateMeta: outcome.stateMeta,
       ttlMs: outcome.ttlMs,
       valueRefs: outcome.valueRefs,
       values: outcome.values
@@ -488,7 +494,8 @@ function isBatchableComplete(outcome: CompleteOutcome | RetryOutcome | FailOutco
     outcome.values === undefined &&
     outcome.valueRefs === undefined &&
     outcome.dropValues === undefined &&
-    outcome.overrideValues === undefined
+    outcome.overrideValues === undefined &&
+    outcome.stateMeta === undefined
   );
 }
 

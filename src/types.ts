@@ -61,12 +61,16 @@ export interface ChildSpec {
   valueRefs?: Record<string, string>;
 }
 
+export type StateMetaValue = string | number | boolean | Buffer;
+export type StateMeta = Record<string, StateMetaValue>;
+
 export interface CreateItem {
   id: string;
   payload?: unknown;
   partitionKey?: string;
   values?: Record<string, unknown>;
   valueRefs?: Record<string, string>;
+  stateMeta?: StateMeta;
 }
 
 export const CLAIMED_ITEM_WIRE: unique symbol = Symbol("ferricstore.claimedItemWire");
@@ -142,6 +146,8 @@ export interface FlowRecord<TPayload = unknown> {
   valueOmitted?: Record<string, unknown>;
   valueMissing?: Record<string, unknown>;
   attributes?: Record<string, unknown>;
+  stateMeta?: Record<string, unknown>;
+  indexedStateMeta?: string;
   raw?: unknown;
 }
 
@@ -223,6 +229,8 @@ export function flowRecordFromResp<TPayload = unknown>(
     valueOmitted: toStringKeyMap(field(value, "value_omitted")),
     valueMissing: toStringKeyMap(field(value, "value_missing")),
     attributes: plainObjectField(value, "attributes"),
+    stateMeta: toStringKeyMap(field(value, "state_meta")),
+    indexedStateMeta: optionalString(field(value, "indexed_state_meta")),
     raw: value
   };
 }

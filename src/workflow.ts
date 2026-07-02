@@ -9,6 +9,7 @@ import {
   type ExceptionPolicy,
   type FlowRecord,
   type RetryPolicy,
+  type StateMeta,
   type ValueConfig,
   type WorkerConfig
 } from "./types.js";
@@ -115,6 +116,7 @@ export class Workflow {
     retentionTtlMs?: number;
     values?: Record<string, unknown>;
     valueRefs?: Record<string, string>;
+    stateMeta?: StateMeta;
     returnRecord?: boolean;
   } = {}): Promise<FlowRecord | Buffer | unknown> {
     return await this.client.create(id, {
@@ -124,7 +126,14 @@ export class Workflow {
     });
   }
 
-  async startMany(items: { id: string; payload?: unknown; partitionKey?: string; values?: Record<string, unknown>; valueRefs?: Record<string, string> }[], options: {
+  async startMany(items: {
+    id: string;
+    payload?: unknown;
+    partitionKey?: string;
+    values?: Record<string, unknown>;
+    valueRefs?: Record<string, string>;
+    stateMeta?: StateMeta;
+  }[], options: {
     state?: string;
     partitionKey?: string;
     runAtMs?: number;
@@ -135,6 +144,7 @@ export class Workflow {
     retentionTtlMs?: number;
     values?: Record<string, unknown>;
     valueRefs?: Record<string, string>;
+    stateMeta?: StateMeta;
   } = {}): Promise<unknown[] | unknown> {
     return await this.client.createMany(options.partitionKey, items, {
       ...options,
@@ -212,6 +222,14 @@ export class WorkflowContext {
 
   get values(): Record<string, unknown> {
     return "values" in this.job && this.job.values != null ? this.job.values : {};
+  }
+
+  get stateMeta(): Record<string, unknown> {
+    return "stateMeta" in this.job && this.job.stateMeta != null ? this.job.stateMeta : {};
+  }
+
+  get indexedStateMeta(): string | undefined {
+    return "indexedStateMeta" in this.job ? this.job.indexedStateMeta : undefined;
   }
 
   get valueRefs(): Record<string, unknown> {
@@ -519,6 +537,7 @@ async function applyTransition(
     priority: outcome.priority,
     returnRecord,
     runAtMs: outcome.runAtMs,
+    stateMeta: outcome.stateMeta,
     toState: outcome.toState,
     valueRefs: outcome.valueRefs,
     values: outcome.values
@@ -540,6 +559,7 @@ async function applyComplete(
     payload: outcome.payload,
     result: outcome.result,
     returnRecord,
+    stateMeta: outcome.stateMeta,
     ttlMs: outcome.ttlMs,
     valueRefs: outcome.valueRefs,
     values: outcome.values
@@ -562,6 +582,7 @@ async function applyRetry(
     payload: outcome.payload,
     returnRecord,
     runAtMs: outcome.runAtMs,
+    stateMeta: outcome.stateMeta,
     valueRefs: outcome.valueRefs,
     values: outcome.values
   });
@@ -582,6 +603,7 @@ async function applyFail(
     partitionKey: ctx.partitionKey,
     payload: outcome.payload,
     returnRecord,
+    stateMeta: outcome.stateMeta,
     ttlMs: outcome.ttlMs,
     valueRefs: outcome.valueRefs,
     values: outcome.values

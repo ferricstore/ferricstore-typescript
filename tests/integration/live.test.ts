@@ -9,7 +9,8 @@ import {
   complete,
   transition,
   type ClaimedItem,
-  type FencedItem
+  type FencedItem,
+  type FlowRecord
 } from "../../src/index.js";
 
 function url(): string {
@@ -32,6 +33,19 @@ function text(value: unknown): string {
 
 function ok(value: unknown): boolean {
   return value === true || value === 1 || value === "OK" || (Buffer.isBuffer(value) && value.toString("utf8") === "OK");
+}
+
+async function expectSupportedOrKnownServerError<T>(
+  promise: Promise<T>,
+  pattern = /unsupported|unknown|not supported|not enabled|invalid|password|cluster|no config file|shard index/i
+): Promise<T | undefined> {
+  try {
+    return await promise;
+  } catch (error) {
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(pattern);
+    return undefined;
+  }
 }
 
 function field(source: unknown, name: string): unknown {
@@ -63,6 +77,10 @@ function fenced(job: ClaimedItem): FencedItem {
     leaseToken: job.leaseToken,
     partitionKey: job.partitionKey
   };
+}
+
+function expectStateMeta(record: FlowRecord | undefined, state: string, expected: Record<string, unknown>): void {
+  expect(record?.stateMeta).toMatchObject({ [state]: expected });
 }
 
 async function deletePrefixedKeys(flow: FerricStoreClient, prefix: string): Promise<void> {
@@ -125,6 +143,33 @@ async function createAndClaim(
   return { id, job, partitionKey };
 }
 
+async function createManyAndClaim(
+  flow: FerricStoreClient,
+  type: string,
+  runId: string,
+  name: string,
+  state: string,
+  now: number
+): Promise<{ readonly ids: readonly string[]; readonly jobs: ClaimedItem[]; readonly partitionKey: string }> {
+  const ids = [`ts-sdk:${name}:${runId}:a`, `ts-sdk:${name}:${runId}:b`];
+  const partitionKey = `ts-sdk:${name}:${runId}:partition`;
+  await flow.createMany(partitionKey, ids.map((id) => ({ id })), {
+    nowMs: now,
+    runAtMs: now,
+    state,
+    type
+  });
+  const jobs = await flow.claimJobs(type, {
+    limit: ids.length,
+    nowMs: now,
+    partitionKey,
+    state,
+    worker: `ts-sdk-${name}-worker`
+  });
+  expect(jobs).toHaveLength(ids.length);
+  return { ids, jobs, partitionKey };
+}
+
 describe("FerricStore integration", () => {
   it("uses KV helpers and a full Flow claim/complete cycle", async () => {
     const flow = await FerricStoreClient.fromUrl(url(), {
@@ -185,6 +230,207 @@ describe("FerricStore integration", () => {
     }
   });
 
+  it("stores state metadata and policy indexed state metadata", async () => {
+    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const runId = suffix();
+    const type = `ts-sdk-state-meta-${runId}`;
+    const id = `ts-sdk:state-meta:${runId}`;
+    const partitionKey = `${id}:partition`;
+    const now = Date.now();
+
+    try {
+      await expect(flow.installPolicy(type, { indexedStateMeta: "version" })).resolves.toBeDefined();
+      const policy = await flow.policyGet(type);
+      expect(text(field(policy, "indexed_state_meta"))).toBe("version");
+
+      await expect(flow.create(id, {
+        idempotent: true,
+        nowMs: now,
+        partitionKey,
+        runAtMs: now,
+        state: "accept",
+        stateMeta: { owner: "risk", version: "1" },
+        type
+      })).resolves.toBeDefined();
+
+      await expect(flow.get(id, { partitionKey })).resolves.toMatchObject({
+        indexedStateMeta: "version",
+        stateMeta: {
+          accept: { owner: "risk", version: "1" }
+        }
+      });
+
+      const job = await claimOne(flow, type, "accept", partitionKey, { nowMs: now + 1 });
+      await expect(flow.complete(id, {
+        fencingToken: job.fencingToken,
+        leaseToken: job.leaseToken,
+        nowMs: now + 2,
+        partitionKey,
+        stateMeta: { version: "3" }
+      })).resolves.toBeDefined();
+
+      await expect(flow.get(id, { partitionKey })).resolves.toMatchObject({
+        stateMeta: {
+          accept: { owner: "risk", version: "1" },
+          completed: { version: "3" }
+        }
+      });
+    } finally {
+      await flow.close();
+    }
+  });
+
+  it("stores state metadata for every flow mutation command", async () => {
+    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const runId = suffix();
+    const type = `ts-sdk-state-meta-all-${runId}`;
+    const now = Date.now();
+
+    try {
+      await flow.installPolicy(type, { indexedStateMeta: "version" });
+
+      const createId = `ts-sdk:state-meta-create:${runId}`;
+      const createPartition = `${createId}:partition`;
+      await flow.create(createId, {
+        nowMs: now,
+        partitionKey: createPartition,
+        runAtMs: now,
+        state: "created",
+        stateMeta: { version: "1" },
+        type
+      });
+      expectStateMeta(await flow.get(createId, { partitionKey: createPartition }), "created", { version: "1" });
+
+      const transitionJob = await createAndClaim(flow, type, runId, "state-meta-transition", { nowMs: now, state: "transition-start" });
+      await flow.transition(transitionJob.id, {
+        fencingToken: transitionJob.job.fencingToken,
+        fromState: transitionJob.job.state,
+        leaseToken: transitionJob.job.leaseToken,
+        nowMs: now + 1,
+        partitionKey: transitionJob.partitionKey,
+        stateMeta: { version: "2" },
+        toState: "transition-next"
+      });
+      expectStateMeta(await flow.get(transitionJob.id, { partitionKey: transitionJob.partitionKey }), "transition-next", { version: "2" });
+
+      const completeJob = await createAndClaim(flow, type, runId, "state-meta-complete", { nowMs: now, state: "complete-start" });
+      await flow.complete(completeJob.id, {
+        fencingToken: completeJob.job.fencingToken,
+        leaseToken: completeJob.job.leaseToken,
+        nowMs: now + 2,
+        partitionKey: completeJob.partitionKey,
+        stateMeta: { version: "3" }
+      });
+      expectStateMeta(await flow.get(completeJob.id, { partitionKey: completeJob.partitionKey }), "completed", { version: "3" });
+
+      const retryJob = await createAndClaim(flow, type, runId, "state-meta-retry", { nowMs: now, state: "retry-start" });
+      await flow.retry(retryJob.id, {
+        fencingToken: retryJob.job.fencingToken,
+        leaseToken: retryJob.job.leaseToken,
+        nowMs: now + 3,
+        partitionKey: retryJob.partitionKey,
+        runAtMs: now + 3,
+        stateMeta: { version: "4" }
+      });
+      expectStateMeta(await flow.get(retryJob.id, { partitionKey: retryJob.partitionKey }), "retry-start", { version: "4" });
+
+      const failJob = await createAndClaim(flow, type, runId, "state-meta-fail", { nowMs: now, state: "fail-start" });
+      await flow.fail(failJob.id, {
+        fencingToken: failJob.job.fencingToken,
+        leaseToken: failJob.job.leaseToken,
+        nowMs: now + 4,
+        partitionKey: failJob.partitionKey,
+        stateMeta: { version: "5" }
+      });
+      expectStateMeta(await flow.get(failJob.id, { partitionKey: failJob.partitionKey }), "failed", { version: "5" });
+
+      const cancelJob = await createAndClaim(flow, type, runId, "state-meta-cancel", { nowMs: now, state: "cancel-start" });
+      await flow.cancel(cancelJob.id, {
+        fencingToken: cancelJob.job.fencingToken,
+        leaseToken: cancelJob.job.leaseToken,
+        nowMs: now + 5,
+        partitionKey: cancelJob.partitionKey,
+        stateMeta: { version: "6" }
+      });
+      expectStateMeta(await flow.get(cancelJob.id, { partitionKey: cancelJob.partitionKey }), "cancelled", { version: "6" });
+
+      const createManyIds = [`ts-sdk:state-meta-create-many:${runId}:a`, `ts-sdk:state-meta-create-many:${runId}:b`];
+      const createManyPartition = `ts-sdk:state-meta-create-many:${runId}:partition`;
+      await flow.createMany(createManyPartition, createManyIds.map((id) => ({ id })), {
+        nowMs: now,
+        runAtMs: now,
+        state: "create-many",
+        stateMeta: { version: "7" },
+        type
+      });
+      for (const id of createManyIds) {
+        expectStateMeta(await flow.get(id, { partitionKey: createManyPartition }), "create-many", { version: "7" });
+      }
+
+      const transitionMany = await createManyAndClaim(flow, type, runId, "state-meta-transition-many", "transition-many-start", now);
+      const transitionManyState = transitionMany.jobs[0]?.state;
+      if (transitionManyState == null) {
+        throw new Error("expected transitionMany state");
+      }
+      await flow.transitionMany(transitionMany.partitionKey, {
+        fromState: transitionManyState,
+        items: transitionMany.jobs.map(fenced),
+        nowMs: now + 6,
+        stateMeta: { version: "8" },
+        toState: "transition-many-next"
+      });
+      for (const id of transitionMany.ids) {
+        expectStateMeta(await flow.get(id, { partitionKey: transitionMany.partitionKey }), "transition-many-next", { version: "8" });
+      }
+
+      const completeMany = await createManyAndClaim(flow, type, runId, "state-meta-complete-many", "complete-many-start", now);
+      await flow.completeMany(completeMany.partitionKey, completeMany.jobs, {
+        nowMs: now + 7,
+        stateMeta: { version: "9" }
+      });
+      for (const id of completeMany.ids) {
+        expectStateMeta(await flow.get(id, { partitionKey: completeMany.partitionKey }), "completed", { version: "9" });
+      }
+
+      const retryMany = await createManyAndClaim(flow, type, runId, "state-meta-retry-many", "retry-many-start", now);
+      await flow.retryMany(retryMany.partitionKey, retryMany.jobs, {
+        nowMs: now + 8,
+        runAtMs: now + 8,
+        stateMeta: { version: "10" }
+      });
+      for (const id of retryMany.ids) {
+        expectStateMeta(await flow.get(id, { partitionKey: retryMany.partitionKey }), "retry-many-start", { version: "10" });
+      }
+
+      const failMany = await createManyAndClaim(flow, type, runId, "state-meta-fail-many", "fail-many-start", now);
+      await flow.failMany(failMany.partitionKey, failMany.jobs, {
+        nowMs: now + 9,
+        stateMeta: { version: "11" }
+      });
+      for (const id of failMany.ids) {
+        expectStateMeta(await flow.get(id, { partitionKey: failMany.partitionKey }), "failed", { version: "11" });
+      }
+
+      const cancelManyIds = [`ts-sdk:state-meta-cancel-many:${runId}:a`, `ts-sdk:state-meta-cancel-many:${runId}:b`];
+      const cancelManyPartition = `ts-sdk:state-meta-cancel-many:${runId}:partition`;
+      await flow.createMany(cancelManyPartition, cancelManyIds.map((id) => ({ id })), {
+        nowMs: now,
+        runAtMs: now,
+        state: "cancel-many-start",
+        type
+      });
+      await flow.cancelMany(cancelManyPartition, cancelManyIds.map((id) => ({ fencingToken: 0, id, partitionKey: cancelManyPartition })), {
+        nowMs: now + 10,
+        stateMeta: { version: "12" }
+      });
+      for (const id of cancelManyIds) {
+        expectStateMeta(await flow.get(id, { partitionKey: cancelManyPartition }), "cancelled", { version: "12" });
+      }
+    } finally {
+      await flow.close();
+    }
+  }, 20_000);
+
   it("covers native helpers and read-only diagnostics", async () => {
     const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
     const runId = suffix();
@@ -230,6 +476,15 @@ describe("FerricStore integration", () => {
       await expect(flow.fetchOrComputeError(errorKey, "boom")).resolves.toBe(true);
 
       await expect(flow.serverInfo("server")).resolves.toContain("#");
+      await expectSupportedOrKnownServerError(flow.configGet("*"));
+      await expectSupportedOrKnownServerError(flow.configGetLocal("protected-mode"));
+      await expectSupportedOrKnownServerError(flow.configSet(`ts-sdk-${runId}-unknown`, "1"));
+      await expectSupportedOrKnownServerError(flow.configResetStat());
+      await expectSupportedOrKnownServerError(flow.configRewrite());
+      await expectSupportedOrKnownServerError(flow.slowlogGet(10));
+      await expectSupportedOrKnownServerError(flow.slowlogLen());
+      await expectSupportedOrKnownServerError(flow.slowlogReset());
+      await expectSupportedOrKnownServerError(flow.commandMetadata());
       await expect(flow.commandCount()).resolves.toBeGreaterThan(0);
       await expect(flow.commandList()).resolves.not.toHaveLength(0);
       await expect(flow.commandInfo("get")).resolves.toHaveLength(1);
@@ -245,22 +500,37 @@ describe("FerricStore integration", () => {
       await expect(flow.clientGetRedir()).resolves.toBeGreaterThanOrEqual(0);
       await expect(flow.clientCaching("NO")).rejects.toThrow(/not supported/i);
       await expect(flow.clientTracking("OFF")).rejects.toThrow(/not supported/i);
+      await expectSupportedOrKnownServerError(flow.save());
+      await expectSupportedOrKnownServerError(flow.bgsave());
       await expect(flow.lastsave()).resolves.toBeGreaterThanOrEqual(0);
+      await expectSupportedOrKnownServerError(flow.lolwut());
       await expect(flow.moduleList()).resolves.toEqual([]);
       await expect(flow.publish(`${prefix}channel`, "hello")).resolves.toBeGreaterThanOrEqual(0);
       await expect(flow.pubsubChannels()).resolves.toBeDefined();
       await expect(flow.pubsubNumSub(`${prefix}channel`)).resolves.toBeDefined();
       await expect(flow.pubsubNumPat()).resolves.toBeGreaterThanOrEqual(0);
+      await expectSupportedOrKnownServerError(flow.aclSetUser(`ts-sdk-${runId}`, ["off"]));
+      await expectSupportedOrKnownServerError(flow.aclGetUser("default"));
+      await expectSupportedOrKnownServerError(flow.aclList());
       await expect(flow.aclWhoami()).rejects.toThrow(/unsupported command|unknown ACL subcommand/i);
+      await expectSupportedOrKnownServerError(flow.aclSave());
+      await expectSupportedOrKnownServerError(flow.aclLoad());
+      await expectSupportedOrKnownServerError(flow.aclDelUser(`ts-sdk-${runId}`));
+      await expectSupportedOrKnownServerError(flow.auth("bad-password"));
       await expect(flow.clusterHealth()).resolves.toBeTypeOf("object");
       await expect(flow.clusterStats()).resolves.toBeTypeOf("object");
       await expect(flow.clusterKeyslot(key)).resolves.toBeGreaterThanOrEqual(0);
       await expect(flow.clusterSlots()).resolves.toBeDefined();
       await expect(flow.clusterStatus()).resolves.toBeTypeOf("object");
       await expect(flow.clusterRole()).resolves.toBeDefined();
+      await expectSupportedOrKnownServerError(flow.clusterJoin("invalid-node"));
+      await expectSupportedOrKnownServerError(flow.clusterFailover(9_999, "invalid-node"));
+      await expectSupportedOrKnownServerError(flow.clusterPromote("invalid-node"));
+      await expectSupportedOrKnownServerError(flow.clusterDemote("invalid-node"));
       await expect(flow.ferricstoreConfig("GET", "*")).resolves.toBeDefined();
       await expect(flow.ferricstoreMetrics()).resolves.toBeTypeOf("object");
       await expect(flow.ferricstoreHotness()).resolves.toBeTypeOf("object");
+      await expect(flow.ferricstoreBlobgc()).resolves.toBeDefined();
       await expect(flow.ferricstoreDoctor("CHECK", "SCOPE", "BITCASK")).resolves.toBeDefined();
     } finally {
       await deletePrefixedKeys(flow, prefix);
@@ -463,7 +733,42 @@ describe("FerricStore integration", () => {
     }
   }, 30_000);
 
-  it("covers native probabilistic helpers except JSON", async () => {
+  it("covers JSON helper commands when the server supports JSON", async () => {
+    const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
+    const runId = suffix();
+    const key = `ts-sdk:json:${runId}`;
+
+    try {
+      const created = await expectSupportedOrKnownServerError(flow.json.set(key, "$", {
+        count: 1,
+        flag: true,
+        items: [1, 2],
+        name: "abc",
+        obj: { a: 1 }
+      }));
+      if (created !== true) {
+        return;
+      }
+
+      await expect(flow.json.get(key)).resolves.toBeDefined();
+      await expect(flow.json.numIncrBy(key, "$.count", 2)).resolves.toBeDefined();
+      await expect(flow.json.type(key, "$.name")).resolves.toBeDefined();
+      await expect(flow.json.strlen(key, "$.name")).resolves.toBeDefined();
+      await expect(flow.json.objKeys(key, "$.obj")).resolves.toBeInstanceOf(Array);
+      await expect(flow.json.objLen(key, "$.obj")).resolves.toBeGreaterThanOrEqual(0);
+      await expect(flow.json.arrAppend(key, "$.items", 3)).resolves.toBeGreaterThanOrEqual(0);
+      await expect(flow.json.arrLen(key, "$.items")).resolves.toBeGreaterThanOrEqual(0);
+      await expect(flow.json.toggle(key, "$.flag")).resolves.toBeDefined();
+      await expect(flow.json.clear(key, "$.obj")).resolves.toBeGreaterThanOrEqual(0);
+      await expect(flow.json.mget([key], "$.count")).resolves.toHaveLength(1);
+      await expect(flow.json.del(key)).resolves.toBeGreaterThanOrEqual(0);
+    } finally {
+      await flow.kv.del(key);
+      await flow.close();
+    }
+  });
+
+  it("covers native probabilistic helpers", async () => {
     const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
     const runId = suffix();
     const prefix = `ts-sdk:prob:${runId}:`;
@@ -545,6 +850,7 @@ describe("FerricStore integration", () => {
       if (valueRef == null) {
         throw new Error("FLOW.VALUE.PUT did not return a ref");
       }
+      await expectSupportedOrKnownServerError(flow.valueMGet([text(valueRef)]));
 
       const signalId = `ts-sdk:signal:${runId}`;
       const signalPartition = `${signalId}:partition`;
@@ -582,6 +888,9 @@ describe("FerricStore integration", () => {
         worker: "ts-sdk-batch-worker"
       });
       expect(batchJobs).toHaveLength(2);
+      await expect(flow.completeJobs(batchJobs, { nowMs: now + 1 })).resolves.toBeDefined();
+      const completedBatchRecords = await Promise.all(batchJobs.map((job) => flow.get(job.id, { partitionKey: batchPartition })));
+      expect(completedBatchRecords.map((record) => record?.state).sort()).toEqual(["completed", "completed"]);
 
       const transitionJob = await createAndClaim(flow, type, runId, "transition");
       await expect(flow.extendLease(transitionJob.id, {
@@ -838,6 +1147,59 @@ describe("FerricStore integration", () => {
       });
       expect(queueResult).toEqual({ claimed: 1, completed: 1, failed: 0, retried: 0 });
 
+      const queueManyPartition = `ts-sdk:queue-many:${runId}:partition`;
+      await queue.enqueueMany([
+        { id: `ts-sdk:queue-many:${runId}:a`, payload: { n: 1 } },
+        { id: `ts-sdk:queue-many:${runId}:b`, payload: { n: 2 } }
+      ], {
+        nowMs: now,
+        partitionKey: queueManyPartition,
+        runAtMs: now
+      });
+      const batchResult = await queue.worker({
+        batchSize: 2,
+        nowMs: now + 2,
+        partitionKey: queueManyPartition,
+        worker: "ts-sdk-queue-batch-worker"
+      }).runBatchOnce((jobs) => {
+        expect(jobs).toHaveLength(2);
+      });
+      expect(batchResult).toEqual({ claimed: 2, completed: 2, failed: 0, retried: 0 });
+
+      const queuePartitionA = `ts-sdk:queue-partition:${runId}:a`;
+      const queuePartitionB = `ts-sdk:queue-partition:${runId}:b`;
+      await queue.enqueueMany([
+        { id: `ts-sdk:queue-partition:${runId}:a`, partitionKey: queuePartitionA },
+        { id: `ts-sdk:queue-partition:${runId}:b`, partitionKey: queuePartitionB }
+      ], {
+        nowMs: now,
+        runAtMs: now
+      });
+      const partitionBatchResult = await queue.worker({
+        batchSize: 2,
+        nowMs: now + 3,
+        worker: "ts-sdk-queue-partition-worker"
+      }).runBatchOnceForPartitionKeys((jobs) => {
+        expect(jobs.map((job) => job.partitionKey).sort()).toEqual([queuePartitionA, queuePartitionB].sort());
+      }, [queuePartitionA, queuePartitionB], { claimCredit: 2 });
+      expect(partitionBatchResult).toEqual({ claimed: 2, completed: 2, failed: 0, retried: 0 });
+
+      const queueAsyncPartition = `ts-sdk:queue-async:${runId}:partition`;
+      await queue.enqueue(`ts-sdk:queue-async:${runId}`, {
+        nowMs: now,
+        partitionKey: queueAsyncPartition,
+        runAtMs: now
+      });
+      const asyncWorker = queue.worker({
+        batchSize: 1,
+        completeAsyncDepth: 1,
+        nowMs: now + 4,
+        partitionKey: queueAsyncPartition,
+        worker: "ts-sdk-queue-async-worker"
+      });
+      await expect(asyncWorker.runOnce(() => undefined)).resolves.toMatchObject({ claimed: 1, completed: 0 });
+      await expect(asyncWorker.flush()).resolves.toBe(1);
+
       const workflowType = `ts-sdk-workflow-${runId}`;
       const workflow = new WorkflowClient(flow).workflow({
         initialState: "received",
@@ -845,8 +1207,31 @@ describe("FerricStore integration", () => {
         worker: "ts-sdk-workflow-worker"
       });
       workflow
-        .state("received", () => transition("validated", { payload: { validated: true }, runAtMs: now + 1 }))
+        .state("received", async (ctx) => {
+          await expect(ctx.value("missing", "fallback")).resolves.toBe("fallback");
+          await expect(ctx.valueMany(["missing"])).resolves.toHaveProperty("missing", undefined);
+          await expectSupportedOrKnownServerError(
+            ctx.flow.putValue("handler", { stored: true }, { ttlMs: 60_000 }),
+            /syntax|unsupported|unknown|not supported/i
+          );
+          await expect(ctx.flow.value("missing", "fallback")).resolves.toBe("fallback");
+          await expect(ctx.flow.values(["missing"])).resolves.toHaveProperty("missing", undefined);
+          return transition("validated", { payload: { validated: true }, runAtMs: now + 1 });
+        })
         .state("validated", (ctx) => complete({ result: { id: ctx.id, done: true } }));
+      expect(workflow.stateNames()).toEqual(["received", "validated"]);
+      expect(workflow.stateRegistration("received")).toMatchObject({ name: "received" });
+
+      const workflowManyPartition = `ts-sdk:workflow-many:${runId}:partition`;
+      const workflowManyIds = [`ts-sdk:workflow-many:${runId}:a`, `ts-sdk:workflow-many:${runId}:b`];
+      await workflow.startMany(workflowManyIds.map((id) => ({ id })), {
+        nowMs: now,
+        partitionKey: workflowManyPartition,
+        runAtMs: now
+      });
+      for (const id of workflowManyIds) {
+        await expect(workflow.get(id, { partitionKey: workflowManyPartition })).resolves.toMatchObject({ state: "received" });
+      }
 
       const workflowId = `ts-sdk:workflow:${runId}`;
       const workflowPartition = `${workflowId}:partition`;
@@ -866,6 +1251,7 @@ describe("FerricStore integration", () => {
         applied: 1
       });
       await expect(workflow.get(workflowId, { partitionKey: workflowPartition })).resolves.toMatchObject({ state: "completed" });
+      await expect(workflow.history(workflowId, { count: 5, partitionKey: workflowPartition })).resolves.toBeDefined();
     } finally {
       await flow.close();
     }

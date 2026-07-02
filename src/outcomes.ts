@@ -1,3 +1,5 @@
+import type { StateMeta } from "./types.js";
+
 export type Outcome = TransitionOutcome | CompleteOutcome | RetryOutcome | FailOutcome;
 
 export interface NamedValueMutation {
@@ -5,6 +7,7 @@ export interface NamedValueMutation {
   valueRefs?: Record<string, string>;
   dropValues?: string[];
   overrideValues?: string[];
+  stateMeta?: StateMeta;
 }
 
 export interface TransitionOutcome extends NamedValueMutation {

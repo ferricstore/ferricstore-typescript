@@ -99,6 +99,209 @@ describe("FerricStoreClient", () => {
     ]);
   });
 
+  it("builds flow mutation commands with state metadata", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor);
+    const lease = Buffer.from("lease");
+    const claimed = [{ id: "flow-1", leaseToken: lease, fencingToken: 7, partitionKey: "tenant-a", type: "order", state: "queued" }];
+    const fenced = [{ id: "flow-1", leaseToken: lease, fencingToken: 7, partitionKey: "tenant-a" }];
+
+    const expectStateMeta = (value: string): void => {
+      const call = executor.calls.at(-1);
+      expect(call).toBeDefined();
+      const index = call?.indexOf("STATE_META") ?? -1;
+      expect(call?.slice(index, index + 3)).toEqual(["STATE_META", "version", value]);
+    };
+
+    await client.create("flow-1", { nowMs: 100, stateMeta: { version: "1" }, type: "order" });
+    expectStateMeta("1");
+
+    await client.transition("flow-1", {
+      fencingToken: 7,
+      fromState: "queued",
+      leaseToken: lease,
+      nowMs: 101,
+      stateMeta: { version: "2" },
+      toState: "charged"
+    });
+    expectStateMeta("2");
+
+    await client.complete("flow-1", {
+      fencingToken: 7,
+      leaseToken: lease,
+      stateMeta: { version: "3" }
+    });
+    expectStateMeta("3");
+
+    await client.retry("flow-1", {
+      fencingToken: 7,
+      leaseToken: lease,
+      stateMeta: { version: "4" }
+    });
+    expectStateMeta("4");
+
+    await client.fail("flow-1", {
+      fencingToken: 7,
+      leaseToken: lease,
+      stateMeta: { version: "5" }
+    });
+    expectStateMeta("5");
+
+    await client.cancel("flow-1", {
+      fencingToken: 7,
+      leaseToken: lease,
+      stateMeta: { version: "6" }
+    });
+    expectStateMeta("6");
+
+    await client.completeMany("tenant-a", claimed, { stateMeta: { version: "7" } });
+    expectStateMeta("7");
+
+    await client.transitionMany("tenant-a", {
+      fromState: "queued",
+      items: fenced,
+      stateMeta: { version: "8" },
+      toState: "charged"
+    });
+    expectStateMeta("8");
+
+    await client.retryMany("tenant-a", claimed, { stateMeta: { version: "9" } });
+    expectStateMeta("9");
+
+    await client.failMany("tenant-a", claimed, { stateMeta: { version: "10" } });
+    expectStateMeta("10");
+
+    await client.cancelMany("tenant-a", fenced, { stateMeta: { version: "11" } });
+    expectStateMeta("11");
+  });
+
+  it("builds cancelMany without lease tokens", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor);
+    const lease = Buffer.from("lease");
+
+    await client.cancelMany("tenant-a", [
+      { id: "flow-1", leaseToken: lease, fencingToken: 7, partitionKey: "tenant-a" }
+    ], { nowMs: 100 });
+    expect(executor.calls[0]).toEqual([
+      "FLOW.CANCEL_MANY",
+      "tenant-a",
+      "NOW",
+      100,
+      "ITEMS",
+      "flow-1",
+      7
+    ]);
+
+    await client.cancelMany(undefined, [
+      { id: "flow-2", leaseToken: lease, fencingToken: 8, partitionKey: "tenant-b" }
+    ], { nowMs: 101 });
+    expect(executor.calls[1]).toEqual([
+      "FLOW.CANCEL_MANY",
+      "MIXED",
+      "NOW",
+      101,
+      "ITEMS",
+      "flow-2",
+      "tenant-b",
+      8
+    ]);
+  });
+
+  it("builds createMany with shared state metadata", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor);
+
+    await client.createMany("tenant-a", [
+      { id: "flow-1", payload: "one" },
+      { id: "flow-2", payload: "two" }
+    ], {
+      nowMs: 100,
+      state: "queued",
+      stateMeta: { owner: "risk", version: "1" },
+      type: "order"
+    });
+
+    expect(executor.calls[0]).toEqual([
+      "FLOW.CREATE_MANY",
+      "tenant-a",
+      "TYPE",
+      "order",
+      "STATE",
+      "queued",
+      "NOW",
+      100,
+      "RUN_AT",
+      100,
+      "STATE_META",
+      "owner",
+      "risk",
+      "STATE_META",
+      "version",
+      "1",
+      "ITEMS",
+      "flow-1",
+      Buffer.from("one"),
+      "flow-2",
+      Buffer.from("two")
+    ]);
+  });
+
+  it("reuses identical createMany item state metadata and rejects mixed state metadata", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor);
+
+    await client.createMany("tenant-a", [
+      { id: "flow-1", stateMeta: { version: "1" } },
+      { id: "flow-2", stateMeta: { version: "1" } }
+    ], {
+      nowMs: 100,
+      type: "order"
+    });
+
+    const call = executor.calls[0];
+    const index = call?.indexOf("STATE_META") ?? -1;
+    expect(call?.slice(index, index + 3)).toEqual(["STATE_META", "version", "1"]);
+
+    await expect(client.createMany("tenant-a", [
+      { id: "flow-3", stateMeta: { version: "1" } },
+      { id: "flow-4", stateMeta: { version: "2" } }
+    ], {
+      nowMs: 100,
+      type: "order"
+    })).rejects.toThrow("shared stateMeta");
+  });
+
+  it("builds policy indexing and decodes state metadata fields", async () => {
+    const executor = new FakeExecutor([
+      Buffer.from("OK"),
+      new Map<unknown, unknown>([
+        ["id", "flow-1"],
+        ["type", "order"],
+        ["state", "completed"],
+        ["partition_key", "tenant-a"],
+        ["version", 3],
+        ["state_meta", new Map<unknown, unknown>([
+          ["accept", new Map<unknown, unknown>([["version", "1"]])],
+          ["completed", new Map<unknown, unknown>([["version", "3"]])]
+        ])],
+        ["indexed_state_meta", "version"]
+      ])
+    ]);
+    const client = new FerricStoreClient(executor);
+
+    await client.installPolicy("order", { indexedStateMeta: "version" });
+    expect(executor.calls[0]).toEqual(["FLOW.POLICY.SET", "order", "INDEXED_STATE_META", "version"]);
+
+    await expect(client.get("flow-1", { partitionKey: "tenant-a" })).resolves.toMatchObject({
+      indexedStateMeta: "version",
+      stateMeta: {
+        accept: { version: "1" },
+        completed: { version: "3" }
+      }
+    });
+  });
+
   it("decodes claimed flow records from wire maps", async () => {
     const executor = new FakeExecutor([
       [

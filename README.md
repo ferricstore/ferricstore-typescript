@@ -22,7 +22,7 @@ Requires Node.js 24 or newer. The SDK is ESM-only and tested with Node 24 and 26
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.5.2
+  ghcr.io/ferricstore/ferricstore:0.6.0
 ```
 
 ## Durable Queue
