@@ -14,7 +14,19 @@ FLOW.CREATE -> FLOW.CLAIM_DUE -> handler -> FLOW.TRANSITION / COMPLETE / FAIL / 
 npm install @ferricstore/ferricstore
 ```
 
-Requires Node.js 24 or newer. The SDK is ESM-only and tested with Node 24 and 26.
+Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is tested with Node 22, 24, and 26.
+
+ESM:
+
+```ts
+import { FerricStoreClient, JsonCodec } from "@ferricstore/ferricstore";
+```
+
+CommonJS:
+
+```js
+const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
+```
 
 ## Run FerricStore Locally
 

@@ -4,6 +4,18 @@ All notable changes to the FerricStore TypeScript SDK will be documented here.
 
 The format is based on Keep a Changelog, and this project follows semver once it reaches `1.0`.
 
+## [0.1.3] - 2026-07-03
+
+### Added
+
+- CommonJS package export alongside the existing ESM export.
+- Package export smoke test covering both `import()` and `require()`.
+
+### Changed
+
+- Lowered the Node.js support floor to Node.js 22.22.
+- Expanded CI coverage to Node.js 22.22, 24, and 26.
+
 ## [0.1.0] - Unreleased
 
 ### Added
