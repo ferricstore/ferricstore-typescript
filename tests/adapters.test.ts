@@ -1,7 +1,7 @@
 import net from "node:net";
 import type { AddressInfo, Socket } from "node:net";
 import { afterEach, expect, test } from "vitest";
-import { NativeAdapter } from "../src/adapters.js";
+import { NativeAdapter, ReconnectingExecutor } from "../src/adapters.js";
 import { HEADER_SIZE, MAGIC, OPCODES, RESPONSE_VERSION, encodeValue } from "../src/protocol.js";
 
 const servers: net.Server[] = [];
@@ -34,6 +34,7 @@ test("NativeAdapter defaults to latency-first eight protocol lanes", async () =>
 
   try {
     expect((adapter as unknown as { protocolLanes: number }).protocolLanes).toBe(8);
+    expect((adapter as unknown as { heartbeatIntervalMs: number }).heartbeatIntervalMs).toBe(60_000);
   } finally {
     await adapter.close();
   }
@@ -71,6 +72,42 @@ test("NativeAdapter rejects oversized chunked responses", async () => {
   }
 });
 
+test("NativeAdapter can keep idle sockets active with heartbeat pings", async () => {
+  let pingCount = 0;
+  const server = await startCountingServer((request) => {
+    if (request.opcode === OPCODES.ping) {
+      pingCount++;
+    }
+  });
+  const address = server.address() as AddressInfo;
+  const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
+    heartbeatIntervalMs: 10
+  });
+
+  try {
+    await waitFor(() => pingCount > 0);
+    expect(pingCount).toBeGreaterThan(0);
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("ReconnectingExecutor reconnects when the native adapter was closed while idle", async () => {
+  const server = await startStartupClosingServer();
+  const address = server.address() as AddressInfo;
+  const executor = new ReconnectingExecutor(async () => await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`));
+
+  try {
+    await waitFor(() => server.connectionCount > 0);
+    const response = await executor.executeCommand("PING");
+    expect(Buffer.isBuffer(response)).toBe(true);
+    expect((response as Buffer).toString("utf8")).toBe("PONG");
+    expect(server.connectionCount).toBeGreaterThan(1);
+  } finally {
+    await executor.close();
+  }
+});
+
 async function startFragmentingServer(options: { chunkOnlyPing?: boolean } = {}): Promise<net.Server> {
   const server = net.createServer((socket) => handleSocket(socket, options));
   servers.push(server);
@@ -84,7 +121,41 @@ async function startFragmentingServer(options: { chunkOnlyPing?: boolean } = {})
   return server;
 }
 
-function handleSocket(socket: Socket, options: { chunkOnlyPing?: boolean }): void {
+async function startCountingServer(onRequest: (request: TestRequest) => void): Promise<net.Server> {
+  const server = net.createServer((socket) => handleSocket(socket, { onRequest }));
+  servers.push(server);
+  await listen(server);
+  return server;
+}
+
+async function startStartupClosingServer(): Promise<net.Server & { connectionCount: number }> {
+  const server = net.createServer() as net.Server & {
+    connectionCount: number;
+  };
+  server.on("connection", (socket) => handleStartupClosingSocket(socket, server));
+  server.connectionCount = 0;
+  servers.push(server);
+  await listen(server);
+  return server;
+}
+
+async function listen(server: net.Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
+interface TestRequest {
+  readonly laneId: number;
+  readonly opcode: number;
+  readonly requestId: bigint;
+}
+
+function handleSocket(socket: Socket, options: { chunkOnlyPing?: boolean; onRequest?: (request: TestRequest) => void }): void {
   let input: Buffer = Buffer.alloc(0);
   socket.on("data", (chunk: Buffer) => {
     input = Buffer.concat([input, chunk]);
@@ -93,6 +164,7 @@ function handleSocket(socket: Socket, options: { chunkOnlyPing?: boolean }): voi
       if (request == null) {
         return;
       }
+      options.onRequest?.(request);
       input = request.rest;
       const value = request.opcode === OPCODES.ping ? "PONG" : "OK";
       if (options.chunkOnlyPing === true && request.opcode === OPCODES.ping) {
@@ -104,12 +176,29 @@ function handleSocket(socket: Socket, options: { chunkOnlyPing?: boolean }): voi
   });
 }
 
-function readRequest(input: Buffer): {
-  readonly laneId: number;
-  readonly opcode: number;
-  readonly requestId: bigint;
-  readonly rest: Buffer;
-} | null {
+function handleStartupClosingSocket(socket: Socket, server: net.Server & { connectionCount: number }): void {
+  server.connectionCount++;
+  const connectionNumber = server.connectionCount;
+  let input: Buffer = Buffer.alloc(0);
+  socket.on("data", (chunk: Buffer) => {
+    input = Buffer.concat([input, chunk]);
+    for (;;) {
+      const request = readRequest(input);
+      if (request == null) {
+        return;
+      }
+      input = request.rest;
+      const frame = responseFrame(request.opcode, request.laneId, request.requestId, request.opcode === OPCODES.ping ? "PONG" : "OK");
+      if (connectionNumber === 1 && request.opcode === OPCODES.startup) {
+        socket.write(frame, () => socket.end());
+      } else {
+        socket.write(frame);
+      }
+    }
+  });
+}
+
+function readRequest(input: Buffer): (TestRequest & { readonly rest: Buffer }) | null {
   if (input.byteLength < HEADER_SIZE) {
     return null;
   }
@@ -163,4 +252,15 @@ async function closeServer(server: net.Server): Promise<void> {
       else resolve();
     });
   });
+}
+
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 1_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("condition was not met before timeout");
 }

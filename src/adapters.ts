@@ -27,14 +27,22 @@ export interface ExecutePipelineOptions {
 }
 
 export interface NativeAdapterOptions {
+  autoReconnect?: boolean | ReconnectOptions;
   clientName?: string;
   connectTimeoutMs?: number;
+  heartbeatIntervalMs?: number;
+  keepAlive?: boolean;
+  keepAliveInitialDelayMs?: number;
   maxChunkBytes?: number;
   protocolLanes?: number;
   timeoutMs?: number;
   username?: string;
   password?: string;
   tlsOptions?: tls.ConnectionOptions;
+}
+
+export interface ReconnectOptions {
+  maxRetries?: number;
 }
 
 interface PendingRequest {
@@ -62,16 +70,28 @@ export class NativeAdapter implements CommandExecutor {
   private readonly maxChunkBytes: number;
   private requestId = 0n;
   private readonly protocolLanes: number;
+  private readonly heartbeatIntervalMs?: number;
+  private heartbeatInFlight = false;
+  private heartbeatTimer?: NodeJS.Timeout;
+  private lastActivityMs = Date.now();
   private readonly timeoutMs: number;
 
-  private constructor(socket: net.Socket | tls.TLSSocket, timeoutMs: number, protocolLanes: number, maxChunkBytes: number) {
+  private constructor(
+    socket: net.Socket | tls.TLSSocket,
+    timeoutMs: number,
+    protocolLanes: number,
+    maxChunkBytes: number,
+    heartbeatIntervalMs?: number
+  ) {
     this.socket = socket;
     this.maxChunkBytes = Math.max(1, Math.trunc(maxChunkBytes));
     this.timeoutMs = timeoutMs;
     this.protocolLanes = Math.max(1, Math.trunc(protocolLanes));
+    this.heartbeatIntervalMs = normalizeHeartbeatInterval(heartbeatIntervalMs);
     this.socket.on("data", (chunk: Buffer) => this.onData(chunk));
     this.socket.on("error", (error) => this.failAll(error));
     this.socket.on("close", () => this.failAll(new FerricStoreError("FerricStore connection closed")));
+    this.startHeartbeat();
   }
 
   static async fromUrl(url: string, options: NativeAdapterOptions = {}): Promise<NativeAdapter> {
@@ -81,7 +101,8 @@ export class NativeAdapter implements CommandExecutor {
       socket,
       options.timeoutMs ?? 30_000,
       options.protocolLanes ?? 8,
-      options.maxChunkBytes ?? 64 * 1024 * 1024
+      options.maxChunkBytes ?? 64 * 1024 * 1024,
+      options.heartbeatIntervalMs
     );
     await adapter.startup(options.clientName);
     const password = options.password ?? parsed.password;
@@ -108,6 +129,7 @@ export class NativeAdapter implements CommandExecutor {
       return;
     }
     this.closed = true;
+    this.stopHeartbeat();
     this.socket.end();
   }
 
@@ -132,6 +154,7 @@ export class NativeAdapter implements CommandExecutor {
     if (this.closed) {
       throw new FerricStoreError("FerricStore connection is closed");
     }
+    this.lastActivityMs = Date.now();
     const requestId = this.nextRequestId();
     const frame = encodeRequest(this.assignLane(command), requestId);
 
@@ -147,10 +170,12 @@ export class NativeAdapter implements CommandExecutor {
         opcode: command.opcode,
         reject: (reason: unknown) => {
           clearTimeout(timer);
+          this.lastActivityMs = Date.now();
           reject(reason instanceof Error ? reason : classifyServerError(String(reason), reason));
         },
         resolve: (value: unknown) => {
           clearTimeout(timer);
+          this.lastActivityMs = Date.now();
           resolve(value);
         }
       });
@@ -160,10 +185,46 @@ export class NativeAdapter implements CommandExecutor {
           this.pending.delete(requestId);
           this.cleanupChunksForRequest(requestId);
           clearTimeout(timer);
+          this.lastActivityMs = Date.now();
           reject(error);
         }
       });
     });
+  }
+
+  private startHeartbeat(): void {
+    if (this.heartbeatIntervalMs == null) {
+      return;
+    }
+    this.heartbeatTimer = setInterval(() => {
+      void this.sendHeartbeat();
+    }, this.heartbeatIntervalMs);
+    this.heartbeatTimer.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer == null) {
+      return;
+    }
+    clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
+  }
+
+  private async sendHeartbeat(): Promise<void> {
+    if (this.closed || this.heartbeatInFlight || this.pending.size > 0 || this.heartbeatIntervalMs == null) {
+      return;
+    }
+    if (Date.now() - this.lastActivityMs < this.heartbeatIntervalMs) {
+      return;
+    }
+    this.heartbeatInFlight = true;
+    try {
+      await this.request(buildProtocolCommand(["PING"]));
+    } catch {
+      // Socket close/error handlers own adapter shutdown and pending request rejection.
+    } finally {
+      this.heartbeatInFlight = false;
+    }
   }
 
   private onData(chunk: Buffer): void {
@@ -229,6 +290,7 @@ export class NativeAdapter implements CommandExecutor {
       return;
     }
     this.closed = true;
+    this.stopHeartbeat();
     const error = reason instanceof Error ? reason : classifyServerError(String(reason), reason);
     for (const pending of this.pending.values()) {
       pending.reject(error);
@@ -265,6 +327,83 @@ export class NativeAdapter implements CommandExecutor {
   }
 }
 
+export class ReconnectingExecutor implements CommandExecutor {
+  private closed = false;
+  private readonly maxRetries: number;
+  private executorPromise: Promise<CommandExecutor>;
+  private reconnectPromise?: Promise<CommandExecutor>;
+
+  constructor(
+    private readonly createExecutor: () => Promise<CommandExecutor>,
+    options: ReconnectOptions = {}
+  ) {
+    this.maxRetries = Math.max(0, Math.trunc(options.maxRetries ?? 1));
+    this.executorPromise = createExecutor();
+  }
+
+  async executeCommand(...args: CommandArgument[]): Promise<unknown> {
+    return await this.withReconnect((executor) => executor.executeCommand(...args));
+  }
+
+  async executePipeline(commands: readonly Command[], options: ExecutePipelineOptions = {}): Promise<unknown[]> {
+    return await this.withReconnect(async (executor) => {
+      if (executor.executePipeline != null) {
+        return await executor.executePipeline(commands, options);
+      }
+      return await Promise.all(commands.map((command) => executor.executeCommand(...command)));
+    });
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    const executor = await this.executorPromise.catch(() => undefined);
+    await Promise.resolve(executor?.close?.());
+  }
+
+  private async withReconnect<T>(operation: (executor: CommandExecutor) => Promise<T>): Promise<T> {
+    let executor = await this.executorPromise;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await operation(executor);
+      } catch (error) {
+        if (this.closed || attempt >= this.maxRetries || !isReconnectableClosedConnectionError(error)) {
+          throw error;
+        }
+        executor = await this.reconnect(executor);
+      }
+    }
+  }
+
+  private async reconnect(staleExecutor: CommandExecutor): Promise<CommandExecutor> {
+    if (this.closed) {
+      throw new FerricStoreError("FerricStore client is closed");
+    }
+    if (this.reconnectPromise != null) {
+      return await this.reconnectPromise;
+    }
+    const currentExecutor = await this.executorPromise.catch(() => undefined);
+    if (currentExecutor != null && currentExecutor !== staleExecutor) {
+      return currentExecutor;
+    }
+    this.reconnectPromise = (async () => {
+      await Promise.resolve(staleExecutor.close?.()).catch(() => undefined);
+      const nextExecutor = await this.createExecutor();
+      this.executorPromise = Promise.resolve(nextExecutor);
+      return nextExecutor;
+    })().finally(() => {
+      this.reconnectPromise = undefined;
+    });
+    return await this.reconnectPromise;
+  }
+}
+
+export function isReconnectableClosedConnectionError(error: unknown): boolean {
+  return error instanceof Error && error.message === "FerricStore connection is closed";
+}
+
 function parseFerricUrl(value: string): ParsedUrl {
   const url = new URL(value);
   if (url.protocol !== "ferric:" && url.protocol !== "ferrics:") {
@@ -292,6 +431,7 @@ async function connect(parsed: ParsedUrl, options: NativeAdapterOptions): Promis
     timer.unref?.();
 
     socket.setNoDelay(true);
+    socket.setKeepAlive(options.keepAlive ?? true, normalizeKeepAliveInitialDelay(options.keepAliveInitialDelayMs));
     socket.once("connect", () => {
       clearTimeout(timer);
       resolve(socket);
@@ -301,4 +441,15 @@ async function connect(parsed: ParsedUrl, options: NativeAdapterOptions): Promis
       reject(error instanceof Error ? error : classifyServerError(String(error), error));
     });
   });
+}
+
+function normalizeHeartbeatInterval(value: number | undefined): number | undefined {
+  if (value != null && value <= 0) {
+    return undefined;
+  }
+  return Math.trunc(value ?? 60_000);
+}
+
+function normalizeKeepAliveInitialDelay(value: number | undefined): number {
+  return Math.max(0, Math.trunc(value ?? 30_000));
 }

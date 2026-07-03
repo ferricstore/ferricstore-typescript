@@ -1,4 +1,12 @@
-export { NativeAdapter, type CommandExecutor, type ExecutePipelineOptions, type NativeAdapterOptions } from "./adapters.js";
+export {
+  NativeAdapter,
+  ReconnectingExecutor,
+  isReconnectableClosedConnectionError,
+  type CommandExecutor,
+  type ExecutePipelineOptions,
+  type NativeAdapterOptions,
+  type ReconnectOptions
+} from "./adapters.js";
 export {
   FerricStoreClient,
   type AutoBatchOptions,
@@ -8,6 +16,7 @@ export {
   type CreateManyOptions,
   type CreateOptions,
   type FailOptions,
+  type FerricStoreClientFromUrlOptions,
   type FerricStoreClientOptions,
   type MutateOptions,
   type ReadOptions,

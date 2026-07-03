@@ -18,7 +18,14 @@ import {
   type Command,
   type CommandArgument
 } from "./internal.js";
-import { NativeAdapter, type CommandExecutor, type ExecutePipelineOptions, type NativeAdapterOptions } from "./adapters.js";
+import {
+  NativeAdapter,
+  ReconnectingExecutor,
+  type CommandExecutor,
+  type ExecutePipelineOptions,
+  type NativeAdapterOptions,
+  type ReconnectOptions
+} from "./adapters.js";
 import {
   BitmapStore,
   GeoStore,
@@ -69,6 +76,11 @@ export interface FerricStoreClientOptions {
   autoBatch?: boolean | AutoBatchOptions;
   codec?: Codec;
   backpressure?: BackpressurePolicy;
+}
+
+export interface FerricStoreClientFromUrlOptions extends FerricStoreClientOptions {
+  nativeOptions?: NativeAdapterOptions;
+  reconnect?: boolean | ReconnectOptions;
 }
 
 export interface CreateOptions {
@@ -229,11 +241,14 @@ export class FerricStoreClient {
     this.zset = new SortedSetStore(this);
   }
 
-  static async fromUrl(
-    url: string,
-    options: FerricStoreClientOptions & { nativeOptions?: NativeAdapterOptions } = {}
-  ): Promise<FerricStoreClient> {
-    return new FerricStoreClient(await NativeAdapter.fromUrl(url, options.nativeOptions), options);
+  static async fromUrl(url: string, options: FerricStoreClientFromUrlOptions = {}): Promise<FerricStoreClient> {
+    const reconnectOptions = options.reconnect ?? options.nativeOptions?.autoReconnect ?? true;
+    const createExecutor = async () => await NativeAdapter.fromUrl(url, options.nativeOptions);
+    const executor =
+      reconnectOptions === false
+        ? await createExecutor()
+        : new ReconnectingExecutor(createExecutor, reconnectOptions === true ? {} : reconnectOptions);
+    return new FerricStoreClient(executor, options);
   }
 
   async command(...args: CommandArgument[]): Promise<unknown> {
