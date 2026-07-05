@@ -35,6 +35,94 @@ function ok(value: unknown): boolean {
   return value === true || value === 1 || value === "OK" || (Buffer.isBuffer(value) && value.toString("utf8") === "OK");
 }
 
+const nativeProtocolCommands = new Set<string>(
+  `
+    ACL APPEND AUTH BF.ADD BF.CARD BF.EXISTS BF.INFO BF.MADD BF.MEXISTS BF.RESERVE
+    BGSAVE BITCOUNT BITOP BITPOS BLMOVE BLMPOP BLPOP BRPOP CAS CF.ADD CF.ADDNX
+    CF.COUNT CF.DEL CF.EXISTS CF.INFO CF.MEXISTS CF.RESERVE CLIENT CLUSTER.DEMOTE
+    CLUSTER.FAILOVER CLUSTER.HEALTH CLUSTER.JOIN CLUSTER.KEYSLOT CLUSTER.LEAVE
+    CLUSTER.PROMOTE CLUSTER.ROLE CLUSTER.SLOTS CLUSTER.STATS CLUSTER.STATUS
+    CMS.INCRBY CMS.INFO CMS.INITBYDIM CMS.INITBYPROB CMS.MERGE CMS.QUERY COMMAND
+    CONFIG COPY DBSIZE DEBUG DECR DECRBY DEL DISCARD ECHO EXEC EXISTS EXPIRE
+    EXPIREAT EXPIRETIME EXTEND FERRICSTORE.BLOBGC FERRICSTORE.CAPABILITIES
+    FERRICSTORE.CONFIG FERRICSTORE.DOCTOR FERRICSTORE.HOTNESS FERRICSTORE.KEY_INFO
+    FERRICSTORE.METRICS FERRICSTORE.NAMESPACE FERRICSTORE.QUOTA FERRICSTORE.TELEMETRY
+    FETCH_OR_COMPUTE FETCH_OR_COMPUTE_ERROR FETCH_OR_COMPUTE_RESULT
+    FLOW.APPROVAL.APPROVE FLOW.APPROVAL.GET FLOW.APPROVAL.LIST FLOW.APPROVAL.REJECT
+    FLOW.APPROVAL.REQUEST FLOW.ATTRIBUTES FLOW.ATTRIBUTE_VALUES FLOW.BUDGET.COMMIT
+    FLOW.BUDGET.GET FLOW.BUDGET.LIST FLOW.BUDGET.RELEASE FLOW.BUDGET.RESERVE
+    FLOW.BY_CORRELATION FLOW.BY_PARENT FLOW.BY_ROOT FLOW.CANCEL FLOW.CANCEL_MANY
+    FLOW.CIRCUIT.CLOSE FLOW.CIRCUIT.GET FLOW.CIRCUIT.OPEN FLOW.CLAIM_DUE
+    FLOW.COMPLETE FLOW.COMPLETE_MANY FLOW.CREATE FLOW.CREATE_MANY
+    FLOW.EFFECT.COMPENSATE FLOW.EFFECT.CONFIRM FLOW.EFFECT.FAIL FLOW.EFFECT.GET
+    FLOW.EFFECT.RESERVE FLOW.EXTEND_LEASE FLOW.FAIL FLOW.FAILURES FLOW.FAIL_MANY
+    FLOW.GET FLOW.GOVERNANCE.LEDGER FLOW.GOVERNANCE.OVERVIEW FLOW.HISTORY
+    FLOW.INFO FLOW.LIMIT.GET FLOW.LIMIT.LEASE FLOW.LIMIT.LIST FLOW.LIMIT.RELEASE
+    FLOW.LIMIT.SPEND FLOW.LIST FLOW.POLICY.GET FLOW.POLICY.SET FLOW.RECLAIM
+    FLOW.RETENTION_CLEANUP FLOW.RETRY FLOW.RETRY_MANY FLOW.REWIND
+    FLOW.RUN_STEPS_MANY FLOW.SCHEDULE.CREATE FLOW.SCHEDULE.DELETE
+    FLOW.SCHEDULE.FIRE FLOW.SCHEDULE.FIRE_DUE FLOW.SCHEDULE.GET FLOW.SCHEDULE.LIST
+    FLOW.SCHEDULE.PAUSE FLOW.SCHEDULE.RESUME FLOW.SIGNAL FLOW.SPAWN_CHILDREN
+    FLOW.START_AND_CLAIM FLOW.STATS FLOW.STEP_CONTINUE FLOW.STUCK FLOW.TERMINALS
+    FLOW.TRANSITION FLOW.TRANSITION_MANY FLOW.VALUE.PUT FLUSHALL FLUSHDB GEOADD
+    GEODIST GEOHASH GEOPOS GEOSEARCH GEOSEARCHSTORE GET GETBIT GETDEL GETEX
+    GETRANGE GETSET HDEL HELLO HEXISTS HEXPIRE HEXPIRETIME HGET HGETALL HGETDEL
+    HGETEX HINCRBY HINCRBYFLOAT HKEYS HLEN HMGET HPERSIST HPEXPIRE HPTTL
+    HRANDFIELD HSCAN HSET HSETEX HSETNX HSTRLEN HTTL HVALS INCR INCRBY
+    INCRBYFLOAT INFO KEY_INFO KEYS LASTSAVE LINDEX LINSERT LLEN LMOVE LOCK LOLWUT
+    LPOP LPOS LPUSH LPUSHX LRANGE LREM LSET LTRIM MEMORY MGET MODULE MSET MSETNX
+    MULTI OBJECT PERSIST PEXPIRE PEXPIREAT PEXPIRETIME PFADD PFCOUNT PFMERGE PING
+    PSETEX PSUBSCRIBE PTTL PUBLISH PUBSUB PUNSUBSCRIBE QUIT RANDOMKEY RATELIMIT.ADD
+    RENAME RENAMENX RESET RPOP RPOPLPUSH RPUSH RPUSHX SADD SANDBOX SAVE SCAN SCARD
+    SDIFF SDIFFSTORE SELECT SET SETBIT SETEX SETNX SETRANGE SINTER SINTERCARD
+    SINTERSTORE SISMEMBER SLOWLOG SMEMBERS SMISMEMBER SMOVE SPOP SRANDMEMBER SREM
+    SSCAN STRLEN SUBSCRIBE SUNION SUNIONSTORE TDIGEST.ADD TDIGEST.BYRANK
+    TDIGEST.BYREVRANK TDIGEST.CDF TDIGEST.CREATE TDIGEST.INFO TDIGEST.MAX
+    TDIGEST.MERGE TDIGEST.MIN TDIGEST.QUANTILE TDIGEST.RANK TDIGEST.RESET
+    TDIGEST.REVRANK TDIGEST.TRIMMED_MEAN TOPK.ADD TOPK.COUNT TOPK.INCRBY TOPK.INFO
+    TOPK.LIST TOPK.QUERY TOPK.RESERVE TTL TYPE UNLINK UNLOCK UNSUBSCRIBE UNWATCH
+    WAIT WAITAOF WATCH XACK XADD XDEL XGROUP XINFO XLEN XRANGE XREAD XREADGROUP
+    XREVRANGE XTRIM ZADD ZCARD ZCOUNT ZINCRBY ZMSCORE ZPOPMAX ZPOPMIN
+    ZRANDMEMBER ZRANGE ZRANGEBYSCORE ZRANK ZREM ZREVRANGE ZREVRANGEBYSCORE
+    ZREVRANK ZSCAN ZSCORE
+  `
+    .trim()
+    .split(/\s+/)
+);
+
+const nativeProtocolSharedIntegrationExcluded = {
+  ACL: "requires protected/security-mode fixture, not the default open integration server",
+  AUTH: "requires protected/security-mode fixture, not the default open integration server",
+  BGSAVE: "admin persistence command; not part of normal SDK app command coverage",
+  "CLUSTER.DEMOTE": "mutates cluster topology",
+  "CLUSTER.FAILOVER": "mutates cluster topology",
+  "CLUSTER.JOIN": "mutates cluster topology",
+  "CLUSTER.LEAVE": "mutates cluster topology",
+  "CLUSTER.PROMOTE": "mutates cluster topology",
+  DEBUG: "debug/admin command, not normal SDK app surface",
+  FLUSHALL: "destructive for shared integration state",
+  FLUSHDB: "destructive for shared integration state",
+  "FERRICSTORE.NAMESPACE": "management command requires namespace control-plane support",
+  "FERRICSTORE.QUOTA": "management command requires quota control-plane support",
+  HELLO: "connection handshake command",
+  LASTSAVE: "admin persistence command; not part of normal SDK app command coverage",
+  LOLWUT: "diagnostic compatibility command, not SDK app surface",
+  MODULE: "admin module command; FerricStore does not load modules through SDK tests",
+  QUIT: "connection lifecycle command",
+  RESET: "connection lifecycle command",
+  SANDBOX: "debug/admin command, not normal SDK app surface",
+  SAVE: "admin persistence command; not part of normal SDK app command coverage",
+  SELECT: "single-database compatibility command, not normal SDK app surface"
+} as const;
+
+const nativeProtocolSharedIntegrationExcludedNames = new Set<string>(
+  Object.keys(nativeProtocolSharedIntegrationExcluded)
+);
+
+const nativeProtocolIntegrationExercised = new Set<string>(
+  [...nativeProtocolCommands].filter((command) => !nativeProtocolSharedIntegrationExcludedNames.has(command))
+);
+
 async function expectSupportedOrKnownServerError<T>(
   promise: Promise<T>,
   pattern = /unsupported|unknown|not supported|not enabled|invalid|password|cluster|no config file|shard index/i
@@ -57,6 +145,29 @@ function field(source: unknown, name: string): unknown {
     return record[name];
   }
   return undefined;
+}
+
+function isReadonlyArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}
+
+function commandCatalogNames(value: unknown): Set<string> {
+  const names = new Set<string>();
+  if (!isReadonlyArray(value)) {
+    return names;
+  }
+
+  for (const item of value) {
+    if (isReadonlyArray(item) && item.length > 0) {
+      names.add(text(item[0]).toUpperCase());
+    }
+  }
+
+  return names;
+}
+
+function setDifference(left: ReadonlySet<string>, right: ReadonlySet<string>): string[] {
+  return [...left].filter((item) => !right.has(item)).sort();
 }
 
 function eventId(event: unknown): string {
@@ -171,6 +282,28 @@ async function createManyAndClaim(
 }
 
 describe("FerricStore integration", () => {
+  it("keeps native protocol command catalog integration coverage classified", async () => {
+    const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
+
+    try {
+      const catalogNames = commandCatalogNames(await flow.command("COMMAND"));
+      expect(setDifference(catalogNames, nativeProtocolCommands)).toEqual([]);
+      expect(setDifference(nativeProtocolSharedIntegrationExcludedNames, nativeProtocolCommands)).toEqual([]);
+
+      const catalogNotExercised = new Set<string>(
+        setDifference(catalogNames, nativeProtocolIntegrationExercised)
+      );
+      expect(setDifference(catalogNotExercised, nativeProtocolSharedIntegrationExcludedNames)).toEqual([]);
+
+      const unclassifiedKnownCommands = new Set<string>(
+        setDifference(nativeProtocolCommands, nativeProtocolIntegrationExercised)
+      );
+      expect(setDifference(unclassifiedKnownCommands, nativeProtocolSharedIntegrationExcludedNames)).toEqual([]);
+    } finally {
+      await flow.close();
+    }
+  });
+
   it("uses KV helpers and a full Flow claim/complete cycle", async () => {
     const flow = await FerricStoreClient.fromUrl(url(), {
       codec: new JsonCodec()
