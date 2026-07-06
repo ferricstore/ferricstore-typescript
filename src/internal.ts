@@ -1,6 +1,6 @@
 import type { Codec } from "./codecs.js";
 
-export type CommandArgument = string | Buffer | number | boolean | null | undefined;
+export type CommandArgument = string | Buffer | number | boolean | Record<string, unknown> | null | undefined;
 export type Command = readonly CommandArgument[];
 export type RespMap = Map<unknown, unknown> | Record<PropertyKey, unknown>;
 

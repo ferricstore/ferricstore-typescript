@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import {
+  COMMAND_OPCODES,
   OPCODES,
   buildProtocolCommand,
   decodeResponse,
@@ -13,6 +14,13 @@ import {
 import { CLAIMED_ITEM_WIRE, claimedItemFromResp } from "../src/types.js";
 
 describe("native protocol codec", () => {
+  it("exports the latest native command opcode table", () => {
+    expect(COMMAND_OPCODES.OPTIONS).toBe(0x000b);
+    expect(COMMAND_OPCODES["FLOW.SEARCH"]).toBe(0x0230);
+    expect(COMMAND_OPCODES["FLOW.BUDGET.RELEASE"]).toBe(0x0258);
+    expect(OPCODES.flowSearch).toBe(COMMAND_OPCODES["FLOW.SEARCH"]);
+  });
+
   it("encodes request frames with FerricStore native header", () => {
     const frame = encodeRequest({ laneId: 0, opcode: OPCODES.ping, payload: { message: "hello" } }, 7n);
 
@@ -35,8 +43,38 @@ describe("native protocol codec", () => {
 
   it("uses dedicated native client metadata opcodes", () => {
     const setName = buildProtocolCommand(["CLIENT", "SETNAME", "worker-a"]);
+    const info = buildProtocolCommand(["CLIENT", "INFO"]);
 
     expect(setName).toMatchObject({ laneId: 0, opcode: OPCODES.clientSetName, payload: { name: "worker-a" } });
+    expect(info).toMatchObject({ laneId: 0, opcode: OPCODES.clientInfo, payload: {} });
+  });
+
+  it("uses dedicated native topology opcodes", () => {
+    expect(buildProtocolCommand(["SHARDS"])).toMatchObject({ laneId: 0, opcode: OPCODES.shards, payload: {} });
+    expect(buildProtocolCommand(["ROUTE", "tenant-key"])).toMatchObject({
+      laneId: 0,
+      opcode: OPCODES.route,
+      payload: { key: "tenant-key" }
+    });
+    expect(buildProtocolCommand(["ROUTE_BATCH", "tenant-a", "tenant-b"])).toMatchObject({
+      laneId: 0,
+      opcode: OPCODES.routeBatch,
+      payload: { keys: ["tenant-a", "tenant-b"] }
+    });
+  });
+
+  it("uses dedicated native authentication and options opcodes", () => {
+    expect(buildProtocolCommand(["AUTH", "secret"])).toMatchObject({
+      laneId: 0,
+      opcode: OPCODES.auth,
+      payload: { password: "secret", username: "default" }
+    });
+    expect(buildProtocolCommand(["AUTH", "svc", "secret"])).toMatchObject({
+      laneId: 0,
+      opcode: OPCODES.auth,
+      payload: { password: "secret", username: "svc" }
+    });
+    expect(buildProtocolCommand(["OPTIONS"])).toMatchObject({ laneId: 0, opcode: OPCODES.options, payload: {} });
   });
 
   it("decodes compact GET responses", () => {
@@ -246,6 +284,52 @@ describe("native protocol codec", () => {
       payload: {
         args: ["email", "INDEXED_STATE_META", "version"],
         command: "FLOW.POLICY.SET"
+      }
+    });
+  });
+
+  it("builds direct native FLOW.SEARCH with attributes and state metadata", () => {
+    const command = buildProtocolCommand([
+      "FLOW.SEARCH",
+      "email",
+      "STATE",
+      "queued",
+      "COUNT",
+      10,
+      "ATTRIBUTE",
+      "tenant",
+      "acme",
+      "STATE_META",
+      "queued",
+      { version: 3 },
+      "TERMINAL_ONLY",
+      "true"
+    ]);
+
+    expect(command).toMatchObject({
+      opcode: OPCODES.flowSearch,
+      payload: {
+        attributes: { tenant: "acme" },
+        count: 10,
+        state: "queued",
+        state_meta: { queued: { version: 3 } },
+        terminal_only: true,
+        type: "email"
+      }
+    });
+
+    expect(buildProtocolCommand([
+      "FLOW.SEARCH",
+      "email",
+      "STATE",
+      "queued",
+      "STATE_META",
+      "version",
+      3
+    ])).toMatchObject({
+      opcode: OPCODES.flowSearch,
+      payload: {
+        state_meta: { queued: { version: 3 } }
       }
     });
   });

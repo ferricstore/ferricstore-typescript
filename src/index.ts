@@ -8,6 +8,13 @@ export {
   type ReconnectOptions
 } from "./adapters.js";
 export {
+  RoutingTopology,
+  TopologyNativeAdapterPool,
+  type EndpointPolicy,
+  type RoutingEndpoint,
+  type RoutingRoute
+} from "./topology.js";
+export {
   FerricStoreClient,
   type AutoBatchOptions,
   type CancelOptions,
@@ -18,10 +25,13 @@ export {
   type FailOptions,
   type FerricStoreClientFromUrlOptions,
   type FerricStoreClientOptions,
+  type ManagementPairs,
   type MutateOptions,
   type ReadOptions,
   type ReclaimOptions,
   type RetryOptions,
+  type SearchOptions,
+  type SearchStateMeta,
   type TransitionOptions
 } from "./client.js";
 export { JsonCodec, RawCodec, type Codec } from "./codecs.js";
@@ -51,6 +61,8 @@ export {
   type TransitionOutcome
 } from "./outcomes.js";
 export type { Command, CommandArgument } from "./internal.js";
+export { COMMAND_OPCODES } from "./protocol.js";
+export type { ProtocolCommand } from "./protocol.js";
 export {
   BloomFilterStore,
   CountMinSketchStore,
@@ -64,7 +76,7 @@ export {
   type TDigestMergeOptions,
   type TopKReserveOptions
 } from "./modules.js";
-export { Queue, QueueClient, QueueWorker, type QueueBatchHandler, type QueueHandler, type QueueOptions, type QueueWorkerResult } from "./queue.js";
+export { Queue, QueueClient, QueueWorker, type QueueBatchHandler, type QueueHandler, type QueueJob, type QueueOptions, type QueueWorkerResult } from "./queue.js";
 export {
   BitmapStore,
   GeoStore,

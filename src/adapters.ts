@@ -3,6 +3,7 @@ import tls from "node:tls";
 import { Buffer } from "node:buffer";
 import { FerricStoreError, classifyServerError } from "./errors.js";
 import type { Command, CommandArgument } from "./internal.js";
+import type { EndpointPolicy, RoutingEndpoint, RoutingRoute, RoutingTopology } from "./topology.js";
 import {
   FLAG_MORE_CHUNKS,
   OPCODES,
@@ -19,6 +20,8 @@ import {
 export interface CommandExecutor {
   executeCommand(...args: CommandArgument[]): Promise<unknown>;
   executePipeline?(commands: readonly Command[], options?: ExecutePipelineOptions): Promise<unknown[]>;
+  refreshTopology?(): Promise<RoutingTopology>;
+  route?(key: string | Buffer): Promise<RoutingRoute> | RoutingRoute;
   close?(): Promise<void> | void;
 }
 
@@ -30,15 +33,21 @@ export interface NativeAdapterOptions {
   autoReconnect?: boolean | ReconnectOptions;
   clientName?: string;
   connectTimeoutMs?: number;
+  endpointPolicy?: EndpointPolicy;
+  endpointValidator?: (endpoint: RoutingEndpoint) => boolean | void;
+  haRouting?: boolean;
   heartbeatIntervalMs?: number;
   keepAlive?: boolean;
   keepAliveInitialDelayMs?: number;
   maxChunkBytes?: number;
   protocolLanes?: number;
+  seeds?: readonly string[];
   timeoutMs?: number;
+  trustedHosts?: readonly string[];
   username?: string;
   password?: string;
   tlsOptions?: tls.ConnectionOptions;
+  warmConnections?: boolean;
 }
 
 export interface ReconnectOptions {
@@ -115,6 +124,10 @@ export class NativeAdapter implements CommandExecutor {
   async executeCommand(...args: CommandArgument[]): Promise<unknown> {
     const command = buildProtocolCommand(args);
     return await this.request(command);
+  }
+
+  async executeProtocolCommand(command: ProtocolCommand, laneId?: number): Promise<unknown> {
+    return await this.request(laneId == null ? command : { ...command, laneId });
   }
 
   async executePipeline(commands: readonly Command[], options: ExecutePipelineOptions = {}): Promise<unknown[]> {
@@ -352,6 +365,22 @@ export class ReconnectingExecutor implements CommandExecutor {
       }
       return await Promise.all(commands.map((command) => executor.executeCommand(...command)));
     });
+  }
+
+  async refreshTopology(): Promise<RoutingTopology> {
+    const executor = await this.executorPromise;
+    if (executor.refreshTopology == null) {
+      throw new FerricStoreError("topology refresh requires a topology-aware native executor");
+    }
+    return await executor.refreshTopology();
+  }
+
+  async route(key: string | Buffer): Promise<RoutingRoute> {
+    const executor = await this.executorPromise;
+    if (executor.route == null) {
+      throw new FerricStoreError("route lookup requires a topology-aware native executor");
+    }
+    return await executor.route(key);
   }
 
   async close(): Promise<void> {

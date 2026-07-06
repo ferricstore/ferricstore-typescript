@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FerricStoreClient, FlowAlreadyExistsError, JsonCodec, OverloadedError, StaleLeaseError } from "../src/index.js";
+import { FerricStoreClient, FlowAlreadyExistsError, JsonCodec, OverloadedError, RoutingTopology, StaleLeaseError } from "../src/index.js";
 import type { CommandExecutor } from "../src/adapters.js";
 import { FakeExecutor } from "./fake-executor.js";
 
@@ -32,6 +32,34 @@ describe("FerricStoreClient", () => {
 
     expect(executor.calls[0]).toEqual(["FLOW.CLAIM_DUE", "email", "WORKER", "worker-1"]);
     expect(executor.pipelineCalls).toEqual([[["SET", "auto-batch:claim-safe", "1"]]]);
+  });
+
+  it("delegates topology helpers through client wrappers", async () => {
+    const executor = new FakeExecutor() as FakeExecutor & {
+      refreshTopology: () => Promise<RoutingTopology>;
+      route: (key: string) => Promise<{
+        endpoint: { host: string; nativePort: number; node: string };
+        endpointKey: string;
+        key: string;
+        laneId: number;
+        leaderNode: string;
+        shard: number;
+      }>;
+    };
+    const topology = RoutingTopology.empty();
+    executor.refreshTopology = async () => topology;
+    executor.route = async (key: string) => ({
+      endpoint: { host: "127.0.0.1", nativePort: 6388, node: "node@local" },
+      endpointKey: "127.0.0.1:6388",
+      key,
+      laneId: 1,
+      leaderNode: "node@local",
+      shard: 0
+    });
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+
+    await expect(client.refreshTopology()).resolves.toBe(topology);
+    await expect(client.route("tenant-key")).resolves.toMatchObject({ key: "tenant-key", shard: 0 });
   });
 
   it("rejects only the failed promise for auto-batched item errors", async () => {
@@ -302,6 +330,54 @@ describe("FerricStoreClient", () => {
     });
   });
 
+  it("builds FLOW.SEARCH with attributes and state metadata", async () => {
+    const executor = new FakeExecutor([
+      [
+        new Map<unknown, unknown>([
+          ["id", "flow-1"],
+          ["type", "order"],
+          ["state", "queued"],
+          ["partition_key", "tenant-a"],
+          ["version", 1]
+        ])
+      ]
+    ]);
+    const client = new FerricStoreClient(executor);
+
+    const records = await client.search("order", {
+      attributes: { tenant: "acme" },
+      consistentProjection: true,
+      count: 10,
+      state: "queued",
+      stateMeta: { version: 1 },
+      terminalOnly: true
+    });
+
+    expect(records[0]).toMatchObject({ id: "flow-1", partitionKey: "tenant-a" });
+    expect(executor.calls[0]).toEqual([
+      "FLOW.SEARCH",
+      "order",
+      "COUNT",
+      10,
+      "STATE",
+      "queued",
+      "TERMINAL_ONLY",
+      "true",
+      "CONSISTENT_PROJECTION",
+      "true",
+      "ATTRIBUTE",
+      "tenant",
+      "acme",
+      "STATE_META",
+      "queued",
+      { version: 1 }
+    ]);
+
+    await expect(client.search("order", { stateMeta: { version: 1 } })).rejects.toThrow(
+      "search stateMeta filters require state"
+    );
+  });
+
   it("decodes claimed flow records from wire maps", async () => {
     const executor = new FakeExecutor([
       [
@@ -397,6 +473,52 @@ describe("FerricStoreClient", () => {
       ["FERRICSTORE.HOTNESS"],
       ["FERRICSTORE.BLOBGC", "RUN"],
       ["FERRICSTORE.DOCTOR", "CHECK"]
+    ]);
+  });
+
+  it("builds control-plane helper commands and normalizes responses", async () => {
+    const executor = new FakeExecutor([
+      new Map<unknown, unknown>([["sdk", true]]),
+      Buffer.from("OK"),
+      new Map<unknown, unknown>([["prefix", Buffer.from("tenant:")]]),
+      [Buffer.from("tenant:")],
+      Buffer.from("OK"),
+      Buffer.from("OK"),
+      new Map<unknown, unknown>([["keys", 10]]),
+      new Map<unknown, unknown>([["keys", 1]]),
+      new Map<unknown, unknown>([["nodes", 1]]),
+      new Map<unknown, unknown>([["keys", 1]]),
+      [[Buffer.from("id"), Buffer.from("flow-1")]],
+      [[Buffer.from("event"), Buffer.from("created")]]
+    ]);
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.capabilities()).resolves.toEqual({ sdk: true });
+    await expect(client.ensureNamespace("tenant:", { durability: "hot" })).resolves.toBe("OK");
+    await expect(client.getNamespace("tenant:")).resolves.toEqual({ prefix: "tenant:" });
+    await expect(client.listNamespaces()).resolves.toEqual(["tenant:"]);
+    await expect(client.deleteNamespace("tenant:")).resolves.toBe("OK");
+    await expect(client.setQuota("tenant:", { keys: 10 })).resolves.toBe("OK");
+    await expect(client.getQuota("tenant:")).resolves.toEqual({ keys: 10 });
+    await expect(client.quotaUsage("tenant:")).resolves.toEqual({ keys: 1 });
+    await expect(client.clusterInfo()).resolves.toEqual({ nodes: 1 });
+    await expect(client.namespaceUsage("tenant:")).resolves.toEqual({ keys: 1 });
+    await expect(client.flowQuery({ type: "order" })).resolves.toEqual([["id", "flow-1"]]);
+    await expect(client.flowHistory("flow-1", { partition: "tenant:" })).resolves.toEqual([["event", "created"]]);
+
+    expect(executor.calls).toEqual([
+      ["FERRICSTORE.CAPABILITIES"],
+      ["FERRICSTORE.NAMESPACE", "ENSURE", "tenant:", "DURABILITY", "hot"],
+      ["FERRICSTORE.NAMESPACE", "GET", "tenant:"],
+      ["FERRICSTORE.NAMESPACE", "LIST"],
+      ["FERRICSTORE.NAMESPACE", "DELETE", "tenant:"],
+      ["FERRICSTORE.QUOTA", "SET", "tenant:", "KEYS", 10],
+      ["FERRICSTORE.QUOTA", "GET", "tenant:"],
+      ["FERRICSTORE.QUOTA", "USAGE", "tenant:"],
+      ["FERRICSTORE.TELEMETRY", "CLUSTER_INFO"],
+      ["FERRICSTORE.TELEMETRY", "NAMESPACE_USAGE", "tenant:"],
+      ["FERRICSTORE.TELEMETRY", "FLOW_QUERY", "TYPE", "order"],
+      ["FERRICSTORE.TELEMETRY", "FLOW_HISTORY", "flow-1", "PARTITION", "tenant:"]
     ]);
   });
 

@@ -2,7 +2,8 @@ import net from "node:net";
 import type { AddressInfo, Socket } from "node:net";
 import { afterEach, expect, test } from "vitest";
 import { NativeAdapter, ReconnectingExecutor } from "../src/adapters.js";
-import { HEADER_SIZE, MAGIC, OPCODES, RESPONSE_VERSION, encodeValue } from "../src/protocol.js";
+import { HEADER_SIZE, MAGIC, OPCODES, RESPONSE_VERSION, decodeValue, encodeValue } from "../src/protocol.js";
+import { RoutingTopology, TopologyNativeAdapterPool } from "../src/topology.js";
 
 const servers: net.Server[] = [];
 
@@ -108,6 +109,244 @@ test("ReconnectingExecutor reconnects when the native adapter was closed while i
   }
 });
 
+test("RoutingTopology builds 1024-slot hash-tag aware routes", () => {
+  const topology = RoutingTopology.build({
+    route_epoch: 7,
+    shard_count: 2,
+    ranges: [
+      {
+        endpoint: { host: "node-a.local", native_port: 6388, node: "a@cluster" },
+        first_slot: 0,
+        lane_id: 1,
+        last_slot: 511,
+        shard: 0
+      },
+      {
+        endpoint: { host: "node-b.local", native_port: 6389, node: "b@cluster" },
+        first_slot: 512,
+        lane_id: 2,
+        last_slot: 1023,
+        shard: 1
+      }
+    ]
+  });
+
+  const shard0Key = Array.from({ length: 10_000 }, (_, index) => `slot-a-${index}`).find(
+    (key) => RoutingTopology.slotForKey(key) < 512
+  );
+  const shard1Key = Array.from({ length: 10_000 }, (_, index) => `slot-b-${index}`).find(
+    (key) => RoutingTopology.slotForKey(key) >= 512
+  );
+
+  expect(shard0Key).toBeDefined();
+  expect(shard1Key).toBeDefined();
+  expect(topology.routeEpoch).toBe(7);
+  expect(RoutingTopology.slotForKey("{tenant}:one")).toBe(RoutingTopology.slotForKey("{tenant}:two"));
+  expect(topology.routeKey(shard0Key ?? "slot-a-0")).toMatchObject({ shard: 0, endpoint: { host: "node-a.local" } });
+  expect(topology.routeKey(shard1Key ?? "slot-b-0")).toMatchObject({ laneId: 2, endpointKey: "node-b.local:6389" });
+});
+
+test("TopologyNativeAdapterPool routes keyed commands to learned shard leader lane", async () => {
+  const leaderRequests: TestRequest[] = [];
+  const leader = await startCountingServer((request) => {
+    leaderRequests.push(request);
+    return undefined;
+  });
+  const leaderAddress = leader.address() as AddressInfo;
+  const seed = await startCountingServer((request) => {
+    if (request.opcode !== OPCODES.shards) return undefined;
+    return {
+      ranges: [
+        {
+          endpoint: {
+            host: "127.0.0.1",
+            native_port: leaderAddress.port,
+            node: "leader@local"
+          },
+          first_slot: 0,
+          lane_id: 3,
+          last_slot: 1023,
+          shard: 0
+        }
+      ],
+      route_epoch: 1,
+      shard_count: 1
+    };
+  });
+  const seedAddress = seed.address() as AddressInfo;
+  const pool = await TopologyNativeAdapterPool.fromUrls([`ferric://127.0.0.1:${seedAddress.port}`], {
+    trustedHosts: ["127.0.0.1"]
+  });
+
+  try {
+    await pool.executeCommand("SET", "tenant-key", "value");
+
+    const routedSet = leaderRequests.find((request) => request.opcode === OPCODES.set);
+    expect(routedSet).toMatchObject({ laneId: 3, opcode: OPCODES.set });
+    expect(pool.route("tenant-key")).toMatchObject({
+      endpoint: { host: "127.0.0.1", nativePort: leaderAddress.port },
+      leaderNode: "leader@local"
+    });
+  } finally {
+    await pool.close();
+  }
+});
+
+test("TopologyNativeAdapterPool keeps unpartitioned Flow queries on the control path", async () => {
+  const leaderRequests: TestRequest[] = [];
+  const leader = await startCountingServer((request) => {
+    leaderRequests.push(request);
+    return [];
+  });
+  const leaderAddress = leader.address() as AddressInfo;
+  const seedRequests: TestRequest[] = [];
+  const seed = await startCountingServer((request) => {
+    seedRequests.push(request);
+    if (request.opcode !== OPCODES.shards) return [];
+    return {
+      ranges: [
+        {
+          endpoint: { host: "127.0.0.1", native_port: leaderAddress.port, node: "leader@local" },
+          first_slot: 0,
+          lane_id: 4,
+          last_slot: 1023,
+          shard: 0
+        }
+      ],
+      route_epoch: 1,
+      shard_count: 1
+    };
+  });
+  const seedAddress = seed.address() as AddressInfo;
+  const pool = await TopologyNativeAdapterPool.fromUrls([`ferric://127.0.0.1:${seedAddress.port}`], {
+    trustedHosts: ["127.0.0.1"]
+  });
+
+  try {
+    await pool.executeCommand("FLOW.SEARCH", "order");
+    await pool.executeCommand("FLOW.SEARCH", "order", "PARTITION", "tenant-a");
+
+    expect(seedRequests.some((request) => request.opcode === OPCODES.flowSearch)).toBe(true);
+    expect(leaderRequests.some((request) => request.opcode === OPCODES.flowSearch && request.laneId === 4)).toBe(true);
+  } finally {
+    await pool.close();
+  }
+});
+
+test("TopologyNativeAdapterPool routes command_exec commands by real key positions only", async () => {
+  const operationSlot = RoutingTopology.slotForKey("OR");
+  const streamTokenSlot = RoutingTopology.slotForKey("STREAMS");
+  const bitopTag = keyForSlot((slot) => (operationSlot < 512 ? slot >= 512 : slot < 512), "bitmap");
+  const streamTag = keyForSlot((slot) => (streamTokenSlot < 512 ? slot >= 512 : slot < 512), "stream");
+  const bitopSlot = RoutingTopology.slotForKey(bitopTag);
+  const streamSlot = RoutingTopology.slotForKey(streamTag);
+  const leftKey = keyForSlot((slot) => slot < 512, "rename-left");
+  const rightKey = keyForSlot((slot) => slot >= 512, "rename-right");
+
+  const lowRequests: TestRequest[] = [];
+  const low = await startCountingServer((request) => {
+    lowRequests.push(request);
+    return "OK";
+  });
+  const lowAddress = low.address() as AddressInfo;
+  const highRequests: TestRequest[] = [];
+  const high = await startCountingServer((request) => {
+    highRequests.push(request);
+    return "OK";
+  });
+  const highAddress = high.address() as AddressInfo;
+  const seedRequests: TestRequest[] = [];
+  const seed = await startCountingServer((request) => {
+    seedRequests.push(request);
+    if (request.opcode !== OPCODES.shards) return "OK";
+    return twoShardTopology(lowAddress.port, highAddress.port);
+  });
+  const seedAddress = seed.address() as AddressInfo;
+  const pool = await TopologyNativeAdapterPool.fromUrls([`ferric://127.0.0.1:${seedAddress.port}`], {
+    endpointPolicy: "any"
+  });
+
+  try {
+    await pool.executeCommand("BITOP", "OR", `{${bitopTag}}:out`, `{${bitopTag}}:in`);
+    await pool.executeCommand("XREAD", "STREAMS", `{${streamTag}}:events`, "0-0");
+    await pool.executeCommand("RENAME", leftKey, rightKey);
+
+    const bitopTarget = bitopSlot < 512 ? lowRequests : highRequests;
+    const bitopWrong = bitopSlot < 512 ? highRequests : lowRequests;
+    expect(bitopTarget.some((request) => commandExecName(request) === "BITOP")).toBe(true);
+    expect(bitopWrong.some((request) => commandExecName(request) === "BITOP")).toBe(false);
+
+    const streamTarget = streamSlot < 512 ? lowRequests : highRequests;
+    const streamWrong = streamSlot < 512 ? highRequests : lowRequests;
+    expect(streamTarget.some((request) => commandExecName(request) === "XREAD")).toBe(true);
+    expect(streamWrong.some((request) => commandExecName(request) === "XREAD")).toBe(false);
+
+    expect(seedRequests.filter((request) => commandExecName(request) === "RENAME")).toHaveLength(1);
+  } finally {
+    await pool.close();
+  }
+});
+
+test("TopologyNativeAdapterPool rejects untrusted learned endpoints by default", async () => {
+  const seed = await startCountingServer((request) => {
+    if (request.opcode !== OPCODES.shards) return undefined;
+    return {
+      ranges: [
+        {
+          endpoint: { host: "other.local", native_port: 6388, node: "other@cluster" },
+          first_slot: 0,
+          lane_id: 1,
+          last_slot: 1023,
+          shard: 0
+        }
+      ]
+    };
+  });
+  const seedAddress = seed.address() as AddressInfo;
+  const pool = await TopologyNativeAdapterPool.fromUrls([`ferric://127.0.0.1:${seedAddress.port}`]);
+
+  try {
+    await expect(pool.executeCommand("GET", "tenant-key")).rejects.toThrow("unsafe learned endpoint");
+  } finally {
+    await pool.close();
+  }
+});
+
+test("TopologyNativeAdapterPool rejects learned seed host ports unless explicitly trusted", async () => {
+  const learned = await startCountingServer(() => "OK");
+  const learnedAddress = learned.address() as AddressInfo;
+  const seed = await startCountingServer((request) => {
+    if (request.opcode !== OPCODES.shards) return "OK";
+    return {
+      ranges: [
+        {
+          endpoint: { host: "127.0.0.1", native_port: learnedAddress.port, node: "other-port@local" },
+          first_slot: 0,
+          lane_id: 1,
+          last_slot: 1023,
+          shard: 0
+        }
+      ]
+    };
+  });
+  const seedAddress = seed.address() as AddressInfo;
+  const seedUrl = `ferric://127.0.0.1:${seedAddress.port}`;
+  const strictPool = await TopologyNativeAdapterPool.fromUrls([seedUrl]);
+
+  try {
+    await expect(strictPool.executeCommand("GET", "tenant-key")).rejects.toThrow("unsafe learned endpoint");
+  } finally {
+    await strictPool.close();
+  }
+
+  const trustedPool = await TopologyNativeAdapterPool.fromUrls([seedUrl], { trustedHosts: ["127.0.0.1"] });
+  try {
+    await expect(trustedPool.executeCommand("GET", "tenant-key")).resolves.toBeDefined();
+  } finally {
+    await trustedPool.close();
+  }
+});
+
 async function startFragmentingServer(options: { chunkOnlyPing?: boolean } = {}): Promise<net.Server> {
   const server = net.createServer((socket) => handleSocket(socket, options));
   servers.push(server);
@@ -119,6 +358,39 @@ async function startFragmentingServer(options: { chunkOnlyPing?: boolean } = {})
     });
   });
   return server;
+}
+
+function twoShardTopology(lowPort: number, highPort: number): unknown {
+  return {
+    ranges: [
+      {
+        endpoint: { host: "127.0.0.1", native_port: lowPort, node: "low@local" },
+        first_slot: 0,
+        lane_id: 2,
+        last_slot: 511,
+        shard: 0
+      },
+      {
+        endpoint: { host: "127.0.0.1", native_port: highPort, node: "high@local" },
+        first_slot: 512,
+        lane_id: 3,
+        last_slot: 1023,
+        shard: 1
+      }
+    ],
+    route_epoch: 1,
+    shard_count: 2
+  };
+}
+
+function keyForSlot(predicate: (slot: number) => boolean, prefix: string): string {
+  const key = Array.from({ length: 20_000 }, (_, index) => `${prefix}-${index}`).find((candidate) =>
+    predicate(RoutingTopology.slotForKey(candidate))
+  );
+  if (key == null) {
+    throw new Error(`no key found for ${prefix}`);
+  }
+  return key;
 }
 
 async function startCountingServer(onRequest: (request: TestRequest) => void): Promise<net.Server> {
@@ -152,10 +424,14 @@ async function listen(server: net.Server): Promise<void> {
 interface TestRequest {
   readonly laneId: number;
   readonly opcode: number;
+  readonly payload: unknown;
   readonly requestId: bigint;
 }
 
-function handleSocket(socket: Socket, options: { chunkOnlyPing?: boolean; onRequest?: (request: TestRequest) => void }): void {
+function handleSocket(
+  socket: Socket,
+  options: { chunkOnlyPing?: boolean; onRequest?: (request: TestRequest) => unknown }
+): void {
   let input: Buffer = Buffer.alloc(0);
   socket.on("data", (chunk: Buffer) => {
     input = Buffer.concat([input, chunk]);
@@ -164,9 +440,9 @@ function handleSocket(socket: Socket, options: { chunkOnlyPing?: boolean; onRequ
       if (request == null) {
         return;
       }
-      options.onRequest?.(request);
+      const override = options.onRequest?.(request);
       input = request.rest;
-      const value = request.opcode === OPCODES.ping ? "PONG" : "OK";
+      const value = override ?? (request.opcode === OPCODES.ping ? "PONG" : "OK");
       if (options.chunkOnlyPing === true && request.opcode === OPCODES.ping) {
         socket.write(responseFrame(request.opcode, request.laneId, request.requestId, "partial-response", 0x20));
       } else {
@@ -213,9 +489,26 @@ function readRequest(input: Buffer): (TestRequest & { readonly rest: Buffer }) |
   return {
     laneId: input.readUInt32BE(6),
     opcode: input.readUInt16BE(10),
+    payload: decodeValue(input.subarray(HEADER_SIZE, frameLength)).value,
     requestId: input.readBigUInt64BE(12),
     rest: input.subarray(frameLength)
   };
+}
+
+function commandExecName(request: TestRequest): string | undefined {
+  if (request.opcode !== OPCODES.commandExec) {
+    return undefined;
+  }
+  const payload = request.payload;
+  if (payload instanceof Map) {
+    const command = (payload as Map<unknown, unknown>).get("command");
+    return typeof command === "string" ? command : Buffer.isBuffer(command) ? command.toString("utf8") : undefined;
+  }
+  if (typeof payload === "object" && payload != null && "command" in payload) {
+    const command = (payload as { readonly command?: unknown }).command;
+    return typeof command === "string" ? command : Buffer.isBuffer(command) ? command.toString("utf8") : undefined;
+  }
+  return undefined;
 }
 
 function responseFrame(opcode: number, laneId: number, requestId: bigint, value: unknown, flags = 0): Buffer {

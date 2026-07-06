@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import { FerricStoreClient, JsonCodec, WorkflowClient, fail } from "../src/index.js";
 import { FakeExecutor } from "./fake-executor.js";
@@ -98,7 +99,11 @@ describe("FerricStoreClient edge cases", () => {
     expect(executor.calls.length).toBeGreaterThan(0);
     for (const call of executor.calls) {
       expect(call[0]).toBe("FLOW.CREATE_MANY");
-      expect(String(call[1])).toMatch(/^__flow_auto__:[0-9]+$/u);
+      const partition = call[1];
+      if (typeof partition !== "string") {
+        throw new TypeError("expected auto partition key to be a string");
+      }
+      expect(partition).toMatch(/^__flow_auto__:[0-9]+$/u);
       expect(call).toContain("INDEPENDENT");
       expect(call).toContain("true");
     }
@@ -281,6 +286,12 @@ describe("Workflow edge cases", () => {
     expect(executor.calls[1]).toContain("ERROR");
     const errorIndex = executor.calls[1]?.indexOf("ERROR") ?? -1;
     const errorPayload = executor.calls[1]?.[errorIndex + 1];
-    expect(String(errorPayload)).toContain("bad input");
+    const errorText =
+      Buffer.isBuffer(errorPayload)
+        ? errorPayload.toString("utf8")
+        : typeof errorPayload === "string"
+          ? errorPayload
+          : JSON.stringify(errorPayload);
+    expect(errorText).toContain("bad input");
   });
 });

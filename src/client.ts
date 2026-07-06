@@ -11,6 +11,7 @@ import {
   autoPartitionKeyForId,
   expandManyResponse,
   nowMs,
+  normalizeRefMeta,
   okResponse,
   parseKvResponse,
   sleep,
@@ -26,6 +27,11 @@ import {
   type NativeAdapterOptions,
   type ReconnectOptions
 } from "./adapters.js";
+import {
+  TopologyNativeAdapterPool,
+  type RoutingRoute,
+  type RoutingTopology
+} from "./topology.js";
 import {
   BitmapStore,
   GeoStore,
@@ -194,6 +200,15 @@ export interface ReadOptions {
   consistentProjection?: boolean;
 }
 
+export type SearchStateMeta = StateMeta | Record<string, StateMeta>;
+
+export interface SearchOptions extends ReadOptions {
+  attributes?: Record<string, CommandArgument>;
+  stateMeta?: SearchStateMeta;
+}
+
+export type ManagementPairs = Record<string, CommandArgument>;
+
 export class FerricStoreClient {
   readonly executor: CommandExecutor;
   readonly codec: Codec;
@@ -243,7 +258,25 @@ export class FerricStoreClient {
 
   static async fromUrl(url: string, options: FerricStoreClientFromUrlOptions = {}): Promise<FerricStoreClient> {
     const reconnectOptions = options.reconnect ?? options.nativeOptions?.autoReconnect ?? true;
-    const createExecutor = async () => await NativeAdapter.fromUrl(url, options.nativeOptions);
+    const nativeOptions = options.nativeOptions ?? {};
+    const seeds = nativeOptions.seeds ?? [];
+    const createExecutor = async () =>
+      nativeOptions.haRouting === true || seeds.length > 0
+        ? await TopologyNativeAdapterPool.fromUrls([url, ...seeds], nativeOptions)
+        : await NativeAdapter.fromUrl(url, nativeOptions);
+    const executor =
+      reconnectOptions === false
+        ? await createExecutor()
+        : new ReconnectingExecutor(createExecutor, reconnectOptions === true ? {} : reconnectOptions);
+    return new FerricStoreClient(executor, options);
+  }
+
+  static async fromUrls(urls: readonly string[], options: FerricStoreClientFromUrlOptions = {}): Promise<FerricStoreClient> {
+    if (urls.length === 0) {
+      throw new Error("FerricStoreClient.fromUrls requires at least one URL");
+    }
+    const reconnectOptions = options.reconnect ?? options.nativeOptions?.autoReconnect ?? true;
+    const createExecutor = async () => await TopologyNativeAdapterPool.fromUrls(urls, options.nativeOptions);
     const executor =
       reconnectOptions === false
         ? await createExecutor()
@@ -264,6 +297,20 @@ export class FerricStoreClient {
 
   async close(): Promise<void> {
     await this.executor.close?.();
+  }
+
+  async refreshTopology(): Promise<RoutingTopology> {
+    if (this.executor.refreshTopology == null) {
+      throw new Error("topology refresh requires a topology-aware native executor");
+    }
+    return await this.executor.refreshTopology();
+  }
+
+  async route(key: string | Buffer): Promise<RoutingRoute> {
+    if (this.executor.route == null) {
+      throw new Error("route lookup requires a topology-aware native executor");
+    }
+    return await this.executor.route(key);
   }
 
   async ping(message?: CommandArgument): Promise<unknown> {
@@ -348,7 +395,7 @@ export class FerricStoreClient {
   }
 
   async clientInfo(): Promise<string> {
-    return text(await this.command("CLIENT", "INFO"));
+    return infoText(await this.command("CLIENT", "INFO"));
   }
 
   async clientList(options: { type?: string } = {}): Promise<string> {
@@ -424,8 +471,8 @@ export class FerricStoreClient {
     return Number(await this.command("PUBSUB", "NUMPAT"));
   }
 
-  async aclSetUser(username: string, rules: string[]): Promise<boolean> {
-    return okResponse(await this.command("ACL", "SETUSER", username, ...rules));
+  async aclSetUser(username: string, rules: string | readonly string[]): Promise<boolean> {
+    return okResponse(await this.command("ACL", "SETUSER", username, ...ruleArgs(rules)));
   }
 
   async aclDelUser(...usernames: string[]): Promise<number> {
@@ -438,6 +485,10 @@ export class FerricStoreClient {
 
   async aclList(): Promise<unknown[]> {
     return arrayResponse(await this.command("ACL", "LIST"));
+  }
+
+  async aclListUsers(): Promise<unknown[]> {
+    return await this.aclList();
   }
 
   async aclWhoami(): Promise<string> {
@@ -565,6 +616,66 @@ export class FerricStoreClient {
 
   async ferricstoreDoctor(...args: CommandArgument[]): Promise<unknown> {
     return await this.command("FERRICSTORE.DOCTOR", ...args);
+  }
+
+  async capabilities(): Promise<Record<string, unknown>> {
+    return normalizeAdminResponse(await this.command("FERRICSTORE.CAPABILITIES")) as Record<string, unknown>;
+  }
+
+  async ensureNamespace(prefix: string, attrs: ManagementPairs = {}): Promise<unknown> {
+    return normalizeAdminResponse(
+      await this.command("FERRICSTORE.NAMESPACE", "ENSURE", prefix, ...managementPairArgs(attrs))
+    );
+  }
+
+  async getNamespace(prefix: string): Promise<unknown> {
+    return normalizeAdminResponse(await this.command("FERRICSTORE.NAMESPACE", "GET", prefix));
+  }
+
+  async listNamespaces(): Promise<unknown> {
+    return normalizeAdminResponse(await this.command("FERRICSTORE.NAMESPACE", "LIST"));
+  }
+
+  async deleteNamespace(prefix: string): Promise<unknown> {
+    return normalizeAdminResponse(await this.command("FERRICSTORE.NAMESPACE", "DELETE", prefix));
+  }
+
+  async setQuota(namespace: string, quotaSpec: ManagementPairs = {}): Promise<unknown> {
+    return normalizeAdminResponse(
+      await this.command("FERRICSTORE.QUOTA", "SET", namespace, ...managementPairArgs(quotaSpec))
+    );
+  }
+
+  async getQuota(namespace: string): Promise<unknown> {
+    return normalizeAdminResponse(await this.command("FERRICSTORE.QUOTA", "GET", namespace));
+  }
+
+  async quotaUsage(namespace: string): Promise<unknown> {
+    return normalizeAdminResponse(await this.command("FERRICSTORE.QUOTA", "USAGE", namespace));
+  }
+
+  async clusterInfo(): Promise<Record<string, unknown>> {
+    return normalizeAdminResponse(await this.command("FERRICSTORE.TELEMETRY", "CLUSTER_INFO")) as Record<string, unknown>;
+  }
+
+  async namespaceUsage(prefix: string): Promise<Record<string, unknown>> {
+    return normalizeAdminResponse(
+      await this.command("FERRICSTORE.TELEMETRY", "NAMESPACE_USAGE", prefix)
+    ) as Record<string, unknown>;
+  }
+
+  async flowQuery(attrs: ManagementPairs = {}): Promise<unknown[]> {
+    const response = normalizeAdminResponse(
+      await this.command("FERRICSTORE.TELEMETRY", "FLOW_QUERY", ...managementPairArgs(attrs))
+    );
+    return Array.isArray(response) ? [...(response as unknown[])] : [];
+  }
+
+  async flowHistory(id: string, attrs: ManagementPairs = {}): Promise<unknown[]> {
+    const response = normalizeAdminResponse(
+      await this.command("FERRICSTORE.TELEMETRY", "FLOW_HISTORY", id, ...managementPairArgs(attrs))
+    );
+    return Array.isArray(response) ? [...(response as unknown[])] : [];
   }
 
   async create(id: string, options: CreateOptions): Promise<FlowRecord | Buffer | unknown> {
@@ -1172,6 +1283,15 @@ export class FerricStoreClient {
     return await this.indexQuery("FLOW.LIST", type, options);
   }
 
+  async search(type: string, options: SearchOptions = {}): Promise<FlowRecord[]> {
+    const args: CommandArgument[] = ["FLOW.SEARCH", type];
+    appendReadOptions(args, options);
+    appendAttributes(args, options.attributes);
+    appendSearchStateMeta(args, options.state, options.stateMeta);
+    const response = await this.command(...args);
+    return Array.isArray(response) ? this.records(response) : [];
+  }
+
   async terminals(type: string, options: ReadOptions = {}): Promise<FlowRecord[]> {
     return await this.indexQuery("FLOW.TERMINALS", type, options);
   }
@@ -1387,6 +1507,20 @@ class ErrorMappingExecutor implements CommandExecutor {
     }
   }
 
+  async refreshTopology(): Promise<RoutingTopology> {
+    if (this.executor.refreshTopology == null) {
+      throw new Error("topology refresh requires a topology-aware native executor");
+    }
+    return await this.executor.refreshTopology();
+  }
+
+  async route(key: string | Buffer): Promise<RoutingRoute> {
+    if (this.executor.route == null) {
+      throw new Error("route lookup requires a topology-aware native executor");
+    }
+    return await this.executor.route(key);
+  }
+
   async close(): Promise<void> {
     await this.executor.close?.();
   }
@@ -1440,6 +1574,20 @@ class AutoBatchExecutor implements CommandExecutor {
     }
 
     return await Promise.all(commands.map((command) => this.executor.executeCommand(...command)));
+  }
+
+  async refreshTopology(): Promise<RoutingTopology> {
+    if (this.executor.refreshTopology == null) {
+      throw new Error("topology refresh requires a topology-aware native executor");
+    }
+    return await this.executor.refreshTopology();
+  }
+
+  async route(key: string | Buffer): Promise<RoutingRoute> {
+    if (this.executor.route == null) {
+      throw new Error("route lookup requires a topology-aware native executor");
+    }
+    return await this.executor.route(key);
   }
 
   async close(): Promise<void> {
@@ -1684,6 +1832,84 @@ function appendStateMeta(args: CommandArgument[], stateMeta: StateMeta | undefin
   for (const [name, value] of Object.entries(stateMeta ?? {})) {
     args.push("STATE_META", name, value);
   }
+}
+
+function appendAttributes(args: CommandArgument[], attributes: Record<string, CommandArgument> | undefined): void {
+  for (const [name, value] of Object.entries(attributes ?? {})) {
+    args.push("ATTRIBUTE", name, value);
+  }
+}
+
+function appendSearchStateMeta(
+  args: CommandArgument[],
+  state: string | undefined,
+  stateMeta: SearchStateMeta | undefined
+): void {
+  const entries = Object.entries(stateMeta ?? {});
+  if (entries.length === 0) {
+    return;
+  }
+
+  if (entries.every(([, value]) => isPlainObject(value))) {
+    for (const [metaState, values] of entries) {
+      args.push("STATE_META", metaState, values as Record<string, unknown>);
+    }
+    return;
+  }
+
+  if (state == null) {
+    throw new Error("search stateMeta filters require state or nested state metadata");
+  }
+
+  args.push("STATE_META", state, stateMeta);
+}
+
+function normalizeAdminResponse(value: unknown): unknown {
+  return normalizeRefMeta(value);
+}
+
+function infoText(value: unknown): string {
+  if (typeof value === "string" || Buffer.isBuffer(value)) {
+    return text(value);
+  }
+  const normalized = normalizeRefMeta(value);
+  if (isPlainObject(normalized)) {
+    return Object.entries(normalized)
+      .map(([key, item]) => `${key}=${diagnosticValueText(item)}`)
+      .join(" ");
+  }
+  return diagnosticValueText(normalized);
+}
+
+function diagnosticValueText(value: unknown): string {
+  if (value == null) {
+    return "";
+  }
+  if (Buffer.isBuffer(value)) {
+    return value.toString("utf8");
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
+
+function managementPairArgs(pairs: ManagementPairs): CommandArgument[] {
+  const args: CommandArgument[] = [];
+  for (const [key, value] of Object.entries(pairs)) {
+    if (value != null) {
+      args.push(key.toUpperCase(), value);
+    }
+  }
+  return args;
+}
+
+function ruleArgs(rules: string | readonly string[]): string[] {
+  return typeof rules === "string" ? [rules] : [...rules];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value != null && !Array.isArray(value) && !Buffer.isBuffer(value);
 }
 
 function sharedCreateManyStateMeta(items: readonly CreateItem[], stateMeta: StateMeta | undefined): StateMeta | undefined {

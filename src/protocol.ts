@@ -13,24 +13,172 @@ export const FLAG_MORE_CHUNKS = 0x20;
 
 export const STATUS_OK = 0;
 
+export const COMMAND_OPCODES = {
+  "HELLO": 0x0001,
+  "AUTH": 0x0002,
+  "PING": 0x0003,
+  "CLIENT.SETNAME": 0x0004,
+  "CLIENT.INFO": 0x0005,
+  "ROUTE": 0x0006,
+  "SHARDS": 0x0007,
+  "BACKPRESSURE": 0x0008,
+  "QUIT": 0x0009,
+  "GOAWAY": 0x000a,
+  "OPTIONS": 0x000b,
+  "STARTUP": 0x000c,
+  "WINDOW_UPDATE": 0x000d,
+  "PIPELINE": 0x000e,
+  "ROUTE_BATCH": 0x000f,
+  "EVENT": 0x0010,
+  "SUBSCRIBE_EVENTS": 0x0011,
+  "UNSUBSCRIBE_EVENTS": 0x0012,
+  "COMMAND_EXEC": 0x0100,
+  "GET": 0x0101,
+  "SET": 0x0102,
+  "DEL": 0x0103,
+  "MGET": 0x0104,
+  "MSET": 0x0105,
+  "CAS": 0x0106,
+  "LOCK": 0x0107,
+  "UNLOCK": 0x0108,
+  "EXTEND": 0x0109,
+  "RATELIMIT.ADD": 0x010a,
+  "FETCH_OR_COMPUTE": 0x010b,
+  "FETCH_OR_COMPUTE_RESULT": 0x010c,
+  "FETCH_OR_COMPUTE_ERROR": 0x010d,
+  "HSET": 0x0110,
+  "HGET": 0x0111,
+  "HMGET": 0x0112,
+  "HGETALL": 0x0113,
+  "LPUSH": 0x0120,
+  "RPUSH": 0x0121,
+  "LPOP": 0x0122,
+  "RPOP": 0x0123,
+  "LRANGE": 0x0124,
+  "SADD": 0x0130,
+  "SREM": 0x0131,
+  "SMEMBERS": 0x0132,
+  "SISMEMBER": 0x0133,
+  "ZADD": 0x0140,
+  "ZREM": 0x0141,
+  "ZRANGE": 0x0142,
+  "ZSCORE": 0x0143,
+  "FLOW.CREATE": 0x0201,
+  "FLOW.GET": 0x0202,
+  "FLOW.CLAIM_DUE": 0x0203,
+  "FLOW.COMPLETE": 0x0204,
+  "FLOW.TRANSITION": 0x0205,
+  "FLOW.RETRY": 0x0206,
+  "FLOW.FAIL": 0x0207,
+  "FLOW.CANCEL": 0x0208,
+  "FLOW.EXTEND_LEASE": 0x0209,
+  "FLOW.HISTORY": 0x020a,
+  "FLOW.VALUE.PUT": 0x020b,
+  "FLOW.VALUE.MGET": 0x020c,
+  "FLOW.SIGNAL": 0x020d,
+  "FLOW.LIST": 0x020e,
+  "FLOW.CREATE_MANY": 0x020f,
+  "FLOW.COMPLETE_MANY": 0x0210,
+  "FLOW.TRANSITION_MANY": 0x0211,
+  "FLOW.RETRY_MANY": 0x0212,
+  "FLOW.FAIL_MANY": 0x0213,
+  "FLOW.CANCEL_MANY": 0x0214,
+  "FLOW.RECLAIM": 0x0215,
+  "FLOW.REWIND": 0x0216,
+  "FLOW.TERMINALS": 0x0217,
+  "FLOW.FAILURES": 0x0218,
+  "FLOW.BY_PARENT": 0x0219,
+  "FLOW.BY_ROOT": 0x021a,
+  "FLOW.BY_CORRELATION": 0x021b,
+  "FLOW.INFO": 0x021c,
+  "FLOW.STUCK": 0x021d,
+  "FLOW.POLICY.SET": 0x021e,
+  "FLOW.POLICY.GET": 0x021f,
+  "FLOW.SPAWN_CHILDREN": 0x0220,
+  "FLOW.RETENTION_CLEANUP": 0x0221,
+  "FLOW.STEP_CONTINUE": 0x0222,
+  "FLOW.START_AND_CLAIM": 0x0223,
+  "FLOW.RUN_STEPS_MANY": 0x0224,
+  "FLOW.SCHEDULE.CREATE": 0x0225,
+  "FLOW.SCHEDULE.GET": 0x0226,
+  "FLOW.SCHEDULE.DELETE": 0x0227,
+  "FLOW.SCHEDULE.FIRE_DUE": 0x0228,
+  "FLOW.SCHEDULE.LIST": 0x0229,
+  "FLOW.SCHEDULE.FIRE": 0x022a,
+  "FLOW.SCHEDULE.PAUSE": 0x022b,
+  "FLOW.SCHEDULE.RESUME": 0x022c,
+  "FLOW.STATS": 0x022d,
+  "FLOW.ATTRIBUTES": 0x022e,
+  "FLOW.ATTRIBUTE_VALUES": 0x022f,
+  "FLOW.SEARCH": 0x0230,
+  "FLOW.EFFECT.RESERVE": 0x0240,
+  "FLOW.EFFECT.CONFIRM": 0x0241,
+  "FLOW.EFFECT.FAIL": 0x0242,
+  "FLOW.EFFECT.COMPENSATE": 0x0243,
+  "FLOW.EFFECT.GET": 0x0244,
+  "FLOW.GOVERNANCE.LEDGER": 0x0245,
+  "FLOW.APPROVAL.REQUEST": 0x0246,
+  "FLOW.APPROVAL.APPROVE": 0x0247,
+  "FLOW.APPROVAL.REJECT": 0x0248,
+  "FLOW.APPROVAL.GET": 0x0249,
+  "FLOW.CIRCUIT.OPEN": 0x024a,
+  "FLOW.CIRCUIT.CLOSE": 0x024b,
+  "FLOW.CIRCUIT.GET": 0x024c,
+  "FLOW.BUDGET.RESERVE": 0x024d,
+  "FLOW.BUDGET.GET": 0x024e,
+  "FLOW.LIMIT.LEASE": 0x024f,
+  "FLOW.LIMIT.SPEND": 0x0250,
+  "FLOW.LIMIT.RELEASE": 0x0251,
+  "FLOW.LIMIT.GET": 0x0252,
+  "FLOW.APPROVAL.LIST": 0x0253,
+  "FLOW.GOVERNANCE.OVERVIEW": 0x0254,
+  "FLOW.BUDGET.LIST": 0x0255,
+  "FLOW.LIMIT.LIST": 0x0256,
+  "FLOW.BUDGET.COMMIT": 0x0257,
+  "FLOW.BUDGET.RELEASE": 0x0258,
+  "CLUSTER.HEALTH": 0x0301,
+  "CLUSTER.STATS": 0x0302,
+  "CLUSTER.KEYSLOT": 0x0303,
+  "CLUSTER.SLOTS": 0x0304,
+  "CLUSTER.STATUS": 0x0305,
+  "CLUSTER.JOIN": 0x0306,
+  "CLUSTER.LEAVE": 0x0307,
+  "CLUSTER.FAILOVER": 0x0308,
+  "CLUSTER.PROMOTE": 0x0309,
+  "CLUSTER.DEMOTE": 0x030a,
+  "CLUSTER.ROLE": 0x030b,
+  "FERRICSTORE.KEY_INFO": 0x030c,
+  "FERRICSTORE.CONFIG": 0x030d,
+  "FERRICSTORE.HOTNESS": 0x030e,
+  "FERRICSTORE.METRICS": 0x030f,
+  "FERRICSTORE.BLOBGC": 0x0310
+} as const;
+
 export const OPCODES = {
-  startup: 0x000c,
-  auth: 0x0002,
-  ping: 0x0003,
-  clientSetName: 0x0004,
-  clientInfo: 0x0005,
-  commandExec: 0x0100,
-  get: 0x0101,
-  set: 0x0102,
-  del: 0x0103,
-  mget: 0x0104,
-  mset: 0x0105,
-  pipeline: 0x000e,
-  flowCreate: 0x0201,
-  flowClaimDue: 0x0203,
-  flowComplete: 0x0204,
-  flowCreateMany: 0x020f,
-  flowCompleteMany: 0x0210
+  startup: COMMAND_OPCODES.STARTUP,
+  auth: COMMAND_OPCODES.AUTH,
+  ping: COMMAND_OPCODES.PING,
+  clientSetName: COMMAND_OPCODES["CLIENT.SETNAME"],
+  clientInfo: COMMAND_OPCODES["CLIENT.INFO"],
+  route: COMMAND_OPCODES.ROUTE,
+  routeBatch: COMMAND_OPCODES.ROUTE_BATCH,
+  shards: COMMAND_OPCODES.SHARDS,
+  backpressure: COMMAND_OPCODES.BACKPRESSURE,
+  options: COMMAND_OPCODES.OPTIONS,
+  quit: COMMAND_OPCODES.QUIT,
+  commandExec: COMMAND_OPCODES.COMMAND_EXEC,
+  get: COMMAND_OPCODES.GET,
+  set: COMMAND_OPCODES.SET,
+  del: COMMAND_OPCODES.DEL,
+  mget: COMMAND_OPCODES.MGET,
+  mset: COMMAND_OPCODES.MSET,
+  pipeline: COMMAND_OPCODES.PIPELINE,
+  flowCreate: COMMAND_OPCODES["FLOW.CREATE"],
+  flowClaimDue: COMMAND_OPCODES["FLOW.CLAIM_DUE"],
+  flowComplete: COMMAND_OPCODES["FLOW.COMPLETE"],
+  flowCreateMany: COMMAND_OPCODES["FLOW.CREATE_MANY"],
+  flowCompleteMany: COMMAND_OPCODES["FLOW.COMPLETE_MANY"],
+  flowSearch: COMMAND_OPCODES["FLOW.SEARCH"]
 } as const;
 
 const COMPACT_FLOW_CLAIM_JOBS = 0x80;
@@ -186,11 +334,51 @@ export function buildProtocolCommand(args: readonly CommandArgument[]): Protocol
   const command = asText(args[0]).toUpperCase();
   const commandArgs = args.slice(1);
 
+  if (command === "COMMAND_EXEC" && commandArgs.length >= 1) {
+    return commandExec(commandArgs);
+  }
+  if (command === "HELLO" || command === "STARTUP" || command === "WINDOW_UPDATE") {
+    return { laneId: 0, opcode: COMMAND_OPCODES[command], payload: optionMap(commandArgs) };
+  }
+  if (command === "AUTH") {
+    const payload =
+      commandArgs.length === 1
+        ? { password: commandArgs[0], username: "default" }
+        : { password: commandArgs[1], username: commandArgs[0] };
+    return { laneId: 0, opcode: OPCODES.auth, payload };
+  }
   if (command === "PING") {
     return { laneId: 0, opcode: OPCODES.ping, payload: commandArgs.length === 0 ? {} : { message: commandArgs[0] } };
   }
+  if (command === "OPTIONS") {
+    return { laneId: 0, opcode: OPCODES.options, payload: {} };
+  }
+  if (command === "BACKPRESSURE") {
+    return { laneId: 0, opcode: OPCODES.backpressure, payload: {} };
+  }
+  if (command === "QUIT") {
+    return { laneId: 0, opcode: OPCODES.quit, payload: {} };
+  }
+  if (command === "ROUTE" && commandArgs.length >= 1) {
+    return { laneId: 0, opcode: OPCODES.route, payload: { key: commandArgs[0] } };
+  }
+  if (command === "ROUTE_BATCH") {
+    return { laneId: 0, opcode: OPCODES.routeBatch, payload: { keys: commandArgs } };
+  }
+  if (command === "SHARDS") {
+    return { laneId: 0, opcode: OPCODES.shards, payload: {} };
+  }
   if (command === "CLIENT" && asText(commandArgs[0]).toUpperCase() === "SETNAME" && commandArgs.length === 2) {
     return { laneId: 0, opcode: OPCODES.clientSetName, payload: { name: commandArgs[1] } };
+  }
+  if (command === "CLIENT.SETNAME" && commandArgs.length === 1) {
+    return { laneId: 0, opcode: OPCODES.clientSetName, payload: { name: commandArgs[0] } };
+  }
+  if (
+    (command === "CLIENT" && asText(commandArgs[0]).toUpperCase() === "INFO" && commandArgs.length === 1) ||
+    (command === "CLIENT.INFO" && commandArgs.length === 0)
+  ) {
+    return { laneId: 0, opcode: OPCODES.clientInfo, payload: {} };
   }
   if (command === "GET" && commandArgs.length >= 1) {
     return { opcode: OPCODES.get, payload: { key: commandArgs[0] } };
@@ -210,7 +398,7 @@ export function buildProtocolCommand(args: readonly CommandArgument[]): Protocol
   if (command === "DEL") {
     return { opcode: OPCODES.del, payload: { keys: commandArgs } };
   }
-  if (command.startsWith("FLOW.") && hasFlowCommandOnlyOption(commandArgs)) {
+  if (command.startsWith("FLOW.") && hasFlowCommandOnlyOption(command, commandArgs)) {
     return commandExec(args);
   }
   if (command === "FLOW.CREATE") {
@@ -227,6 +415,9 @@ export function buildProtocolCommand(args: readonly CommandArgument[]): Protocol
   }
   if (command === "FLOW.COMPLETE_MANY") {
     return flowCompleteManyPayload(commandArgs) ?? commandExec(args);
+  }
+  if (command === "FLOW.SEARCH") {
+    return flowSearchPayload(commandArgs) ?? commandExec(args);
   }
 
   return commandExec(args);
@@ -602,13 +793,13 @@ function writeOptionalBinary(out: Buffer, offset: number, value: Buffer | null):
   return writeBinary(out, offset, value);
 }
 
-function hasFlowCommandOnlyOption(args: readonly CommandArgument[]): boolean {
+function hasFlowCommandOnlyOption(command: string, args: readonly CommandArgument[]): boolean {
   return args.some((arg) => {
     if (typeof arg !== "string" && !Buffer.isBuffer(arg)) {
       return false;
     }
     const token = asText(arg).toUpperCase();
-    return token === "STATE_META" || token === "INDEXED_STATE_META";
+    return token === "INDEXED_STATE_META" || (command !== "FLOW.SEARCH" && token === "STATE_META");
   });
 }
 
@@ -744,6 +935,13 @@ function flowCompleteManyPayload(args: readonly CommandArgument[]): ProtocolComm
   const payload: Record<string, unknown> = { ...options, items };
   if (!auto && !mixed) payload.partition_key = partition;
   return { opcode: OPCODES.flowCompleteMany, payload };
+}
+
+function flowSearchPayload(args: readonly CommandArgument[]): ProtocolCommand | undefined {
+  if (args.length < 1) return undefined;
+  const payload = optionMap(args.slice(1));
+  normalizeFlowSearchStateMeta(payload);
+  return { opcode: OPCODES.flowSearch, payload: { type: args[0], ...payload } };
 }
 
 function compactFlowCreateManyPayload(
@@ -886,6 +1084,86 @@ function compactFlowCompleteManyPayload(
     offset += 8;
   }
   return { flags: FLAG_CUSTOM_PAYLOAD, opcode: OPCODES.flowCompleteMany, payload: out };
+}
+
+const OPTION_FIELDS: Record<string, string> = {
+  CONSISTENT_PROJECTION: "consistent_projection",
+  COUNT: "count",
+  FROM_MS: "from_ms",
+  INCLUDE_COLD: "include_cold",
+  PARTITION: "partition_key",
+  REV: "rev",
+  STATE: "state",
+  TERMINAL_ONLY: "terminal_only",
+  TO_MS: "to_ms"
+};
+
+const BOOL_OPTION_FIELDS = new Set(["consistent_projection", "include_cold", "rev", "terminal_only"]);
+
+function optionMap(args: readonly CommandArgument[]): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  for (let index = 0; index < args.length; ) {
+    const token = asText(args[index]).toUpperCase();
+    if (token === "ATTRIBUTE") {
+      if (index + 2 >= args.length) {
+        throw new FerricStoreError("ATTRIBUTE requires name and value");
+      }
+      const name = asText(args[index + 1]);
+      const attributes = ensureObjectField(payload, "attributes");
+      attributes[name] = args[index + 2];
+      index += 3;
+      continue;
+    }
+    if (token === "STATE_META") {
+      if (index + 2 >= args.length) {
+        throw new FerricStoreError("STATE_META requires name and value");
+      }
+      const name = asText(args[index + 1]);
+      const stateMeta = ensureObjectField(payload, "state_meta");
+      stateMeta[name] = args[index + 2];
+      index += 3;
+      continue;
+    }
+
+    const field = OPTION_FIELDS[token] ?? token.toLowerCase();
+    if (index + 1 >= args.length) {
+      throw new FerricStoreError(`${token} requires a value`);
+    }
+    const value = args[index + 1];
+    payload[field] = BOOL_OPTION_FIELDS.has(field) ? boolArg(value) : value;
+    index += 2;
+  }
+  return payload;
+}
+
+function ensureObjectField(payload: Record<string, unknown>, field: string): Record<string, unknown> {
+  const value = payload[field];
+  if (isPlainObject(value)) {
+    return value;
+  }
+  const next: Record<string, unknown> = {};
+  payload[field] = next;
+  return next;
+}
+
+function normalizeFlowSearchStateMeta(payload: Record<string, unknown>): void {
+  const stateMeta = payload.state_meta;
+  if (!isPlainObject(stateMeta) || Object.keys(stateMeta).length === 0) {
+    return;
+  }
+  if (Object.values(stateMeta).every(isPlainObject)) {
+    return;
+  }
+
+  const state = payload.state;
+  if (state == null) {
+    throw new FerricStoreError("FLOW.SEARCH STATE_META filters require STATE or nested state metadata");
+  }
+  payload.state_meta = { [asText(state)]: stateMeta };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value != null && !Array.isArray(value) && !Buffer.isBuffer(value) && !(value instanceof Uint8Array);
 }
 
 function parseFlowOptions(

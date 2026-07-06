@@ -13,6 +13,8 @@ Legend:
 | Python SDK Surface | TypeScript Status | Notes |
 | --- | --- | --- |
 | `FerricStoreClient.from_url` | Done | `FerricStoreClient.fromUrl` over FerricStore native protocol. |
+| `FerricStoreClient.from_urls` | Done | `FerricStoreClient.fromUrls` builds a topology-aware native pool from seed URLs. |
+| `refresh_topology`, `route` | Done | `refreshTopology()` and `route(key)` expose `SHARDS` routing metadata. |
 | `command` | Done | Raw native command escape hatch. |
 | `pipeline` | Done | Takes command arrays. |
 | `close` | Done | Closes owned adapter. |
@@ -42,6 +44,7 @@ Legend:
 | `FETCH_OR_COMPUTE*` | Done |
 | `FERRICSTORE.KEY_INFO` | Done |
 | `FERRICSTORE.CONFIG`, `HOTNESS`, `METRICS`, `BLOBGC`, `DOCTOR` | Done |
+| `FERRICSTORE.CAPABILITIES`, `NAMESPACE`, `QUOTA`, `TELEMETRY` | Done |
 | `CLUSTER.HEALTH`, `STATS`, `KEYSLOT`, `SLOTS`, `STATUS`, `ROLE`, `JOIN`, `LEAVE`, `FAILOVER`, `PROMOTE`, `DEMOTE` | Done |
 
 ## FerricFlow Commands
@@ -63,6 +66,7 @@ Legend:
 | `FLOW.CANCEL`, `FLOW.CANCEL_MANY` | Done |
 | `FLOW.REWIND` | Done |
 | `FLOW.GET`, `FLOW.LIST`, `FLOW.TERMINALS`, `FLOW.FAILURES`, `FLOW.STUCK` | Done |
+| `FLOW.SEARCH` | Done |
 | `FLOW.BY_PARENT`, `FLOW.BY_ROOT`, `FLOW.BY_CORRELATION` | Done |
 | `FLOW.INFO`, `FLOW.HISTORY` | Done |
 | `FLOW.SPAWN_CHILDREN` | Done |
@@ -111,7 +115,6 @@ Legend:
 
 ## Main Remaining Gaps
 
-- Live integration parity against a running FerricStore server.
 - Advanced worker scheduling parity with Python.
 - Class/decorator workflow ergonomics.
 - Full generated command matrix tests for every Redis-compatible helper and edge option.

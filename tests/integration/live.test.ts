@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  COMMAND_OPCODES,
   FerricStoreClient,
   JsonCodec,
   QueueClient,
@@ -60,7 +61,7 @@ const nativeProtocolCommands = new Set<string>(
     FLOW.INFO FLOW.LIMIT.GET FLOW.LIMIT.LEASE FLOW.LIMIT.LIST FLOW.LIMIT.RELEASE
     FLOW.LIMIT.SPEND FLOW.LIST FLOW.POLICY.GET FLOW.POLICY.SET FLOW.RECLAIM
     FLOW.RETENTION_CLEANUP FLOW.RETRY FLOW.RETRY_MANY FLOW.REWIND
-    FLOW.RUN_STEPS_MANY FLOW.SCHEDULE.CREATE FLOW.SCHEDULE.DELETE
+    FLOW.RUN_STEPS_MANY FLOW.SCHEDULE.CREATE FLOW.SCHEDULE.DELETE FLOW.SEARCH
     FLOW.SCHEDULE.FIRE FLOW.SCHEDULE.FIRE_DUE FLOW.SCHEDULE.GET FLOW.SCHEDULE.LIST
     FLOW.SCHEDULE.PAUSE FLOW.SCHEDULE.RESUME FLOW.SIGNAL FLOW.SPAWN_CHILDREN
     FLOW.START_AND_CLAIM FLOW.STATS FLOW.STEP_CONTINUE FLOW.STUCK FLOW.TERMINALS
@@ -164,6 +165,38 @@ function commandCatalogNames(value: unknown): Set<string> {
   }
 
   return names;
+}
+
+function opcodeValue(value: unknown): number {
+  if (typeof value === "number") {
+    return value;
+  }
+  return Number.parseInt(text(value), 0);
+}
+
+function optionsOpcodeTable(value: unknown): Record<string, number> {
+  const rawOpcodes = field(value, "opcodes");
+  if (!isReadonlyArray(rawOpcodes)) {
+    throw new Error(`OPTIONS response does not contain opcodes list: ${JSON.stringify(value)}`);
+  }
+
+  const table: Record<string, number> = {};
+  for (const item of rawOpcodes) {
+    let name: unknown;
+    let opcode: unknown;
+    if (isReadonlyArray(item) && item.length >= 2) {
+      name = item[0];
+      opcode = item[1];
+    } else {
+      name = field(item, "name");
+      opcode = field(item, "opcode");
+    }
+    if (name == null || opcode == null) {
+      throw new Error(`OPTIONS opcode entry missing name/opcode: ${JSON.stringify(item)}`);
+    }
+    table[text(name).toUpperCase()] = opcodeValue(opcode);
+  }
+  return table;
 }
 
 function setDifference(left: ReadonlySet<string>, right: ReadonlySet<string>): string[] {
@@ -304,6 +337,16 @@ describe("FerricStore integration", () => {
     }
   });
 
+  it("matches the live native OPTIONS opcode table", async () => {
+    const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
+
+    try {
+      expect(optionsOpcodeTable(await flow.command("OPTIONS"))).toEqual(COMMAND_OPCODES);
+    } finally {
+      await flow.close();
+    }
+  });
+
   it("uses KV helpers and a full Flow claim/complete cycle", async () => {
     const flow = await FerricStoreClient.fromUrl(url(), {
       codec: new JsonCodec()
@@ -392,6 +435,14 @@ describe("FerricStore integration", () => {
           accept: { owner: "risk", version: "1" }
         }
       });
+
+      const searchMatches = await flow.search(type, {
+        consistentProjection: true,
+        partitionKey,
+        state: "accept",
+        stateMeta: { version: "1" }
+      });
+      expect(searchMatches.some((record) => record.id === id)).toBe(true);
 
       const job = await claimOne(flow, type, "accept", partitionKey, { nowMs: now + 1 });
       await expect(flow.complete(id, {

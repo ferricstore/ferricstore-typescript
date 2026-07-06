@@ -34,7 +34,43 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.6.0
+  ghcr.io/ferricstore/ferricstore:0.7.2
+```
+
+## Cluster-aware client
+
+For a single node, use `fromUrl`. For a FerricStore cluster, pass multiple seed URLs. The SDK fetches the server `SHARDS` topology, routes keyed commands to the current shard leader, and refuses learned hosts outside the seed-host trust set by default.
+
+```ts
+const flow = await FerricStoreClient.fromUrls(
+  [
+    "ferric://fs0.example.com:6388",
+    "ferric://fs1.example.com:6388",
+    "ferric://fs2.example.com:6388"
+  ],
+  {
+    codec: new JsonCodec(),
+    nativeOptions: {
+      // Use "any" only inside a trusted private network.
+      endpointPolicy: "seed_hosts",
+      warmConnections: true
+    }
+  }
+);
+
+await flow.refreshTopology();
+console.log(await flow.route("tenant-a:order-1"));
+```
+
+You can also keep one primary URL and add seeds:
+
+```ts
+const flow = await FerricStoreClient.fromUrl("ferric://fs0.example.com:6388", {
+  nativeOptions: {
+    haRouting: true,
+    seeds: ["ferric://fs1.example.com:6388", "ferric://fs2.example.com:6388"]
+  }
+});
 ```
 
 ## Durable Queue

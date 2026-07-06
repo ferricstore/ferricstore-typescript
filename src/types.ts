@@ -73,8 +73,10 @@ export interface CreateItem {
   stateMeta?: StateMeta;
 }
 
+/** @internal */
 export const CLAIMED_ITEM_WIRE: unique symbol = Symbol("ferricstore.claimedItemWire");
 
+/** @internal */
 export interface ClaimedItemWire {
   id: Buffer;
   partitionKey?: Buffer | null;
@@ -92,6 +94,7 @@ export interface ClaimedItem<TPayload = unknown> {
   runState?: string;
   payload?: TPayload | null;
   attributes?: Record<string, unknown>;
+  /** @internal */
   [CLAIMED_ITEM_WIRE]?: ClaimedItemWire;
 }
 
