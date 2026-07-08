@@ -26,8 +26,6 @@ describe("Queue", () => {
       Buffer.from('{"to":"user@example.com"}'),
       "RUN_AT",
       100,
-      "PRIORITY",
-      0,
       "IDEMPOTENT",
       "true"
     ]);

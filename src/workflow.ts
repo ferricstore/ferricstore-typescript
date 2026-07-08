@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { FerricStoreClient } from "./client.js";
+import type {
+  FerricStoreClient,
+  FlowPolicyOptions,
+  FlowStateMode,
+  FlowStatePolicyLike
+} from "./client.js";
 import type { CompleteOutcome, FailOutcome, Outcome, RetryOutcome, TransitionOutcome } from "./outcomes.js";
 import { complete, fail, isOutcome, retry } from "./outcomes.js";
 import {
@@ -18,6 +23,7 @@ import { sleep } from "./internal.js";
 export type WorkflowHandler = (ctx: WorkflowContext) => Promise<Outcome | void | unknown> | Outcome | void | unknown;
 
 export interface StateOptions {
+  mode?: FlowStateMode;
   leaseMs?: number;
   claimPayload?: boolean;
   claimRecord?: boolean;
@@ -49,6 +55,7 @@ export interface StateRegistration {
   exceptionPolicy: ExceptionPolicy;
   handler: WorkflowHandler;
   leaseMs: number;
+  mode?: FlowStateMode;
   name: string;
   returnRecord: boolean;
   retryPolicy?: RetryPolicy;
@@ -93,6 +100,7 @@ export class Workflow {
       exceptionPolicy: normalizeExceptionPolicy(options.exceptionPolicy),
       handler,
       leaseMs: options.leaseMs ?? 30_000,
+      ...(options.mode == null ? {} : { mode: normalizeStateMode(options.mode) }),
       name,
       returnRecord: options.returnRecord ?? false,
       valueMaxBytes: options.valueMaxBytes ?? this.valueConfig.valueMaxBytes,
@@ -167,6 +175,22 @@ export class Workflow {
 
   worker(options: WorkerConfig & { states?: string[] } = {}): WorkflowWorker {
     return new WorkflowWorker(this, options);
+  }
+
+  async installPolicy(options: Omit<FlowPolicyOptions, "mode" | "state" | "states"> = {}): Promise<unknown> {
+    const states: Record<string, FlowStatePolicyLike> = {};
+    for (const registration of this.states.values()) {
+      if (registration.mode != null || registration.retryPolicy != null) {
+        states[registration.name] = {
+          ...(registration.mode == null ? {} : { mode: registration.mode }),
+          ...(registration.retryPolicy == null ? {} : { retry: registration.retryPolicy })
+        };
+      }
+    }
+    return await this.client.installPolicy(this.type, {
+      ...options,
+      states
+    });
   }
 
   stateNames(): string[] {
@@ -476,13 +500,15 @@ export class WorkflowWorker {
 
   private async applyJob(job: FlowRecord | ClaimedItem, registration: StateRegistration): Promise<void> {
     const ctx = new WorkflowContext(this.workflow, job, registration.name);
+    let outcome: Outcome;
     try {
       const value = await registration.handler(ctx);
-      const outcome = isOutcome(value) ? value : complete({ result: value });
-      await applyOutcome(this.workflow.client, ctx, outcome, registration.returnRecord);
+      outcome = isOutcome(value) ? value : complete({ result: value });
     } catch (error) {
       await this.applyHandlerError(ctx, registration, error);
+      return;
     }
+    await applyOutcome(this.workflow.client, ctx, outcome, registration.returnRecord);
   }
 
   private async applyHandlerError(ctx: WorkflowContext, registration: StateRegistration, error: unknown): Promise<void> {
@@ -526,6 +552,7 @@ async function applyTransition(
   outcome: TransitionOutcome,
   returnRecord: boolean
 ): Promise<void> {
+  validateTransitionPolicy(ctx, outcome);
   await client.transition(ctx.id, {
     dropValues: outcome.dropValues,
     fencingToken: ctx.fencingToken,
@@ -542,6 +569,13 @@ async function applyTransition(
     valueRefs: outcome.valueRefs,
     values: outcome.values
   });
+}
+
+function validateTransitionPolicy(ctx: WorkflowContext, outcome: TransitionOutcome): void {
+  const target = ctx.workflow.stateRegistration(outcome.toState);
+  if (target?.mode === "fifo" && outcome.priority != null) {
+    throw new Error("priority is not supported for fifo state");
+  }
 }
 
 async function applyComplete(
@@ -619,6 +653,13 @@ function errorToPayload(error: unknown): unknown {
     };
   }
   return error;
+}
+
+function normalizeStateMode(mode: FlowStateMode): FlowStateMode {
+  if (mode === "fifo" || mode === "parallel") {
+    return mode;
+  }
+  throw new Error("state mode must be 'fifo' or 'parallel'");
 }
 
 function valueRefToString(value: unknown): string | undefined {

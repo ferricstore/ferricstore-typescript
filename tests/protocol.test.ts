@@ -288,6 +288,59 @@ describe("native protocol codec", () => {
     });
   });
 
+  it("moves request context out of generic command-exec args", () => {
+    const command = buildProtocolCommand([
+      "INVOCATION.CREATE",
+      "send-email",
+      "{}",
+      "REQUEST_CONTEXT",
+      {
+        scopes: "invocation:create:* tenant:acme",
+        subject: "proxy",
+        tenant: "acme"
+      }
+    ]);
+
+    expect(command).toMatchObject({
+      opcode: OPCODES.commandExec,
+      payload: {
+        args: ["send-email", "{}"],
+        command: "INVOCATION.CREATE",
+        request_context: {
+          scopes: ["invocation:create:*", "tenant:acme"],
+          subject: "proxy",
+          tenant: "acme"
+        }
+      }
+    });
+  });
+
+  it("moves request context out of explicit COMMAND_EXEC args", () => {
+    const command = buildProtocolCommand([
+      "COMMAND_EXEC",
+      "INVOCATION.CREATE",
+      "send-email",
+      "{}",
+      "REQUEST_CONTEXT",
+      {
+        scopes: ["invocation:create:*", "invocation:create:*"],
+        subject: "proxy"
+      }
+    ]);
+
+    expect(command).toMatchObject({
+      opcode: OPCODES.commandExec,
+      payload: {
+        args: ["send-email", "{}"],
+        command: "INVOCATION.CREATE",
+        request_context: {
+          scopes: ["invocation:create:*"],
+          subject: "proxy"
+        }
+      }
+    });
+  });
+
   it("builds direct native FLOW.SEARCH with attributes and state metadata", () => {
     const command = buildProtocolCommand([
       "FLOW.SEARCH",

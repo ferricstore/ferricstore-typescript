@@ -464,6 +464,116 @@ describe("FerricStore integration", () => {
     }
   });
 
+  it("enforces FIFO state policy edges on the real server", async () => {
+    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const runId = suffix();
+    const parallelType = `ts-sdk-fifo-default-${runId}`;
+    const fifoType = `ts-sdk-fifo-policy-${runId}`;
+    const partition = `ts-sdk:fifo:${runId}:partition`;
+    const now = Date.now();
+
+    try {
+      for (const name of ["first", "second"]) {
+        await expect(flow.create(`ts-sdk:fifo-default:${runId}:${name}`, {
+          nowMs: now,
+          partitionKey: partition,
+          payload: { name },
+          priority: 1,
+          runAtMs: now,
+          state: "queued",
+          type: parallelType
+        })).resolves.toBeDefined();
+      }
+
+      await expect(flow.claimJobs(parallelType, {
+        limit: 2,
+        nowMs: now + 1,
+        partitionKey: partition,
+        priority: 1,
+        state: "queued",
+        worker: "ts-sdk-default-parallel-worker"
+      })).resolves.toHaveLength(2);
+
+      await expect(flow.installPolicy(fifoType, {
+        states: {
+          queued: { mode: "fifo" },
+          start: { mode: "parallel" }
+        }
+      })).resolves.toBeDefined();
+      expect(text(field(await flow.policyGet(fifoType, { state: "queued" }), "mode")).toLowerCase()).toBe("fifo");
+      expect(text(field(await flow.policyGet(fifoType, { state: "start" }), "mode")).toLowerCase()).toBe("parallel");
+
+      await expect(flow.create(`ts-sdk:fifo-no-partition:${runId}`, {
+        nowMs: now + 10,
+        payload: { bad: "missing-partition" },
+        runAtMs: now + 10,
+        state: "queued",
+        type: fifoType
+      })).rejects.toThrow(/partition_key is required for fifo state/i);
+
+      await expect(flow.create(`ts-sdk:fifo-priority:${runId}`, {
+        nowMs: now + 11,
+        partitionKey: partition,
+        payload: { bad: "priority" },
+        priority: 1,
+        runAtMs: now + 11,
+        state: "queued",
+        type: fifoType
+      })).rejects.toThrow(/priority is not supported for fifo state/i);
+
+      const transitionId = `ts-sdk:fifo-transition:${runId}`;
+      await flow.create(transitionId, {
+        nowMs: now + 20,
+        payload: { step: "start" },
+        runAtMs: now + 20,
+        state: "start",
+        type: fifoType
+      });
+      const startJobs = await flow.claimJobs(fifoType, {
+        limit: 1,
+        nowMs: now + 21,
+        state: "start",
+        worker: "ts-sdk-fifo-transition-worker"
+      });
+      expect(startJobs).toHaveLength(1);
+      const startJob = startJobs[0];
+      if (startJob == null) {
+        throw new Error("expected start job");
+      }
+      expect(startJob.partitionKey).toBeDefined();
+
+      await expect(flow.transition(transitionId, {
+        fencingToken: startJob.fencingToken,
+        fromState: startJob.state,
+        leaseToken: startJob.leaseToken,
+        nowMs: now + 22,
+        runAtMs: now + 22,
+        toState: "queued"
+      })).rejects.toThrow(/partition_key is required for fifo state/i);
+
+      await expect(flow.transition(transitionId, {
+        fencingToken: startJob.fencingToken,
+        fromState: startJob.state,
+        leaseToken: startJob.leaseToken,
+        nowMs: now + 23,
+        partitionKey: startJob.partitionKey,
+        runAtMs: now + 23,
+        toState: "queued"
+      })).resolves.toBeDefined();
+
+      const queued = await flow.claimJobs(fifoType, {
+        limit: 1,
+        nowMs: now + 24,
+        partitionKey: startJob.partitionKey,
+        state: "queued",
+        worker: "ts-sdk-fifo-queued-worker"
+      });
+      expect(queued.map((job) => job.id)).toEqual([transitionId]);
+    } finally {
+      await flow.close();
+    }
+  });
+
   it("stores state metadata for every flow mutation command", async () => {
     const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
     const runId = suffix();
@@ -716,6 +826,12 @@ describe("FerricStore integration", () => {
       await expect(flow.ferricstoreHotness()).resolves.toBeTypeOf("object");
       await expect(flow.ferricstoreBlobgc()).resolves.toBeDefined();
       await expect(flow.ferricstoreDoctor("CHECK", "SCOPE", "BITCASK")).resolves.toBeDefined();
+      await expectSupportedOrKnownServerError(flow.invocationDefinitionPut({ name: `send-email-${runId}` }));
+      await expectSupportedOrKnownServerError(flow.invocationDefinitionGet(`send-email-${runId}`));
+      await expectSupportedOrKnownServerError(flow.invocationDefinitionList());
+      await expectSupportedOrKnownServerError(flow.invocationCreate(`send-email-${runId}`, { tenant: "acme" }));
+      await expectSupportedOrKnownServerError(flow.invocationGet(`invocation-${runId}`));
+      await expectSupportedOrKnownServerError(flow.invocationPartitionList(`send-email-${runId}`, { scope: "tenant:acme" }));
     } finally {
       await deletePrefixedKeys(flow, prefix);
       await flow.close();

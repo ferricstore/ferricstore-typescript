@@ -4,6 +4,20 @@ All notable changes to the FerricStore TypeScript SDK will be documented here.
 
 The format is based on Keep a Changelog, and this project follows semver once it reaches `1.0`.
 
+## [0.1.6] - 2026-07-08
+
+### Added
+
+- Flow state mode policy support for FerricStore `0.7.5`, including opt-in FIFO/PARALLEL state policy maps.
+- Workflow state `mode` registration and policy installation for FIFO states.
+- Invocation helper commands over the public native command contract.
+- Native `COMMAND_EXEC` request-context payload support.
+
+### Changed
+
+- Updated local Docker guidance and integration compose image to FerricStore `0.7.5`.
+- Workflow workers now apply exception policy only to handler execution; state mutation and SDK validation errors propagate.
+
 ## [0.1.5] - 2026-07-06
 
 ### Added

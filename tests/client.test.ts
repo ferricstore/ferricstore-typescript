@@ -330,6 +330,165 @@ describe("FerricStoreClient", () => {
     });
   });
 
+  it("builds state-scoped Flow mode policies without making FIFO the default", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor);
+
+    await client.installPolicy("order", {
+      states: {
+        audit: { maxRetries: 2 },
+        queued: {
+          mode: "fifo",
+          retry: { maxRetries: 1, exhaustedTo: "failed" }
+        },
+        ready: { mode: "parallel" }
+      }
+    });
+    expect(executor.calls[0]).toEqual([
+      "FLOW.POLICY.SET",
+      "order",
+      "STATE",
+      "audit",
+      "MAX_RETRIES",
+      2,
+      "STATE",
+      "queued",
+      "MODE",
+      "FIFO",
+      "MAX_RETRIES",
+      1,
+      "EXHAUSTED_TO",
+      "failed",
+      "STATE",
+      "ready",
+      "MODE",
+      "PARALLEL"
+    ]);
+
+    await client.installPolicy("order", {
+      mode: "fifo",
+      retry: { maxRetries: 1, exhaustedTo: "failed" },
+      state: "queued"
+    });
+    expect(executor.calls[1]).toEqual([
+      "FLOW.POLICY.SET",
+      "order",
+      "STATE",
+      "queued",
+      "MODE",
+      "FIFO",
+      "MAX_RETRIES",
+      1,
+      "EXHAUSTED_TO",
+      "failed"
+    ]);
+
+    await client.installPolicy("order", { mode: "parallel", state: "ready" });
+    expect(executor.calls[2]).toEqual([
+      "FLOW.POLICY.SET",
+      "order",
+      "STATE",
+      "ready",
+      "MODE",
+      "PARALLEL"
+    ]);
+
+    await client.installPolicy("order", { state: "audit" });
+    expect(executor.calls[3]).toEqual(["FLOW.POLICY.SET", "order", "STATE", "audit"]);
+  });
+
+  it("builds FIFO-compatible partitioned create, transition, and partition-list claims", async () => {
+    const lease = Buffer.from("lease");
+    const executor = new FakeExecutor([
+      Buffer.from("OK"),
+      Buffer.from("OK"),
+      [["order-1", "tenant-a", lease, 17, "queued"]]
+    ]);
+    const client = new FerricStoreClient(executor);
+
+    await client.create("order-1", {
+      nowMs: 100,
+      partitionKey: "tenant-a",
+      state: "queued",
+      type: "order"
+    });
+    expect(executor.calls[0]).toEqual([
+      "FLOW.CREATE",
+      "order-1",
+      "TYPE",
+      "order",
+      "STATE",
+      "queued",
+      "NOW",
+      100,
+      "PARTITION",
+      "tenant-a",
+      "RUN_AT",
+      100
+    ]);
+
+    await client.transition("order-1", {
+      fencingToken: 17,
+      fromState: "running",
+      leaseToken: lease,
+      nowMs: 110,
+      partitionKey: "tenant-a",
+      toState: "ready"
+    });
+    expect(executor.calls[1]).toEqual([
+      "FLOW.TRANSITION",
+      "order-1",
+      "running",
+      "ready",
+      "LEASE_TOKEN",
+      lease,
+      "FENCING",
+      17,
+      "NOW",
+      110,
+      "PARTITION",
+      "tenant-a",
+      "RUN_AT",
+      110
+    ]);
+
+    const jobs = await client.claimJobs("order", {
+      includeState: true,
+      partitionKeys: ["tenant-a", "tenant-b"],
+      state: "queued",
+      worker: "worker-1"
+    });
+    expect(executor.calls[2]).toEqual([
+      "FLOW.CLAIM_DUE",
+      "order",
+      "STATE",
+      "queued",
+      "WORKER",
+      "worker-1",
+      "LEASE_MS",
+      30_000,
+      "LIMIT",
+      100,
+      "PARTITIONS",
+      2,
+      "tenant-a",
+      "tenant-b",
+      "RETURN",
+      "JOBS_COMPACT_STATE"
+    ]);
+    expect(jobs).toEqual([
+      {
+        fencingToken: 17,
+        id: "order-1",
+        leaseToken: lease,
+        partitionKey: "tenant-a",
+        runState: "queued",
+        state: "running",
+        type: ""
+      }
+    ]);
+  });
+
   it("builds FLOW.SEARCH with attributes and state metadata", async () => {
     const executor = new FakeExecutor([
       [
@@ -519,6 +678,67 @@ describe("FerricStoreClient", () => {
       ["FERRICSTORE.TELEMETRY", "NAMESPACE_USAGE", "tenant:"],
       ["FERRICSTORE.TELEMETRY", "FLOW_QUERY", "TYPE", "order"],
       ["FERRICSTORE.TELEMETRY", "FLOW_HISTORY", "flow-1", "PARTITION", "tenant:"]
+    ]);
+  });
+
+  it("builds invocation helper commands and carries request context", async () => {
+    const executor = new FakeExecutor([
+      new Map<unknown, unknown>([["name", Buffer.from("send-email")]]),
+      new Map<unknown, unknown>([["name", Buffer.from("send-email")]]),
+      [new Map<unknown, unknown>([["name", Buffer.from("send-email")]])],
+      new Map<unknown, unknown>([["invocation_id", Buffer.from("inv-1")]]),
+      new Map<unknown, unknown>([["id", Buffer.from("inv-1")]]),
+      [new Map<unknown, unknown>([["scope", Buffer.from("tenant:acme")]])]
+    ]);
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.invocationDefinitionPut({
+      acl: { scopeRequired: true },
+      name: "send-email"
+    })).resolves.toEqual({ name: "send-email" });
+    await expect(client.invocationDefinitionGet("send-email")).resolves.toEqual({ name: "send-email" });
+    await expect(client.invocationDefinitionList()).resolves.toEqual([{ name: "send-email" }]);
+    await expect(client.invocationCreate("send-email", { tenant: "acme" }, {
+      context: { subject: "user-1" },
+      idempotencyKey: "idem-1",
+      requestContext: {
+        scopes: ["invocation:create:*"],
+        subject: "proxy",
+        tenant: "acme"
+      }
+    })).resolves.toEqual({ invocation_id: "inv-1" });
+    await expect(client.invocationGet("inv-1")).resolves.toEqual({ id: "inv-1" });
+    await expect(client.invocationPartitionList("send-email", { scope: "tenant:acme" })).resolves.toEqual([
+      { scope: "tenant:acme" }
+    ]);
+
+    const definitionArg = executor.calls[0]?.[1];
+    expect(typeof definitionArg).toBe("string");
+    expect(JSON.parse(definitionArg as string)).toEqual({
+      acl: { scopeRequired: true },
+      name: "send-email"
+    });
+    expect(executor.calls[3]?.slice(0, 2)).toEqual(["INVOCATION.CREATE", "send-email"]);
+    const createArg = executor.calls[3]?.[2];
+    expect(typeof createArg).toBe("string");
+    expect(JSON.parse(createArg as string)).toEqual({
+      attrs: { tenant: "acme" },
+      context: { subject: "user-1" },
+      idempotency_key: "idem-1"
+    });
+    expect(executor.calls[3]?.slice(3)).toEqual([
+      "REQUEST_CONTEXT",
+      {
+        scopes: ["invocation:create:*"],
+        subject: "proxy",
+        tenant: "acme"
+      }
+    ]);
+    expect(executor.calls[5]).toEqual([
+      "INVOCATION.PARTITION.LIST",
+      "send-email",
+      "SCOPE",
+      "tenant:acme"
     ]);
   });
 

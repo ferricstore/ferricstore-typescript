@@ -56,6 +56,20 @@ describe("FerricStoreClient edge cases", () => {
     expect(executor.calls).toEqual([]);
   });
 
+  it("rejects invalid state mode policy helpers before sending a command", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.installPolicy("order", { mode: "fifo" })).rejects.toThrow(
+      "policy mode requires state"
+    );
+    await expect(
+      client.installPolicy("order", { mode: "priority" as "fifo", state: "queued" })
+    ).rejects.toThrow("policy mode must be 'fifo' or 'parallel'");
+
+    expect(executor.calls).toEqual([]);
+  });
+
   it("rejects batch partition mismatches before sending a command", async () => {
     const executor = new FakeExecutor();
     const client = new FerricStoreClient(executor);

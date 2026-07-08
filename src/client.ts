@@ -138,6 +138,39 @@ export interface ReclaimOptions extends Omit<ClaimDueOptions, "state" | "states"
   state?: "running";
 }
 
+export type FlowStateMode = "fifo" | "parallel";
+
+export interface FlowStatePolicy {
+  mode?: FlowStateMode;
+  retry?: RetryPolicy;
+}
+
+export type FlowStatePolicyLike = FlowStatePolicy | RetryPolicy;
+
+export interface FlowPolicyOptions {
+  state?: string;
+  mode?: FlowStateMode;
+  retry?: RetryPolicy;
+  states?: Record<string, FlowStatePolicyLike>;
+  retentionTtlMs?: number;
+  indexedStateMeta?: string;
+}
+
+export interface RequestContext {
+  subject?: string;
+  tenant?: string;
+  scopes?: string | readonly string[];
+}
+
+export interface RequestContextOptions {
+  requestContext?: RequestContext;
+}
+
+export interface InvocationCreateOptions extends RequestContextOptions {
+  context?: Record<string, unknown>;
+  idempotencyKey?: string;
+}
+
 export interface MutateOptions {
   partitionKey?: string;
   payload?: unknown;
@@ -678,6 +711,75 @@ export class FerricStoreClient {
     return Array.isArray(response) ? [...(response as unknown[])] : [];
   }
 
+  async invocationDefinitionPut(
+    definition: Record<string, unknown> | string,
+    options: RequestContextOptions = {}
+  ): Promise<unknown> {
+    return normalizeAdminResponse(
+      await this.command(
+        ...commandWithRequestContext(
+          "INVOCATION.DEFINITION.PUT",
+          [jsonArg(definition)],
+          options.requestContext
+        )
+      )
+    );
+  }
+
+  async invocationDefinitionGet(name: string, options: RequestContextOptions = {}): Promise<unknown> {
+    return normalizeAdminResponse(
+      await this.command(
+        ...commandWithRequestContext("INVOCATION.DEFINITION.GET", [name], options.requestContext)
+      )
+    );
+  }
+
+  async invocationDefinitionList(options: RequestContextOptions = {}): Promise<unknown[]> {
+    const response = normalizeAdminResponse(
+      await this.command(
+        ...commandWithRequestContext("INVOCATION.DEFINITION.LIST", [], options.requestContext)
+      )
+    );
+    return Array.isArray(response) ? [...(response as unknown[])] : [];
+  }
+
+  async invocationCreate(
+    name: string,
+    attrs: Record<string, unknown>,
+    options: InvocationCreateOptions = {}
+  ): Promise<unknown> {
+    const envelope: Record<string, unknown> = { attrs };
+    if (options.context != null) {
+      envelope.context = options.context;
+    }
+    if (options.idempotencyKey != null) {
+      envelope.idempotency_key = options.idempotencyKey;
+    }
+    return normalizeAdminResponse(
+      await this.command(
+        ...commandWithRequestContext("INVOCATION.CREATE", [name, jsonArg(envelope)], options.requestContext)
+      )
+    );
+  }
+
+  async invocationGet(id: string, options: RequestContextOptions = {}): Promise<unknown> {
+    return normalizeAdminResponse(
+      await this.command(...commandWithRequestContext("INVOCATION.GET", [id], options.requestContext))
+    );
+  }
+
+  async invocationPartitionList(
+    name: string,
+    options: RequestContextOptions & { scope?: string } = {}
+  ): Promise<unknown[]> {
+    const args: CommandArgument[] = [name];
+    append(args, "SCOPE", options.scope);
+    const response = normalizeAdminResponse(
+      await this.command(...commandWithRequestContext("INVOCATION.PARTITION.LIST", args, options.requestContext))
+    );
+    return Array.isArray(response) ? [...(response as unknown[])] : [];
+  }
+
   async create(id: string, options: CreateOptions): Promise<FlowRecord | Buffer | unknown> {
     const currentNowMs = options.nowMs ?? nowMs();
     const args: CommandArgument[] = [
@@ -712,7 +814,6 @@ export class FerricStoreClient {
   async enqueue(id: string, options: Omit<CreateOptions, "state"> & { state?: string }): Promise<FlowRecord | Buffer | unknown> {
     return await this.create(id, {
       ...options,
-      priority: options.priority ?? 0,
       state: options.state ?? "queued"
     });
   }
@@ -726,7 +827,6 @@ export class FerricStoreClient {
       return await this.createMany(options.partitionKey, items, {
         ...options,
         independent: options.independent ?? true,
-        priority: options.priority ?? 0,
         state: options.state ?? "queued"
       });
     }
@@ -743,7 +843,6 @@ export class FerricStoreClient {
       const response = await this.createMany(bucket, groupItems, {
         ...options,
         independent: options.independent ?? true,
-        priority: options.priority ?? 0,
         state: options.state ?? "queued"
       });
       const expanded = expandManyResponse(response, indexedItems.length);
@@ -932,8 +1031,7 @@ export class FerricStoreClient {
       ...options,
       includeState: options.includeState ?? false,
       jobOnly: true,
-      limit: options.limit ?? 100,
-      priority: options.priority ?? 0
+      limit: options.limit ?? 100
     }));
   }
 
@@ -1393,17 +1491,17 @@ export class FerricStoreClient {
     return await this.command(...args);
   }
 
-  async installPolicy(type: string, options: {
-    state?: string;
-    retry?: RetryPolicy;
-    retentionTtlMs?: number;
-    indexedStateMeta?: string;
-  } = {}): Promise<unknown> {
+  async installPolicy(type: string, options: FlowPolicyOptions = {}): Promise<unknown> {
     const args: CommandArgument[] = ["FLOW.POLICY.SET", type];
     append(args, "INDEXED_STATE_META", options.indexedStateMeta);
     append(args, "STATE", options.state);
+    appendPolicyMode(args, options.state, options.mode);
     if (options.retry != null) {
       appendRetryPolicy(args, options.retry);
+    }
+    for (const [state, policy] of Object.entries(options.states ?? {})) {
+      args.push("STATE", state);
+      appendFlowStatePolicy(args, policy);
     }
     append(args, "RETENTION_TTL_MS", options.retentionTtlMs);
     return await this.command(...args);
@@ -1868,6 +1966,22 @@ function normalizeAdminResponse(value: unknown): unknown {
   return normalizeRefMeta(value);
 }
 
+function jsonArg(value: Record<string, unknown> | string): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function commandWithRequestContext(
+  command: string,
+  args: readonly CommandArgument[],
+  requestContext: RequestContext | undefined
+): CommandArgument[] {
+  const commandArgs: CommandArgument[] = [command, ...args];
+  if (requestContext != null) {
+    commandArgs.push("REQUEST_CONTEXT", requestContext as Record<string, unknown>);
+  }
+  return commandArgs;
+}
+
 function infoText(value: unknown): string {
   if (typeof value === "string" || Buffer.isBuffer(value)) {
     return text(value);
@@ -1902,6 +2016,21 @@ function managementPairArgs(pairs: ManagementPairs): CommandArgument[] {
     }
   }
   return args;
+}
+
+function appendFlowStatePolicy(args: CommandArgument[], policy: FlowStatePolicyLike): void {
+  if (isFlowStatePolicy(policy)) {
+    appendPolicyMode(args, "state", policy.mode);
+    if (policy.retry != null) {
+      appendRetryPolicy(args, policy.retry);
+    }
+    return;
+  }
+  appendRetryPolicy(args, policy);
+}
+
+function isFlowStatePolicy(policy: FlowStatePolicyLike): policy is FlowStatePolicy {
+  return typeof policy === "object" && policy != null && ("mode" in policy || "retry" in policy);
 }
 
 function ruleArgs(rules: string | readonly string[]): string[] {
@@ -2020,6 +2149,25 @@ function appendRetryPolicy(args: CommandArgument[], policy: RetryPolicy): void {
   append(args, "MAX_MS", policy.maxMs);
   append(args, "JITTER_PCT", policy.jitterPct);
   append(args, "EXHAUSTED_TO", policy.exhaustedTo);
+}
+
+function appendPolicyMode(args: CommandArgument[], state: string | undefined, mode: FlowStateMode | undefined): void {
+  if (mode == null) {
+    return;
+  }
+  if (state == null) {
+    throw new Error("policy mode requires state");
+  }
+  switch (mode) {
+    case "fifo":
+      args.push("MODE", "FIFO");
+      return;
+    case "parallel":
+      args.push("MODE", "PARALLEL");
+      return;
+    default:
+      throw new Error("policy mode must be 'fifo' or 'parallel'");
+  }
 }
 
 function appendPayloadRead(args: CommandArgument[], payload: boolean | undefined, maxBytes: number | undefined): void {

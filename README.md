@@ -34,7 +34,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.7.2
+  ghcr.io/ferricstore/ferricstore:0.7.5
 ```
 
 ## Cluster-aware client
@@ -170,6 +170,25 @@ for (const job of jobs) {
   });
 }
 ```
+
+FIFO Flow state policy is opt-in per state:
+
+```ts
+await flow.installPolicy("email", {
+  states: {
+    queued: { mode: "fifo" }
+  }
+});
+
+await flow.create("email-3", {
+  partitionKey: "tenant-a:email",
+  payload: Buffer.from("welcome"),
+  state: "queued",
+  type: "email"
+});
+```
+
+FIFO states require a `partitionKey`; priority is for parallel states.
 
 ## FerricStore KV And Data Structures
 

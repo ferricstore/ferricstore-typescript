@@ -104,4 +104,45 @@ describe("Workflow", () => {
     expect(executor.calls[1]).toContain("TTL");
     expect(executor.calls[1]).toContain(60_000);
   });
+
+  it("installs FIFO state policy and rejects priority transitions into FIFO states", async () => {
+    const lease = Buffer.from("lease");
+    const executor = new FakeExecutor([
+      Buffer.from("OK"),
+      [
+        new Map<unknown, unknown>([
+          ["id", "order-4"],
+          ["type", "order"],
+          ["state", "created"],
+          ["partition_key", "tenant-a"],
+          ["lease_token", lease],
+          ["fencing_token", 14]
+        ])
+      ]
+    ]);
+    const flow = new FerricStoreClient(executor, { codec: new JsonCodec() });
+    const workflow = new WorkflowClient(flow).workflow({
+      initialState: "created",
+      type: "order"
+    });
+
+    workflow
+      .state("created", () => transition("ready", { priority: 1 }))
+      .state("ready", () => complete({ result: "done" }), { mode: "fifo" });
+
+    await workflow.installPolicy();
+    expect(executor.calls[0]).toEqual([
+      "FLOW.POLICY.SET",
+      "order",
+      "STATE",
+      "ready",
+      "MODE",
+      "FIFO"
+    ]);
+
+    await expect(
+      workflow.worker({ batchSize: 1, states: ["created"], worker: "worker-1" }).runOnce()
+    ).rejects.toThrow("priority is not supported for fifo state");
+    expect(executor.calls).toHaveLength(2);
+  });
 });

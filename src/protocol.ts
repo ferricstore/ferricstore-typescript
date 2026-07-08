@@ -427,13 +427,79 @@ export function commandExec(args: readonly CommandArgument[]): ProtocolCommand {
   if (args.length === 0) {
     throw new FerricStoreError("command requires at least one argument");
   }
+  const commandArgs = args.slice(1);
+  const payload: Record<string, unknown> = {
+    args: commandArgs,
+    command: asText(args[0]).toUpperCase()
+  };
+  if (commandArgs.length >= 2 && commandTokenIs(commandArgs[commandArgs.length - 2], "REQUEST_CONTEXT")) {
+    const requestContext = normalizeRequestContext(commandArgs[commandArgs.length - 1]);
+    payload.args = commandArgs.slice(0, -2);
+    if (requestContext != null) {
+      payload.request_context = requestContext;
+    }
+  }
   return {
     opcode: OPCODES.commandExec,
-    payload: {
-      args: args.slice(1),
-      command: asText(args[0]).toUpperCase()
-    }
+    payload
   };
+}
+
+function normalizeRequestContext(context: unknown): Record<string, unknown> | undefined {
+  if (!isPlainObject(context)) {
+    return undefined;
+  }
+
+  const out: Record<string, unknown> = {};
+  const subject = optionalText(context.subject);
+  const tenant = optionalText(context.tenant);
+  const scopes = normalizeRequestContextScopes(context.scopes);
+  if (subject != null) {
+    out.subject = subject;
+  }
+  if (tenant != null) {
+    out.tenant = tenant;
+  }
+  if (scopes.length > 0) {
+    out.scopes = scopes;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function normalizeRequestContextScopes(scopes: unknown): string[] {
+  const values = typeof scopes === "string" || Buffer.isBuffer(scopes) || scopes instanceof Uint8Array
+    ? asText(scopes).split(/\s+/u)
+    : Array.isArray(scopes)
+      ? scopes.map((scope) => optionalText(scope)).filter((scope): scope is string => scope != null)
+      : [];
+  return [...new Set(values.filter((scope) => scope.length > 0))];
+}
+
+function optionalText(value: unknown): string | undefined {
+  if (value == null || value === "") {
+    return undefined;
+  }
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "bigint" ||
+    typeof value === "boolean" ||
+    Buffer.isBuffer(value) ||
+    value instanceof Uint8Array
+  ) {
+    return asText(value);
+  }
+  return undefined;
+}
+
+function commandTokenIs(value: unknown, expected: string): boolean {
+  if (typeof value === "string") {
+    return value.toUpperCase() === expected;
+  }
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    return asText(value).toUpperCase() === expected;
+  }
+  return false;
 }
 
 export function pipelineCommand(commands: readonly Command[]): ProtocolCommand {
