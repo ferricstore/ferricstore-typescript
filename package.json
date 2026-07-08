@@ -8,6 +8,9 @@
     "access": "public",
     "provenance": true
   },
+  "overrides": {
+    "esbuild": "0.28.1"
+  },
   "author": "FerricStore",
   "homepage": "https://github.com/ferricstore/ferricstore-typescript#readme",
   "repository": {
