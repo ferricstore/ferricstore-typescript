@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-15
+
 ### Added
 
 - Automatic queue/workflow lease renewal with explicit disable and interval controls.
