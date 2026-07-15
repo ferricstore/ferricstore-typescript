@@ -189,6 +189,7 @@ export class FerricStoreClaimClient extends FerricStoreMutationClient {
   ): Promise<FlowRecord>;
   async extendLease(id: string, options: ExtendLeaseOptions): Promise<FlowRecord | boolean>;
   async extendLease(id: string, options: ExtendLeaseOptions): Promise<FlowRecord | boolean> {
+    const partitionKey = options.partitionKey;
     const args: CommandArgument[] = [
       "FLOW.EXTEND_LEASE",
       id,
@@ -200,7 +201,7 @@ export class FerricStoreClaimClient extends FerricStoreMutationClient {
       "NOW",
       options.nowMs ?? nowMs()
     ];
-    append(args, "PARTITION", options.partitionKey);
+    append(args, "PARTITION", partitionKey);
     const wantsOkResponse = options.returnOkOnSuccess === true;
     const ownsOkResponseProbe = wantsOkResponse && this.extendLeaseOkResponseSupport == null;
     const requestOkResponse = wantsOkResponse && this.extendLeaseOkResponseSupport !== false
@@ -244,10 +245,10 @@ export class FerricStoreClaimClient extends FerricStoreMutationClient {
         }
         return ok;
       }
-      await this.recordOrGet(response, id, options.partitionKey);
+      await this.recordOrGet(response, id, partitionKey);
       return true;
     }
-    return await this.recordOrGet(response, id, options.partitionKey);
+    return await this.recordOrGet(response, id, partitionKey);
   }
 
   /**

@@ -11,7 +11,7 @@ import {
   DEFAULT_MAX_QUEUED_WRITE_BYTES,
   DEFAULT_MAX_RESPONSE_BYTES
 } from "./native-adapter-config.js";
-import { connect, parseFerricUrl } from "./native-connection.js";
+import { connect, nativeBootstrapAbortError, parseFerricUrl } from "./native-connection.js";
 import { snapshotNativeAdapterOptions } from "./client-native-options.js";
 import { DEFAULT_MAX_FRAME_BYTES } from "./protocol.js";
 
@@ -61,7 +61,13 @@ export async function bootstrapNativeAdapter<T>(
     nativeOptions.onEvent,
     nativeOptions.maxQueuedWriteBytes ?? DEFAULT_MAX_QUEUED_WRITE_BYTES
   ]);
+  const signal = nativeOptions.signal;
+  const onAbort = (): void => {
+    void handle.close().catch(() => undefined);
+  };
+  signal?.addEventListener("abort", onAbort, { once: true });
   try {
+    if (signal?.aborted) throw nativeBootstrapAbortError(signal.reason);
     const authRequired = await handle.startup(nativeOptions.clientName, nativeOptions.events);
     const password = nativeOptions.password ?? parsed.password;
     if (authRequired && (password == null || password === "")) {
@@ -72,10 +78,14 @@ export async function bootstrapNativeAdapter<T>(
     if (password != null && password !== "") {
       await handle.auth(nativeOptions.username ?? parsed.username ?? "default", password);
     }
+    if (signal?.aborted) throw nativeBootstrapAbortError(signal.reason);
     handle.startHeartbeat();
     return handle.adapter;
   } catch (error) {
     await handle.close();
+    if (signal?.aborted) throw nativeBootstrapAbortError(signal.reason);
     throw error;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
   }
 }

@@ -25,6 +25,11 @@ import { applyQueueBatchOutcome, applyQueueException, applyQueueOutcome } from "
 import { QueuePendingCompletions } from "./queue-pending-completions.js";
 import { runQueueWorkerInWaves } from "./queue-worker-run-loop.js";
 
+interface GuardedQueueJob {
+  readonly guard: LeaseRenewalGuard;
+  readonly job: QueueJob;
+}
+
 export class QueueWorker {
   readonly queue: Queue;
   readonly options: WorkerConfig;
@@ -227,10 +232,20 @@ export class QueueWorker {
     await this.flush();
     const completionBatcher = new QueueCompletionBatcher(this.queue, this.options);
     try {
-      await runContinuousWorkerPool({
-        claim: async (limit, useBlocking) => await this.claimJobs({ limit, useBlocking }),
+      await runContinuousWorkerPool<GuardedQueueJob>({
+        claim: async (limit, useBlocking) => (await this.claimJobs({ limit, useBlocking }))
+          .map((job) => this.guardContinuousJob(job)),
         concurrency: workerConcurrency(this.options),
-        handle: async (job) => await this.applyContinuousJob(job, handler, completionBatcher),
+        handle: async ({ guard, job }) => {
+          const result = await this.applyContinuousJob(job, guard, handler, completionBatcher);
+          if (result == null) return;
+          return {
+            ...(Object.hasOwn(result, "error") ? { error: result.error } : {}),
+            ...(result.items == null
+              ? {}
+              : { items: result.items.map((item) => this.guardContinuousJob(item)) })
+          };
+        },
         idleSleepMs: this.options.idleSleepMs,
         maxClaimSize: workerBatchSize(this.options, this.queue.client.flowManyBatchLimit),
         maxIdleSleepMs: this.options.maxIdleSleepMs,
@@ -272,6 +287,7 @@ export class QueueWorker {
   ): Promise<boolean> {
     let batchComplete = false;
     let outcome: CompleteOutcome | RetryOutcome | FailOutcome | undefined;
+    guard.assertActive();
     try {
       const value = await handler(job);
       if (value === undefined) {
@@ -320,15 +336,10 @@ export class QueueWorker {
 
   private async applyContinuousJob(
     job: QueueJob,
+    guard: LeaseRenewalGuard,
     handler: QueueHandler,
     completionBatcher: QueueCompletionBatcher
   ): Promise<void | ContinuousWorkerHandleResult<QueueJob>> {
-    const guard = new LeaseRenewalGuard(
-      this.queue.client,
-      job,
-      workerLeaseMs(this.options),
-      this.options
-    );
     let guardOwned = true;
     const stopGuard = async (): Promise<void> => {
       guardOwned = false;
@@ -338,6 +349,7 @@ export class QueueWorker {
     try {
       let batchComplete = false;
       let outcome: CompleteOutcome | RetryOutcome | FailOutcome | undefined;
+      guard.assertActive();
       try {
         const value = await handler(job);
         if (value === undefined) {
@@ -374,6 +386,18 @@ export class QueueWorker {
         await guard.stop();
       }
     }
+  }
+
+  private guardContinuousJob(job: QueueJob): GuardedQueueJob {
+    return {
+      guard: new LeaseRenewalGuard(
+        this.queue.client,
+        job,
+        workerLeaseMs(this.options),
+        this.options
+      ),
+      job
+    };
   }
 
   private async flushCompletions(jobs: ClaimedItem[], result: QueueWorkerResult): Promise<void> {

@@ -1,19 +1,11 @@
 import { Buffer } from "node:buffer";
-import { FerricStoreError, InvalidCommandError } from "./errors.js";
+import { FerricStoreError } from "./errors.js";
 import type { CommandArgument } from "./internal.js";
 import { connectionBlockingCommands } from "./command-metadata.js";
 import * as wire from "./protocol-constants.js";
 import { asText, commandName, commandTokenIs, toBuffer } from "./protocol-text.js";
+import { isRequestContextCommand, normalizeRequestContext } from "./request-context.js";
 export { asText, commandName, commandNameIs, commandTokenIs, optionalText, toBuffer } from "./protocol-text.js";
-
-const requestContextCommands = new Set([
-  "INVOCATION.CREATE",
-  "INVOCATION.DEFINITION.GET",
-  "INVOCATION.DEFINITION.LIST",
-  "INVOCATION.DEFINITION.PUT",
-  "INVOCATION.GET",
-  "INVOCATION.PARTITION.LIST"
-]);
 
 /** Encode an arbitrary command through the server's generic command path. */
 export function commandExec(args: readonly CommandArgument[]): wire.ProtocolCommand {
@@ -27,7 +19,7 @@ export function commandExec(args: readonly CommandArgument[]): wire.ProtocolComm
     command
   };
   if (
-    requestContextCommands.has(command)
+    isRequestContextCommand(command)
     && commandArgs.length >= 2
     && commandTokenIs(commandArgs[commandArgs.length - 2], "REQUEST_CONTEXT")
   ) {
@@ -110,71 +102,6 @@ export function blockDurationMs(value: CommandArgument, multiplier: number): num
   }
   if (duration < 0) return undefined;
   return Math.min(Number.MAX_SAFE_INTEGER, duration * multiplier);
-}
-
-const requestContextFields = new Set(["scopes", "subject", "tenant"]);
-
-function normalizeRequestContext(context: unknown): Record<string, unknown> {
-  if (!isPlainObject(context)) {
-    throw new InvalidCommandError("request context must be a plain object");
-  }
-  const prototype = Reflect.getPrototypeOf(context);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new InvalidCommandError("request context must be a plain object");
-  }
-  for (const key of Object.keys(context)) {
-    if (!requestContextFields.has(key)) {
-      throw new InvalidCommandError(`request context contains unsupported field ${key}`);
-    }
-  }
-
-  const out: Record<string, unknown> = {};
-  const subject = requestContextText(context, "subject");
-  const tenant = requestContextText(context, "tenant");
-  if (subject != null) out.subject = subject;
-  if (tenant != null) out.tenant = tenant;
-  if (Object.hasOwn(context, "scopes") && context.scopes !== undefined) {
-    out.scopes = normalizeRequestContextScopes(context.scopes);
-  }
-  return out;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object"
-    && value != null
-    && !Array.isArray(value)
-    && !Buffer.isBuffer(value)
-    && !(value instanceof Uint8Array);
-}
-
-function normalizeRequestContextScopes(scopes: unknown): string[] {
-  if (typeof scopes === "string") {
-    return [...new Set(scopes.split(/\s+/u).filter((scope) => scope.length > 0))];
-  }
-  if (!Array.isArray(scopes)) {
-    throw new InvalidCommandError("request context scopes must be a string or an array of strings");
-  }
-  const unique = new Set<string>();
-  for (let index = 0; index < scopes.length; index += 1) {
-    const scope: unknown = scopes[index];
-    if (!Object.hasOwn(scopes, index) || typeof scope !== "string" || scope.length === 0) {
-      throw new InvalidCommandError("request context scopes must be a dense array of own non-empty strings");
-    }
-    unique.add(scope);
-  }
-  return [...unique];
-}
-
-function requestContextText(
-  context: Record<string, unknown>,
-  fieldName: "subject" | "tenant"
-): string | undefined {
-  if (!Object.hasOwn(context, fieldName) || context[fieldName] === undefined) return undefined;
-  const value = context[fieldName];
-  if (typeof value !== "string" || value.length === 0) {
-    throw new InvalidCommandError(`request context ${fieldName} must be a non-empty string`);
-  }
-  return value;
 }
 
 /** @internal Normalize a request-body limit once for every encoder. */

@@ -1,5 +1,4 @@
 import { Buffer } from "node:buffer";
-import { OverloadedError } from "./errors.js";
 import {
   append,
   appendBool,
@@ -9,7 +8,6 @@ import {
   expandManyResponse,
   nowMs,
   parseKvResponse,
-  sleep,
   type CommandArgument
 } from "./internal.js";
 import { flowRecordFromResp, type ChildSpec, type FencingToken, type FlowRecord, type MaxActiveMs } from "./types.js";
@@ -33,6 +31,7 @@ import {
 } from "./client-helpers.js";
 import { FlowBatchError, confirmedFlowBatchItems } from "./client-errors.js";
 import { FerricStoreManagementClient } from "./client-management.js";
+import { executeProducerWriteWithBackpressure } from "./producer-backpressure.js";
 
 /** @internal Read, policy, and shared Flow helpers kept off the primary implementation module. */
 export class FerricStoreFlowSupportClient extends FerricStoreManagementClient {
@@ -43,13 +42,15 @@ export class FerricStoreFlowSupportClient extends FerricStoreManagementClient {
     nowMs?: number;
     returnRecord?: boolean;
   } = {}): Promise<FlowRecord | Buffer | unknown> {
+    const partitionKey = options.partitionKey;
+    const returnRecord = options.returnRecord === true;
     const args: CommandArgument[] = ["FLOW.REWIND", id, "NOW", options.nowMs ?? nowMs()];
-    append(args, "PARTITION", options.partitionKey);
+    append(args, "PARTITION", partitionKey);
     append(args, "TO_EVENT", options.toEvent);
     append(args, "EXPECT_STATE", options.expectState);
     const response = await this.commandArgs(args);
-    if (options.returnRecord === true) {
-      return await this.recordOrGet(response, id, options.partitionKey);
+    if (returnRecord) {
+      return await this.recordOrGet(response, id, partitionKey);
     }
     return response;
   }
@@ -250,23 +251,11 @@ export class FerricStoreFlowSupportClient extends FerricStoreManagementClient {
   }
 
   protected async executeProducerWrite(args: CommandArgument[]): Promise<unknown> {
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        return await this.commandArgs(args);
-      } catch (error) {
-        if (!(error instanceof OverloadedError) || attempt >= this.backpressure.maxRetries) {
-          throw error;
-        }
-        const retryAfterMs = error.retryAfterMs;
-        const exponential = Math.min(
-          this.backpressure.maxDelayMs,
-          this.backpressure.baseDelayMs * 2 ** attempt
-        );
-        const base = Math.min(this.backpressure.maxDelayMs, retryAfterMs ?? exponential);
-        const jitter = base * (this.backpressure.jitterPct / 100) * Math.random();
-        await sleep(Math.min(this.backpressure.maxDelayMs, base + jitter));
-      }
-    }
+    return await executeProducerWriteWithBackpressure(
+      async () => await this.commandArgs(args),
+      this.backpressure,
+      this.closeSignal
+    );
   }
 
   protected async recordOrGet(response: unknown, id: string, partitionKey: string | undefined): Promise<FlowRecord> {
@@ -307,14 +296,17 @@ export class FerricStoreFlowSupportClient extends FerricStoreManagementClient {
   protected async executeIndependentManyChunks<T>(
     operation: string,
     items: readonly T[],
+    capture: (item: T) => T,
     execute: (batchItems: T[]) => Promise<unknown[] | unknown>
   ): Promise<unknown[]> {
     const results: unknown[] = [];
-    const batches: T[][] = [];
-    for (let start = 0; start < items.length; start += this.flowManyBatchLimit) {
-      batches.push(items.slice(start, start + this.flowManyBatchLimit));
+    const captured = new Array<T>(items.length);
+    for (let index = 0; index < items.length; index += 1) {
+      if (!Object.hasOwn(items, index)) throw new TypeError(`${operation} items must be dense`);
+      captured[index] = capture(items[index] as T);
     }
-    for (const batchItems of batches) {
+    for (let start = 0; start < captured.length; start += this.flowManyBatchLimit) {
+      const batchItems = captured.slice(start, start + this.flowManyBatchLimit);
       try {
         const response = await execute(batchItems);
         for (const result of expandManyResponse(response, batchItems.length)) results.push(result);

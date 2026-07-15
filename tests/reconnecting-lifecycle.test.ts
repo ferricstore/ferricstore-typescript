@@ -6,6 +6,7 @@ import { ConnectionClosedError } from "../src/errors.js";
 import type { CommandArgument } from "../src/internal.js";
 import { COMMAND_OPCODES } from "../src/protocol.js";
 import {
+  activeConnections,
   NO_RESPONSE,
   commandExecName,
   responseFrame,
@@ -21,6 +22,7 @@ test("ReconnectingExecutor reconnects when the native adapter was closed while i
 
   try {
     await waitFor(() => server.connectionCount > 0);
+    await waitFor(async () => (await activeConnections(server)) === 0);
     const response = await executor.executeCommand("PING");
     expect(Buffer.isBuffer(response)).toBe(true);
     expect((response as Buffer).toString("utf8")).toBe("PONG");

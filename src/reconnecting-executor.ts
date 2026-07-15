@@ -29,7 +29,7 @@ export class ReconnectingExecutor implements CommandExecutor {
   private reconnectPromise?: Promise<CommandExecutor>;
 
   constructor(
-    private readonly createExecutor: () => Promise<CommandExecutor>,
+    private readonly createExecutor: (signal?: AbortSignal) => Promise<CommandExecutor>,
     options: ReconnectOptions = {}
   ) {
     const captured = { ...options };
@@ -40,7 +40,7 @@ export class ReconnectingExecutor implements CommandExecutor {
     );
     this.jitterPct = Math.min(100, normalizeNonNegativeInteger(captured.jitterPct ?? 20, 20));
     this.maxRetries = normalizeNonNegativeInteger(captured.maxRetries ?? 1, 1);
-    this.executorPromise = createExecutor();
+    this.executorPromise = createExecutor(this.retryAbortController.signal);
     void this.executorPromise.catch(() => undefined);
   }
 
@@ -200,7 +200,7 @@ export class ReconnectingExecutor implements CommandExecutor {
     if (currentExecutor != null && currentExecutor !== staleExecutor) return currentExecutor;
     this.reconnectPromise = (async () => {
       await Promise.resolve(staleExecutor.close?.()).catch(() => undefined);
-      const nextExecutor = await this.createExecutor();
+      const nextExecutor = await this.createExecutor(this.retryAbortController.signal);
       if (this.closed) {
         await Promise.resolve(nextExecutor.close?.()).catch(() => undefined);
         throw new FerricStoreError("FerricStore client is closed");

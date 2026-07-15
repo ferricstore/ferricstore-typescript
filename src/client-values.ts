@@ -14,12 +14,13 @@ export async function valueMGetEntries(
   refs: readonly string[],
   options: { readonly maxBytes?: number } = {}
 ): Promise<ValueMGetEntry[]> {
-  if (refs.length === 0) {
+  const refCount = refs.length;
+  if (refCount === 0) {
     return [];
   }
-  const args = new Array<CommandArgument>(1 + refs.length);
+  const args = new Array<CommandArgument>(1 + refCount);
   args[0] = "FLOW.VALUE.MGET";
-  for (let index = 0; index < refs.length; index += 1) {
+  for (let index = 0; index < refCount; index += 1) {
     if (!Object.hasOwn(refs, index)) {
       throw new TypeError("FLOW.VALUE.MGET refs must be dense");
     }
@@ -30,9 +31,9 @@ export async function valueMGetEntries(
   if (!Array.isArray(response)) {
     throw new FerricStoreError("FLOW.VALUE.MGET returned an invalid response", { raw: response });
   }
-  if (response.length !== refs.length) {
+  if (response.length !== refCount) {
     throw new FerricStoreError(
-      `FLOW.VALUE.MGET response length ${response.length} did not match request length ${refs.length}`,
+      `FLOW.VALUE.MGET response length ${response.length} did not match request length ${refCount}`,
       { raw: response }
     );
   }

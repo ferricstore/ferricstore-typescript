@@ -31,6 +31,8 @@ export interface NativeProtocolEvent {
 export interface NativeAdapterOptions {
   clientName?: string;
   connectTimeoutMs?: number;
+  /** Cancels connection, STARTUP, or AUTH while the native adapter is being created. */
+  signal?: AbortSignal;
   heartbeatIntervalMs?: number;
   keepAlive?: boolean;
   keepAliveInitialDelayMs?: number;

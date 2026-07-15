@@ -196,6 +196,7 @@ test("NativeAdapter closes a blackholed connection after heartbeat timeout", asy
   );
   const address = server.address() as AddressInfo;
   const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
+    connectTimeoutMs: 1_000,
     heartbeatIntervalMs: 10,
     timeoutMs: 20
   });
@@ -220,6 +221,7 @@ test("NativeAdapter heartbeats a blackholed connection during sustained outbound
   }, { fragmentResponses: false });
   const address = server.address() as AddressInfo;
   const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
+    connectTimeoutMs: 1_000,
     heartbeatIntervalMs: 10,
     timeoutMs: 15
   });
@@ -246,6 +248,7 @@ test("NativeAdapter retires credits whose timed-out response never arrives", asy
   , { fragmentResponses: false });
   const address = server.address() as AddressInfo;
   const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
+    connectTimeoutMs: 1_000,
     heartbeatIntervalMs: 0,
     timeoutMs: 10
   });
@@ -281,6 +284,7 @@ test("NativeAdapter marks a flow-control waiter timeout as unsent", async () => 
   }, { fragmentResponses: false });
   const address = server.address() as AddressInfo;
   const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
+    connectTimeoutMs: 1_000,
     protocolLanes: 1,
     timeoutMs: 20
   });
@@ -305,6 +309,7 @@ test("NativeAdapter marks a dispatched control-command timeout as possibly sent"
   , { fragmentResponses: false });
   const address = server.address() as AddressInfo;
   const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
+    connectTimeoutMs: 1_000,
     heartbeatIntervalMs: 0,
     timeoutMs: 10
   });
@@ -683,6 +688,7 @@ test("NativeAdapter retains flow-control credit until a timed-out sent request f
   }, { fragmentResponses: false });
   const address = server.address() as AddressInfo;
   const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
+    connectTimeoutMs: 1_000,
     protocolLanes: 1,
     timeoutMs: 50
   });
@@ -1000,7 +1006,10 @@ test("NativeAdapter finishes draining when the last pending request times out", 
     return NO_RESPONSE;
   }, { fragmentResponses: false });
   const address = server.address() as AddressInfo;
-  const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, { timeoutMs: 20 });
+  const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
+    connectTimeoutMs: 1_000,
+    timeoutMs: 20
+  });
 
   try {
     await expect(adapter.executeCommand("PING")).rejects.toThrow("timed out");

@@ -49,6 +49,10 @@ import type {
   WorkflowOptions,
   WorkflowWorkerResult
 } from "./workflow-types.js";
+
+type GuardedContinuousWorkflowJob = ContinuousWorkflowJob & {
+  readonly guard: LeaseRenewalGuard;
+};
 export type {
   StateOptions,
   StateRegistration,
@@ -322,7 +326,7 @@ export class WorkflowWorker {
   private async runContinuously(registrations: readonly ResolvedWorkflowState[]): Promise<void> {
     let stateCursor = 0;
 
-    await runContinuousWorkerPool<ContinuousWorkflowJob>({
+    await runContinuousWorkerPool<GuardedContinuousWorkflowJob>({
       claim: async (limit, useBlocking) => {
         let remainingStates = registrations.length;
         while (remainingStates > 0) {
@@ -338,14 +342,18 @@ export class WorkflowWorker {
             useBlocking && registrations.length === 1
           );
           if (jobs.length > 0) {
-            return jobs.map((job) => ({ job, leaseMs, registration: selected.registration }));
+            return jobs.map((job) => ({
+              guard: new LeaseRenewalGuard(this.workflow.client, job, leaseMs, this.options),
+              job,
+              leaseMs,
+              registration: selected.registration
+            }));
           }
         }
         return [];
       },
       concurrency: workerConcurrency(this.options),
-      handle: async ({ job, leaseMs, registration }) => {
-        const guard = new LeaseRenewalGuard(this.workflow.client, job, leaseMs, this.options);
+      handle: async ({ guard, job, registration }) => {
         try {
           await this.applyJob(job, registration, guard);
         } finally {
@@ -401,6 +409,7 @@ export class WorkflowWorker {
     registration: StateRegistration,
     guard: LeaseRenewalGuard
   ): Promise<void> {
+    guard.assertActive();
     const ctx = new WorkflowContext(this.workflow, job, registration.name, guard.job);
     let outcome: Outcome;
     try {

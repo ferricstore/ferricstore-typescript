@@ -1,4 +1,5 @@
 import type { Codec } from "./codecs.js";
+import { encodeFlowValue } from "./flow-value-snapshot.js";
 import type { CommandArgument } from "./internal.js";
 
 export function appendNamedValues(
@@ -12,7 +13,7 @@ export function appendNamedValues(
   }
 ): void {
   for (const [name, value] of Object.entries(options.values ?? {})) {
-    args.push("VALUE", name, codec.encode(value));
+    args.push("VALUE", name, encodeFlowValue(codec, value));
   }
   for (const [name, ref] of Object.entries(options.valueRefs ?? {})) {
     if (typeof ref !== "string") throw new TypeError("valueRefs must contain string references");

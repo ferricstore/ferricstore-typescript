@@ -6,6 +6,7 @@ import { mapSettledWithConcurrency } from "./topology-utilities.js";
 /** Owns topology adapter creation, deduplication, and graceful retirement. */
 export class TopologyAdapterRegistry {
   private readonly creations = new Map<string, Promise<NativeAdapter>>();
+  private readonly creationControllers = new WeakMap<Promise<NativeAdapter>, AbortController>();
   private readonly adapters = new Map<string, NativeAdapter>();
   private readonly retiring = new Set<NativeAdapter>();
 
@@ -30,8 +31,12 @@ export class TopologyAdapterRegistry {
 
     let creation = this.creations.get(key);
     if (creation == null) {
+      const controller = new AbortController();
+      const signal = options.signal == null
+        ? controller.signal
+        : AbortSignal.any([options.signal, controller.signal]);
       const started = (async () => {
-        const adapter = await NativeAdapter.fromUrl(url, options);
+        const adapter = await NativeAdapter.fromUrl(url, { ...options, signal });
         if (this.isClosed()) {
           await adapter.close();
           this.assertOpen();
@@ -43,6 +48,7 @@ export class TopologyAdapterRegistry {
         if (this.creations.get(key) === tracked) this.creations.delete(key);
       });
       creation = tracked;
+      this.creationControllers.set(creation, controller);
       this.creations.set(key, creation);
     }
 
@@ -63,6 +69,7 @@ export class TopologyAdapterRegistry {
     }
     for (const [key, creation] of this.creations.entries()) {
       if (active.has(key)) continue;
+      this.creationControllers.get(creation)?.abort(new ConnectionClosedError("unsent"));
       void creation.then((adapter) => {
         if (isCurrentlyActive(key)) return;
         if (this.adapters.get(key) === adapter) this.adapters.delete(key);
@@ -74,6 +81,9 @@ export class TopologyAdapterRegistry {
   async close(concurrency: number): Promise<void> {
     const adapters = [...new Set([...this.adapters.values(), ...this.retiring])];
     const creations = [...this.creations.values()];
+    for (const creation of creations) {
+      this.creationControllers.get(creation)?.abort(new ConnectionClosedError("unsent"));
+    }
     this.adapters.clear();
     this.retiring.clear();
     await mapSettledWithConcurrency(

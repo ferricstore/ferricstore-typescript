@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import type { Codec } from "./codecs.js";
+import { encodeFlowValue } from "./flow-value-snapshot.js";
 import { snapshotOwnStringArray } from "./string-array-snapshot.js";
 import type {
   AdminListOptions,
@@ -16,6 +17,7 @@ import type {
   SearchStateMeta
 } from "./client-options.js";
 import { append, appendBool, arrayResponse, normalizeRefMeta, text, type CommandArgument } from "./internal.js";
+import { normalizeRequestContext } from "./request-context.js";
 export { appendAttributeMutations } from "./flow-argument-helpers.js";
 import {
   CLAIMED_ITEM_WIRE,
@@ -153,7 +155,7 @@ export function commandWithRequestContext(
 ): CommandArgument[] {
   const commandArgs: CommandArgument[] = [command, ...args];
   if (requestContext != null) {
-    commandArgs.push("REQUEST_CONTEXT", requestContext as Record<string, unknown>);
+    commandArgs.push("REQUEST_CONTEXT", normalizeRequestContext(requestContext));
   }
   return commandArgs;
 }
@@ -315,7 +317,7 @@ export function appendNamedCounts(
 ): void {
   args.push(Object.keys(values).length);
   for (const [name, value] of Object.entries(values)) {
-    args.push(name, codec.encode(value));
+    args.push(name, encodeFlowValue(codec, value));
   }
   args.push(Object.keys(valueRefs).length);
   for (const [name, ref] of Object.entries(valueRefs)) {
@@ -334,9 +336,9 @@ export function appendClaimedItems(
   for (const item of items) {
     const wire = item[CLAIMED_ITEM_WIRE];
     if (partitionKey == null) {
-      args.push(wire?.id ?? item.id, wire?.partitionKey ?? item.partitionKey ?? "-", wire?.leaseToken ?? item.leaseToken, wire?.fencingToken ?? item.fencingToken);
+      args.push(wire?.id ?? item.id, wire?.partitionKey ?? item.partitionKey ?? "-", Buffer.from(wire?.leaseToken ?? item.leaseToken), wire?.fencingToken ?? item.fencingToken);
     } else {
-      args.push(wire?.id ?? item.id, wire?.leaseToken ?? item.leaseToken, wire?.fencingToken ?? item.fencingToken);
+      args.push(wire?.id ?? item.id, Buffer.from(wire?.leaseToken ?? item.leaseToken), wire?.fencingToken ?? item.fencingToken);
     }
   }
 }
@@ -357,7 +359,7 @@ export function appendFencedItems(
       args.push(item.id, item.fencingToken);
     }
     if (includeLease) {
-      args.push(item.leaseToken ?? Buffer.alloc(0));
+      args.push(item.leaseToken == null ? Buffer.alloc(0) : Buffer.from(item.leaseToken));
     }
   }
 }

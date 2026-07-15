@@ -75,11 +75,12 @@ export class GeoStore {
 
   async geosearch(key: string, args: CommandArgument[]): Promise<unknown[]> {
     requireNonEmpty(args, "GEOSEARCH");
+    const metadataCount = geoSearchMetadataCount(args);
     const encodedSearchArgs = encodeGeoSearchArgs(this.client.codec, args);
     return decodeGeoSearchMembers(
       this.client.codec,
       await commandArgs(this.client, concatArgs(["GEOSEARCH", key], encodedSearchArgs)),
-      geoSearchMetadataCount(args)
+      metadataCount
     );
   }
 

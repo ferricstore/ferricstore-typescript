@@ -22,11 +22,18 @@ import {
   assertManyPartitionMatches
 } from "./client-helpers.js";
 import { FerricStoreFlowSupportClient } from "./client-flow-support.js";
+import {
+  snapshotClaimedItem,
+  snapshotFencedItem,
+  snapshotFlowManyOptions
+} from "./flow-many-snapshot.js";
 import type { ClaimedItem, FencedItem, FlowRecord, StateMeta } from "./types.js";
 
 export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
   async transition(id: string, options: TransitionOptions): Promise<FlowRecord | Buffer | unknown> {
     const currentNowMs = options.nowMs ?? nowMs();
+    const partitionKey = options.partitionKey;
+    const returnRecord = options.returnRecord === true;
     const args: CommandArgument[] = [
       "FLOW.TRANSITION",
       id,
@@ -39,7 +46,7 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
       "NOW",
       currentNowMs
     ];
-    append(args, "PARTITION", options.partitionKey);
+    append(args, "PARTITION", partitionKey);
     appendEncoded(args, "PAYLOAD", this.codec, options.payload);
     append(args, "RUN_AT", options.runAtMs ?? currentNowMs);
     append(args, "PRIORITY", options.priority);
@@ -47,13 +54,15 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
     appendNamedValues(args, this.codec, options);
     appendAttributeMutations(args, options);
     const response = await this.commandArgs(args);
-    if (options.returnRecord === true) {
-      return await this.recordOrGet(response, id, options.partitionKey);
+    if (returnRecord) {
+      return await this.recordOrGet(response, id, partitionKey);
     }
     return response;
   }
 
   async complete(id: string, options: CompleteOptions): Promise<FlowRecord | Buffer | unknown> {
+    const partitionKey = options.partitionKey;
+    const returnRecord = options.returnRecord === true;
     const args: CommandArgument[] = [
       "FLOW.COMPLETE",
       id,
@@ -63,7 +72,7 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
       "NOW",
       options.nowMs ?? nowMs()
     ];
-    append(args, "PARTITION", options.partitionKey);
+    append(args, "PARTITION", partitionKey);
     appendEncoded(args, "RESULT", this.codec, options.result);
     appendEncoded(args, "PAYLOAD", this.codec, options.payload);
     append(args, "TTL", options.ttlMs);
@@ -71,8 +80,8 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
     appendNamedValues(args, this.codec, options);
     appendAttributeMutations(args, options);
     const response = await this.commandArgs(args);
-    if (options.returnRecord === true) {
-      return await this.recordOrGet(response, id, options.partitionKey);
+    if (returnRecord) {
+      return await this.recordOrGet(response, id, partitionKey);
     }
     return response;
   }
@@ -87,10 +96,14 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
     if (items.length > this.flowManyBatchLimit) {
       if (options.independent !== true) throw this.flowManyLimitError("completeMany");
       const currentNowMs = options.nowMs ?? nowMs();
-      return await this.executeIndependentManyChunks("completeMany", items, async (batchItems) => await this.completeMany(
+      const capturedOptions = snapshotFlowManyOptions(
+        { ...options, nowMs: currentNowMs },
+        this.codec
+      );
+      return await this.executeIndependentManyChunks("completeMany", items, snapshotClaimedItem, async (batchItems) => await this.completeMany(
         partitionKey,
         batchItems,
-        { ...options, nowMs: currentNowMs }
+        capturedOptions
       ));
     }
     return this.recordsOrResponse(await this.commandArgs(this.completeManyRequest(partitionKey, items, options)));
@@ -129,6 +142,8 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
   }
 
   async retry(id: string, options: RetryOptions): Promise<FlowRecord | Buffer | unknown> {
+    const partitionKey = options.partitionKey;
+    const returnRecord = options.returnRecord === true;
     const args: CommandArgument[] = [
       "FLOW.RETRY",
       id,
@@ -138,7 +153,7 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
       "NOW",
       options.nowMs ?? nowMs()
     ];
-    append(args, "PARTITION", options.partitionKey);
+    append(args, "PARTITION", partitionKey);
     appendEncoded(args, "ERROR", this.codec, options.error);
     appendEncoded(args, "PAYLOAD", this.codec, options.payload);
     append(args, "RUN_AT", options.runAtMs);
@@ -146,7 +161,7 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
     appendNamedValues(args, this.codec, options);
     appendAttributeMutations(args, options);
     const response = await this.commandArgs(args);
-    if (options.returnRecord === true) return await this.recordOrGet(response, id, options.partitionKey);
+    if (returnRecord) return await this.recordOrGet(response, id, partitionKey);
     return response;
   }
 
@@ -170,10 +185,14 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
     if (items.length > this.flowManyBatchLimit) {
       if (options.independent !== true) throw this.flowManyLimitError("retryMany");
       const currentNowMs = options.nowMs ?? nowMs();
-      return await this.executeIndependentManyChunks("retryMany", items, async (batchItems) => await this.retryMany(
+      const capturedOptions = snapshotFlowManyOptions(
+        { ...options, nowMs: currentNowMs },
+        this.codec
+      );
+      return await this.executeIndependentManyChunks("retryMany", items, snapshotClaimedItem, async (batchItems) => await this.retryMany(
         partitionKey,
         batchItems,
-        { ...options, nowMs: currentNowMs }
+        capturedOptions
       ));
     }
     const args: CommandArgument[] = ["FLOW.RETRY_MANY", partitionKey ?? "MIXED"];
@@ -191,6 +210,8 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
   }
 
   async fail(id: string, options: FailOptions): Promise<FlowRecord | Buffer | unknown> {
+    const partitionKey = options.partitionKey;
+    const returnRecord = options.returnRecord === true;
     const args: CommandArgument[] = [
       "FLOW.FAIL",
       id,
@@ -200,7 +221,7 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
       "NOW",
       options.nowMs ?? nowMs()
     ];
-    append(args, "PARTITION", options.partitionKey);
+    append(args, "PARTITION", partitionKey);
     appendEncoded(args, "ERROR", this.codec, options.error);
     appendEncoded(args, "PAYLOAD", this.codec, options.payload);
     append(args, "TTL", options.ttlMs);
@@ -208,7 +229,7 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
     appendNamedValues(args, this.codec, options);
     appendAttributeMutations(args, options);
     const response = await this.commandArgs(args);
-    if (options.returnRecord === true) return await this.recordOrGet(response, id, options.partitionKey);
+    if (returnRecord) return await this.recordOrGet(response, id, partitionKey);
     return response;
   }
 
@@ -232,10 +253,14 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
     if (items.length > this.flowManyBatchLimit) {
       if (options.independent !== true) throw this.flowManyLimitError("failMany");
       const currentNowMs = options.nowMs ?? nowMs();
-      return await this.executeIndependentManyChunks("failMany", items, async (batchItems) => await this.failMany(
+      const capturedOptions = snapshotFlowManyOptions(
+        { ...options, nowMs: currentNowMs },
+        this.codec
+      );
+      return await this.executeIndependentManyChunks("failMany", items, snapshotClaimedItem, async (batchItems) => await this.failMany(
         partitionKey,
         batchItems,
-        { ...options, nowMs: currentNowMs }
+        capturedOptions
       ));
     }
     const args: CommandArgument[] = ["FLOW.FAIL_MANY", partitionKey ?? "MIXED"];
@@ -253,16 +278,18 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
   }
 
   async cancel(id: string, options: CancelOptions): Promise<FlowRecord | Buffer | unknown> {
+    const partitionKey = options.partitionKey;
+    const returnRecord = options.returnRecord === true;
     const args: CommandArgument[] = ["FLOW.CANCEL", id, "FENCING", options.fencingToken, "NOW", options.nowMs ?? nowMs()];
     append(args, "LEASE_TOKEN", options.leaseToken);
-    append(args, "PARTITION", options.partitionKey);
+    append(args, "PARTITION", partitionKey);
     appendEncoded(args, "REASON", this.codec, options.reason);
     append(args, "TTL", options.ttlMs);
     appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
     appendAttributeMutations(args, options);
     const response = await this.commandArgs(args);
-    if (options.returnRecord === true) return await this.recordOrGet(response, id, options.partitionKey);
+    if (returnRecord) return await this.recordOrGet(response, id, partitionKey);
     return response;
   }
 
@@ -284,10 +311,14 @@ export class FerricStoreMutationClient extends FerricStoreFlowSupportClient {
     if (items.length > this.flowManyBatchLimit) {
       if (options.independent !== true) throw this.flowManyLimitError("cancelMany");
       const currentNowMs = options.nowMs ?? nowMs();
-      return await this.executeIndependentManyChunks("cancelMany", items, async (batchItems) => await this.cancelMany(
+      const capturedOptions = snapshotFlowManyOptions(
+        { ...options, nowMs: currentNowMs },
+        this.codec
+      );
+      return await this.executeIndependentManyChunks("cancelMany", items, snapshotFencedItem, async (batchItems) => await this.cancelMany(
         partitionKey,
         batchItems,
-        { ...options, nowMs: currentNowMs }
+        capturedOptions
       ));
     }
     const args: CommandArgument[] = ["FLOW.CANCEL_MANY", partitionKey ?? "MIXED"];

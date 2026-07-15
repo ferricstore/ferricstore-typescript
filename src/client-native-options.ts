@@ -92,11 +92,25 @@ function snapshotTlsOptions(options: ConnectionOptions): ConnectionOptions {
 function snapshotTlsValue(value: unknown, name: string): unknown {
   if (Buffer.isBuffer(value)) return Buffer.from(value);
   if (value instanceof Uint8Array) return value.slice();
-  if (!Array.isArray(value)) return value;
-  const snapshot = new Array<unknown>(value.length);
-  for (let index = 0; index < value.length; index += 1) {
-    if (!Object.hasOwn(value, index)) throw new TypeError(`${name} must be a dense array`);
-    snapshot[index] = snapshotTlsValue(value[index], name);
+  if (Array.isArray(value)) {
+    const snapshot = new Array<unknown>(value.length);
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.hasOwn(value, index)) throw new TypeError(`${name} must be a dense array`);
+      snapshot[index] = snapshotTlsValue(value[index], name);
+    }
+    return Object.freeze(snapshot);
   }
+  return snapshotTlsIdentity(value, name);
+}
+
+function snapshotTlsIdentity(value: unknown, name: string): unknown {
+  if (typeof value !== "object" || value == null) return value;
+  const source = value as Record<string, unknown>;
+  const materialKey = Object.hasOwn(source, "pem")
+    ? "pem"
+    : Object.hasOwn(source, "buf") ? "buf" : undefined;
+  if (materialKey == null) return value;
+  const snapshot = { ...source };
+  snapshot[materialKey] = snapshotTlsValue(source[materialKey], `${name}.${materialKey}`);
   return Object.freeze(snapshot);
 }

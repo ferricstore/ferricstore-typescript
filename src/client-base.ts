@@ -19,6 +19,7 @@ import {
 import type { Command, CommandArgument } from "./internal.js";
 import type { RoutingRoute, RoutingTopology } from "./topology.js";
 import type { BackpressurePolicy } from "./types.js";
+import { FerricStoreError } from "./errors.js";
 
 const DEFAULT_FLOW_MANY_BATCH_LIMIT = 1_000;
 const DEFAULT_LEGACY_CLAIM_HYDRATION_CONCURRENCY = 16;
@@ -29,6 +30,7 @@ export class FerricStoreClientBase {
   readonly backpressure: Required<BackpressurePolicy>;
   readonly flowManyBatchLimit: number;
   readonly legacyClaimHydrationConcurrency: number;
+  private readonly closeAbortController = new AbortController();
   private closePromise?: Promise<void>;
 
   constructor(executor: CommandExecutor, options: FerricStoreClientOptions = {}) {
@@ -70,8 +72,13 @@ export class FerricStoreClientBase {
   }
 
   async close(): Promise<void> {
+    this.closeAbortController.abort(new FerricStoreError("FerricStore client is closed"));
     this.closePromise ??= (async () => await this.executor.close?.())();
     await this.closePromise;
+  }
+
+  protected get closeSignal(): AbortSignal {
+    return this.closeAbortController.signal;
   }
 
   async refreshTopology(): Promise<RoutingTopology> {

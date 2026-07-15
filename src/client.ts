@@ -104,6 +104,7 @@ import {
 } from "./client-native-options.js";
 import { FerricStoreProducerClient } from "./client-producer.js";
 import { snapshotClientOptions } from "./client-config.js";
+import { snapshotFencedItem, snapshotFlowManyOptions } from "./flow-many-snapshot.js";
 
 export class FerricStoreClient extends FerricStoreProducerClient {
   static async fromUrl(url: string, options: FerricStoreClientFromUrlOptions = {}): Promise<FerricStoreClient> {
@@ -115,10 +116,14 @@ export class FerricStoreClient extends FerricStoreProducerClient {
       nativeOptions.endpointPolicy != null || nativeOptions.endpointValidator != null ||
       nativeOptions.topologyConcurrency != null || nativeOptions.trustedHosts != null ||
       nativeOptions.warmConnections != null;
-    const createExecutor = async () =>
-      useTopology
-        ? await TopologyNativeAdapterPool.fromUrls([url, ...seeds], topologyNativeOptions(nativeOptions))
-        : await NativeAdapter.fromUrl(url, nativeAdapterOptions(nativeOptions));
+    const createExecutor = async (signal?: AbortSignal) => {
+      const bootstrapOptions = nativeOptionsForBootstrap(nativeOptions, signal);
+      return (
+        useTopology
+          ? await TopologyNativeAdapterPool.fromUrls([url, ...seeds], topologyNativeOptions(bootstrapOptions))
+          : await NativeAdapter.fromUrl(url, nativeAdapterOptions(bootstrapOptions))
+      );
+    };
     const executor = reconnectOptions === false
       ? await createExecutor()
       : new ReconnectingExecutor(createExecutor, reconnectOptions === true ? {} : reconnectOptions);
@@ -136,9 +141,9 @@ export class FerricStoreClient extends FerricStoreProducerClient {
     const seedUrls = snapshotFerricUrls(urls);
     const nativeOptions = snapshotNativeClientOptions(clientOptions.nativeOptions ?? {});
     const reconnectOptions = clientOptions.reconnect ?? nativeOptions.autoReconnect ?? true;
-    const createExecutor = async () => await TopologyNativeAdapterPool.fromUrls(
+    const createExecutor = async (signal?: AbortSignal) => await TopologyNativeAdapterPool.fromUrls(
       seedUrls,
-      topologyNativeOptions(nativeOptions)
+      topologyNativeOptions(nativeOptionsForBootstrap(nativeOptions, signal))
     );
     const executor = reconnectOptions === false
       ? await createExecutor()
@@ -216,6 +221,7 @@ export class FerricStoreClient extends FerricStoreProducerClient {
   }
 
   async startAndClaim(id: string, options: StartAndClaimOptions): Promise<FlowRecord> {
+    const partitionKey = options.partitionKey;
     const args: CommandArgument[] = [
       "FLOW.START_AND_CLAIM",
       id,
@@ -230,7 +236,7 @@ export class FerricStoreClient extends FerricStoreProducerClient {
       "NOW",
       options.nowMs ?? nowMs()
     ];
-    append(args, "PARTITION", options.partitionKey);
+    append(args, "PARTITION", partitionKey);
     appendEncoded(args, "PAYLOAD", this.codec, options.payload);
     append(args, "PARENT_FLOW_ID", options.parentFlowId);
     append(args, "ROOT_FLOW_ID", options.rootFlowId);
@@ -240,10 +246,13 @@ export class FerricStoreClient extends FerricStoreProducerClient {
     appendAttributes(args, options.attributes);
     appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
-    return await this.recordOrGet(await this.commandArgs(args), id, options.partitionKey);
+    return await this.recordOrGet(await this.commandArgs(args), id, partitionKey);
   }
 
   async stepContinue(id: string, options: StepContinueOptions): Promise<FlowRecord | ClaimedItem> {
+    const partitionKey = options.partitionKey;
+    const returnJob = options.returnJob === true;
+    const type = options.type;
     const args: CommandArgument[] = [
       "FLOW.STEP_CONTINUE",
       id,
@@ -257,17 +266,17 @@ export class FerricStoreClient extends FerricStoreProducerClient {
       "NOW",
       options.nowMs ?? nowMs()
     ];
-    append(args, "PARTITION", options.partitionKey);
+    append(args, "PARTITION", partitionKey);
     append(args, "WORKER", options.worker);
     appendEncoded(args, "PAYLOAD", this.codec, options.payload);
-    if (options.returnJob === true) args.push("RETURN", "JOBS_COMPACT");
+    if (returnJob) args.push("RETURN", "JOBS_COMPACT");
     appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);
     appendAttributeMutations(args, options);
     const response = await this.commandArgs(args);
-    return options.returnJob === true
-      ? claimedItemFromResp(response, this.codec, { type: options.type })
-      : await this.recordOrGet(response, id, options.partitionKey);
+    return returnJob
+      ? claimedItemFromResp(response, this.codec, { type })
+      : await this.recordOrGet(response, id, partitionKey);
   }
 
   async runStepsMany(
@@ -352,9 +361,13 @@ export class FerricStoreClient extends FerricStoreProducerClient {
         throw this.flowManyLimitError("transitionMany");
       }
       const currentNowMs = options.nowMs ?? nowMs();
-      return await this.executeIndependentManyChunks("transitionMany", options.items, async (batchItems) => await this.transitionMany(
+      const capturedOptions = snapshotFlowManyOptions(
+        { ...options, nowMs: currentNowMs },
+        this.codec
+      );
+      return await this.executeIndependentManyChunks("transitionMany", options.items, snapshotFencedItem, async (batchItems) => await this.transitionMany(
         partitionKey,
-        { ...options, items: batchItems, nowMs: currentNowMs }
+        { ...capturedOptions, items: batchItems }
       ));
     }
     const args: CommandArgument[] = ["FLOW.TRANSITION_MANY", partitionKey ?? "MIXED", options.fromState, options.toState];
@@ -370,4 +383,15 @@ export class FerricStoreClient extends FerricStoreProducerClient {
     return this.recordsOrResponse(await this.commandArgs(args));
   }
 
+}
+
+function nativeOptionsForBootstrap(
+  options: ReturnType<typeof snapshotNativeClientOptions>,
+  signal: AbortSignal | undefined
+): ReturnType<typeof snapshotNativeClientOptions> {
+  if (signal == null) return options;
+  return {
+    ...options,
+    signal: options.signal == null ? signal : AbortSignal.any([options.signal, signal])
+  };
 }

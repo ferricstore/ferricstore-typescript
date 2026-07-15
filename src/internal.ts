@@ -1,4 +1,5 @@
 import type { Codec } from "./codecs.js";
+import { encodeFlowValue } from "./flow-value-snapshot.js";
 import { setLongTimeout } from "./internal-timers.js";
 import { mapDenseResponseArray } from "./response-array-normalization.js";
 export * from "./auto-partition.js";
@@ -51,7 +52,7 @@ export function appendEncoded(
   value: unknown
 ): void {
   if (value != null) {
-    args.push(name, codec.encode(value));
+    args.push(name, encodeFlowValue(codec, value));
   }
 }
 

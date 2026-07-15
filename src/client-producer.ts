@@ -2,6 +2,8 @@ import { finitePositiveInteger } from "./auto-batch.js";
 import { FerricStoreClaimClient } from "./client-claims.js";
 import { confirmedFlowBatchItems, FlowBatchError } from "./client-errors.js";
 import { assertDenseCreateItems, groupAutoPartitionItems } from "./client-grouping.js";
+import { snapshotCreateItem, snapshotFlowManyOptions } from "./flow-many-snapshot.js";
+import { encodeFlowValue } from "./flow-value-snapshot.js";
 import {
   appendAttributes,
   appendNamedCounts,
@@ -25,6 +27,8 @@ import type { CreateItem, FlowRecord } from "./types.js";
 export class FerricStoreProducerClient extends FerricStoreClaimClient {
   async create(id: string, options: CreateOptions): Promise<FlowRecord | Buffer | unknown> {
     const currentNowMs = options.nowMs ?? nowMs();
+    const partitionKey = options.partitionKey;
+    const returnRecord = options.returnRecord === true;
     const args: CommandArgument[] = [
       "FLOW.CREATE",
       id,
@@ -35,7 +39,7 @@ export class FerricStoreProducerClient extends FerricStoreClaimClient {
       "NOW",
       currentNowMs
     ];
-    append(args, "PARTITION", options.partitionKey);
+    append(args, "PARTITION", partitionKey);
     appendEncoded(args, "PAYLOAD", this.codec, options.payload);
     append(args, "PARENT_FLOW_ID", options.parentFlowId);
     append(args, "ROOT_FLOW_ID", options.rootFlowId);
@@ -50,8 +54,8 @@ export class FerricStoreProducerClient extends FerricStoreClaimClient {
     appendNamedValues(args, this.codec, options);
 
     const response = await this.executeProducerWrite(args);
-    return options.returnRecord === true
-      ? await this.recordOrGet(response, id, options.partitionKey)
+    return returnRecord
+      ? await this.recordOrGet(response, id, partitionKey)
       : response;
   }
 
@@ -81,20 +85,30 @@ export class FerricStoreProducerClient extends FerricStoreClaimClient {
 
     if (options.partitionKey != null || items.some((item) => item?.partitionKey != null)) {
       assertDenseCreateItems(items, "enqueueMany");
-      const createOptions = {
+      const partitionKey = options.partitionKey;
+      const createOptions = snapshotFlowManyOptions({
         ...options,
         independent: options.independent ?? true,
         state: options.state ?? "queued"
-      };
+      }, this.codec);
       if (items.length <= this.flowManyBatchLimit) {
-        return await this.createMany(options.partitionKey, items, createOptions);
+        return await this.createMany(partitionKey, items, createOptions);
       }
-      return await this.executeIndependentManyChunks("enqueueMany", items, async (batchItems) =>
-        await this.createMany(options.partitionKey, batchItems, createOptions)
+      return await this.executeIndependentManyChunks(
+        "enqueueMany",
+        items,
+        (item) => snapshotCreateItem(item, this.codec),
+        async (batchItems) => await this.createMany(partitionKey, batchItems, createOptions)
       );
     }
 
-    const groups = groupAutoPartitionItems(items);
+    const capturedItems = items.map((item) => snapshotCreateItem(item, this.codec));
+    const groups = groupAutoPartitionItems(capturedItems);
+    const groupedOptions = snapshotFlowManyOptions({
+      ...options,
+      independent: options.independent ?? true,
+      state: options.state ?? "queued"
+    }, this.codec);
     const results = Array<unknown>(items.length);
     const batchSize = Math.min(
       this.flowManyBatchLimit,
@@ -117,11 +131,7 @@ export class FerricStoreProducerClient extends FerricStoreClaimClient {
           for (let start = 0; start < group.items.length; start += batchSize) {
             if (failure != null) return;
             const batchItems = group.items.slice(start, start + batchSize);
-            const response = await this.createMany(group.bucket, batchItems, {
-              ...options,
-              independent: options.independent ?? true,
-              state: options.state ?? "queued"
-            });
+            const response = await this.createMany(group.bucket, batchItems, groupedOptions);
             const expanded = expandManyResponse(response, batchItems.length);
             for (let resultIndex = 0; resultIndex < expanded.length; resultIndex += 1) {
               const originalIndex = group.indices[start + resultIndex];
@@ -161,13 +171,18 @@ export class FerricStoreProducerClient extends FerricStoreClaimClient {
     const stateMeta = sharedCreateManyStateMeta(items, options.stateMeta);
     if (items.length > this.flowManyBatchLimit) {
       if (options.independent !== true) throw this.flowManyLimitError("createMany");
+      const capturedOptions = snapshotFlowManyOptions(
+        { ...options, attributes, nowMs: currentNowMs, stateMeta },
+        this.codec
+      );
       return await this.executeIndependentManyChunks(
         "createMany",
         items,
+        (item) => snapshotCreateItem(item, this.codec),
         async (batchItems) => await this.createMany(
           partitionKey,
           batchItems,
-          { ...options, attributes, nowMs: currentNowMs, stateMeta }
+          capturedOptions
         )
       );
     }
@@ -202,7 +217,7 @@ export class FerricStoreProducerClient extends FerricStoreClaimClient {
       for (const item of items) {
         const itemValues = { ...(options.values ?? {}), ...(item.values ?? {}) };
         const itemRefs = { ...(options.valueRefs ?? {}), ...(item.valueRefs ?? {}) };
-        args.push(item.id, mixed ? item.partitionKey ?? "-" : "-", this.codec.encode(item.payload));
+        args.push(item.id, mixed ? item.partitionKey ?? "-" : "-", encodeFlowValue(this.codec, item.payload));
         appendNamedCounts(args, this.codec, itemValues, itemRefs);
       }
     } else {
@@ -211,9 +226,9 @@ export class FerricStoreProducerClient extends FerricStoreClaimClient {
       for (const item of items) {
         if (mixed) {
           if (item.partitionKey == null) throw new Error("mixed createMany items require partitionKey");
-          args.push(item.id, item.partitionKey, this.codec.encode(item.payload));
+          args.push(item.id, item.partitionKey, encodeFlowValue(this.codec, item.payload));
         } else {
-          args.push(item.id, this.codec.encode(item.payload));
+          args.push(item.id, encodeFlowValue(this.codec, item.payload));
         }
       }
     }

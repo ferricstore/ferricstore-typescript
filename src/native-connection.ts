@@ -39,6 +39,7 @@ export async function connect(
     options.connectTimeoutMs ?? options.timeoutMs ?? 30_000,
     30_000
   );
+  if (options.signal?.aborted) throw nativeBootstrapAbortError(options.signal.reason);
   return await new Promise((resolve, reject) => {
     const tlsOptions = options.tlsOptions ?? {};
     const servername = tlsOptions.servername ?? (net.isIP(parsed.host) === 0 ? parsed.host : undefined);
@@ -55,6 +56,7 @@ export async function connect(
       timer.cancel();
       socket.off(connectEvent, onConnect);
       socket.off("error", onError);
+      options.signal?.removeEventListener("abort", onAbort);
     };
     const onConnect = (): void => {
       cleanup();
@@ -63,6 +65,11 @@ export async function connect(
     const onError = (error: unknown): void => {
       cleanup();
       reject(error instanceof Error ? error : classifyServerError(String(error), error));
+    };
+    const onAbort = (): void => {
+      cleanup();
+      socket.destroy();
+      reject(nativeBootstrapAbortError(options.signal?.reason));
     };
     const timer = setLongTimeout(() => {
       cleanup();
@@ -78,6 +85,14 @@ export async function connect(
     );
     socket.once(connectEvent, onConnect);
     socket.once("error", onError);
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
+  });
+}
+
+export function nativeBootstrapAbortError(reason: unknown): FerricStoreError {
+  return new FerricStoreError("FerricStore connection bootstrap aborted", {
+    ...(reason instanceof Error ? { cause: reason } : { raw: reason })
   });
 }
 
