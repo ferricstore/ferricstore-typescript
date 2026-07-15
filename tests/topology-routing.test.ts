@@ -337,7 +337,7 @@ test("TopologyNativeAdapterPool subscribes to topology events and refreshes auto
         payload: { route_epoch: 2 }
       })
     );
-    await waitFor(() => shardRequests >= 2);
+    await waitFor(() => pool.topology.routeEpoch === 2);
     expect(pool.topology.routeEpoch).toBe(2);
   } finally {
     await pool.close();
