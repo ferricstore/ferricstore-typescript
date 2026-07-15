@@ -31,8 +31,8 @@ Legend:
 | `CONFIG` | Done | `configGet`, `configSet`, `configGetLocal`, `configResetStat`, `configRewrite`. |
 | `SLOWLOG`, `COMMAND`, `CLIENT` introspection | Done | Thin typed helpers for supported subcommands. |
 | `PUBLISH`, `PUBSUB` introspection | Done | Subscription-mode commands stay raw because they change connection behavior. |
-| `ACL`, `AUTH` | Done | Thin typed helpers. |
-| `MULTI`, `EXEC`, `WATCH`, subscriber mode | Raw | Use `client.command(...)`; these are connection-state flows. |
+| `ACL`, `AUTH` | Done | Thin typed helpers; runtime `AUTH` requires a stable single connection, while reconnecting/topology clients use construction credentials. |
+| `MULTI`, `EXEC`, `WATCH`, subscriber mode | Unsupported | These require an exclusive pinned connection session; the multiplexed native client rejects them before dispatch. |
 
 ## FerricStore Native Commands
 
@@ -68,7 +68,12 @@ Legend:
 | `FLOW.GET`, `FLOW.LIST`, `FLOW.TERMINALS`, `FLOW.FAILURES`, `FLOW.STUCK` | Done |
 | `FLOW.SEARCH` | Done |
 | `FLOW.BY_PARENT`, `FLOW.BY_ROOT`, `FLOW.BY_CORRELATION` | Done |
-| `FLOW.INFO`, `FLOW.HISTORY` | Done |
+| `FLOW.INFO`, `FLOW.HISTORY` | Done; history exposes event/time/version, worker, cold/consistent, values, and payload-size filters. |
+| `FLOW.STATS`, `FLOW.ATTRIBUTES`, `FLOW.ATTRIBUTE_VALUES` | Done |
+| `FLOW.START_AND_CLAIM`, `FLOW.STEP_CONTINUE`, `FLOW.RUN_STEPS_MANY` | Done |
+| `FLOW.SCHEDULE.*` | Done |
+| `FLOW.EFFECT.*`, `FLOW.GOVERNANCE.*`, `FLOW.APPROVAL.*` | Done |
+| `FLOW.CIRCUIT.*`, `FLOW.BUDGET.*`, `FLOW.LIMIT.*` | Done |
 | `FLOW.SPAWN_CHILDREN` | Done |
 | `FLOW.POLICY.SET`, `FLOW.POLICY.GET` | Done |
 | `FLOW.RETENTION_CLEANUP` | Done |
@@ -79,7 +84,7 @@ Legend:
 | --- | --- | --- |
 | `QueueClient.queue` | Done | `new QueueClient(flow).queue(...)`. |
 | `Queue.enqueue`, `enqueue_many` | Done | `enqueue`, `enqueueMany`. |
-| Worker `run_once`, `run` | Done | Async TS worker loop. |
+| Worker `run_once`, `run` | Done | Async TS worker loop with continuous slot refill, bounded claim credit, handler concurrency, lease renewal, and optional finite claim draining. |
 | Exception policy retry/fail/raise | Done | Covered by tests. |
 | Batch handler, start/stop/join/stats | Partial | Python worker has a richer threaded lifecycle and batch scheduler. TS has async `run`/`runOnce`. |
 | Advanced partition scanning/cooldowns | Partial | Python has more throughput scheduler controls. |
@@ -97,7 +102,7 @@ Legend:
 | Spawn children / fanout | Done | `ctx.flow.spawnChildren`. |
 | Class/decorator workflow style | Partial | Python has class/decorator ergonomics; TS currently uses registration. |
 | Batch apply optimization | Partial | Python has richer uniform batch apply paths. TS has low-level many commands. |
-| Worker lifecycle start/stop/join/stats | Partial | TS worker is async-loop based. |
+| Worker lifecycle start/stop/join/stats | Partial | TS worker is async-loop based; continuous slot refill, concurrency, bounded claims, lease renewal, and claim draining are supported. |
 
 ## KV/Data-Structure Commands
 
@@ -111,7 +116,8 @@ Legend:
 | Stream commands and consumer groups | Done through `client.stream` for the supported FerricStore stream surface. |
 | Bitmap, HyperLogLog, Geo | Done through `client.bitmap`, `client.hyperloglog`, `client.geo`. |
 | Bloom, Cuckoo, Count-Min, TopK, TDigest | Done through `client.bloom`, `client.cuckoo`, `client.cms`, `client.topk`, `client.tdigest`. |
-| JSON | Done through `client.json`. |
+
+`JsonCodec` remains available for serializing ordinary FerricStore values. FerricStore has no RedisJSON command family.
 
 ## Main Remaining Gaps
 

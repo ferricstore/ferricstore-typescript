@@ -39,7 +39,15 @@ docker run -p 6388:6388 \
 
 ## Cluster-aware client
 
-For a single node, use `fromUrl`. For a FerricStore cluster, pass multiple seed URLs. The SDK fetches the server `SHARDS` topology, routes keyed commands to the current shard leader, and refuses learned hosts outside the seed-host trust set by default.
+For a single node, use `fromUrl`. For a FerricStore cluster, pass multiple seed URLs. The SDK fetches the server `SHARDS` topology, routes keyed commands to the current shard leader, and refuses learned hosts outside the seed-host trust set by default. The creation promise resolves only after startup and authentication succeed; cluster creation also waits for the initial topology, so connection failures reject the corresponding `await` directly.
+
+Cross-shard pipelines are grouped into one native pipeline per leader/lane and
+merged back into caller order. Decomposable multi-key commands (`MGET`,
+`EXISTS`, `DEL`, `UNLINK`, and `FLOW.VALUE.MGET`) use the same parallel shard
+fan-out; atomic multi-key commands are never split client-side. Pass
+`{ ordered: true }` as the second argument to `client.pipeline()` when later
+commands depend on earlier ones and the transport may need an individual or
+cross-route fallback.
 
 ```ts
 const flow = await FerricStoreClient.fromUrls(
@@ -53,6 +61,8 @@ const flow = await FerricStoreClient.fromUrls(
     nativeOptions: {
       // Use "any" only inside a trusted private network.
       endpointPolicy: "seed_hosts",
+      // Bound client-side route fan-out; freed slots refill immediately.
+      topologyConcurrency: 16,
       warmConnections: true
     }
   }
@@ -61,6 +71,84 @@ const flow = await FerricStoreClient.fromUrls(
 await flow.refreshTopology();
 console.log(await flow.route("tenant-a:order-1"));
 ```
+
+Learned topology endpoints are checked before connection. The default
+`"seed_hosts"` policy permits exact seed endpoints plus `trustedHosts`;
+`"none"` permits exact seed endpoints only. Use `"any"` only when every
+server-advertised endpoint is already inside a trusted network boundary.
+All HA seed URLs must use the same `ferric://` or `ferrics://` transport;
+`tlsOptions` configures a secure transport but does not change a URL's scheme.
+Each seed connection uses only the credentials embedded in its own URL. The
+first complete seed credential pair is reused for learned cluster endpoints,
+but never overrides another seed URL, even when that seed is first reached
+through learned topology. Duplicate seed endpoints with conflicting effective
+credentials are rejected. Explicit `nativeOptions.username` and `password`
+remain an intentional cluster-wide override.
+
+The option types follow ownership: `NativeAdapterOptions` contains direct
+connection settings, `TopologyNativeAdapterOptions` adds learned-endpoint
+policy, and `NativeClientOptions` adds reconnect/HA seed selection. Passing a
+higher-layer option to `NativeAdapter.fromUrl()` is rejected instead of being
+silently ignored.
+
+`topologyConcurrency` defaults to 16 and bounds client-side per-route work such
+as cross-shard fan-out, split pipelines, warm-up, and shutdown. It uses
+continuous slot filling: when one route finishes, the next waiting route starts
+without waiting for the rest of the current group. This setting is local to one
+client process or pod; it does not configure FerricStore server concurrency.
+
+Automatic reconnect retries only an operation rejected before it could be
+written. If a connection closes while a request is in flight, the SDK surfaces
+that error because the server may already have applied the command; it does not
+replay an uncertain mutation. A later request reconnects normally. Use
+FerricFlow fencing or command-level idempotency when the caller needs safe
+application retries. `ConnectionClosedError.requestDisposition` exposes this
+decision as `"unsent"` or `"possibly_sent"` when the transport can classify it;
+unclassified failures are treated conservatively as possibly sent.
+`RequestTimeoutError.requestDisposition` provides the same retry-safety signal:
+timeouts while waiting for a local flow-control or write-queue slot are
+`"unsent"`, while a request whose frame entered the socket is
+`"possibly_sent"`. Do not automatically retry a possibly-sent mutation.
+`autoReconnect` accepts `maxRetries`, `baseDelayMs`, `maxDelayMs`, and
+`jitterPct`; backoff is applied only after a reconnect attempt itself fails.
+
+Topology-aware clients retry one routed command or one physical fused pipeline
+after a successful topology refresh only when the server's typed reroute error
+explicitly reports `safe_to_retry: true`. Split or scattered pipelines and
+uncertain connection failures are never replayed.
+
+Connection-local state mutations (`AUTH`, `CLIENT SETNAME`, `QUIT`, `RESET`,
+and related native controls) are rejected on reconnecting and topology clients
+because they cannot be applied atomically to every current and future socket.
+Configure `nativeOptions.username`, `password`, `clientName`, and `events` when
+creating those clients, and use `close()` for shutdown. A directly managed
+single `NativeAdapter` retains connection-local command semantics. Native
+`CLIENT TRACKING` and `CLIENT CACHING` are unsupported; use native event
+subscriptions instead.
+
+### Deployment integration tests
+
+The default integration suite targets one local development server. Real HA,
+TLS, and authentication deployments can be verified with the opt-in deployment
+suite:
+
+```bash
+FERRICSTORE_HA_URLS=ferric://fs0:6388,ferric://fs1:6388 npm run test:integration:deployment
+
+FERRICSTORE_TLS_URL=ferrics://fs0:6389 \
+FERRICSTORE_TLS_CA_FILE=/path/to/ca.pem \
+npm run test:integration:deployment
+
+FERRICSTORE_AUTH_URL=ferric://app:secret@fs0:6388 \
+npm run test:integration:deployment
+```
+
+The HA fixture must advertise at least two reachable leader endpoints. The auth
+fixture must require credentials even for the default user. Set
+`FERRICSTORE_TLS_PLAINTEXT_URL` as well to verify that a TLS-only deployment
+rejects its plaintext listener. HA TLS/auth options are available through
+`FERRICSTORE_HA_TLS_CA_FILE`, `FERRICSTORE_HA_TLS_SERVERNAME`,
+`FERRICSTORE_HA_USERNAME`, and `FERRICSTORE_HA_PASSWORD`.
 
 You can also keep one primary URL and add seeds:
 
@@ -72,6 +160,25 @@ const flow = await FerricStoreClient.fromUrl("ferric://fs0.example.com:6388", {
   }
 });
 ```
+
+Native connections honor the flow-control windows advertised by `STARTUP` and
+`WINDOW_UPDATE`. Available data-request slots are refilled immediately as
+responses finish; waiting requests are scheduled fairly across protocol lanes.
+The adapter also caps automatic lanes and same-lane work to the advertised lane
+queue, and caps ordered pipeline chunks and outbound frame bodies to the limits
+negotiated during `STARTUP`.
+Set `nativeOptions.maxQueuedRequests` to bound the local waiter queue (default
+`65_536`, or `0` to reject immediately when all advertised slots are occupied).
+Queue waiting counts toward `nativeOptions.timeoutMs`.
+
+Control requests do not consume server data credits. Set
+`nativeOptions.maxPendingControlRequests` to bound correlated control requests
+awaiting responses on each connection (default `4_096`).
+
+If Node reports socket backpressure, later encoded frames wait for `drain` in a
+bounded client queue. Set `nativeOptions.maxQueuedWriteBytes` to control that
+queue (default 64 MiB, or `0` to reject subsequent writes immediately). Healthy
+socket writes still go directly to `socket.write` without entering the queue.
 
 ## Durable Queue
 
@@ -89,7 +196,12 @@ await emails.enqueue("email-1", {
   payload: { template: "welcome", userId: "user-1" }
 });
 
-await emails.worker({ batchSize: 100, worker: "email-worker-1" }).run(async (job) => {
+await emails.enqueueMany([{ id: "email-2", payload: { template: "receipt" } }], {
+  autoPartitionBatchSize: 1_000,
+  autoPartitionConcurrency: 8
+});
+
+await emails.worker({ batchSize: 100, concurrency: 16, worker: "email-worker-1" }).run(async (job) => {
   console.log(job.id, job.payload);
   return { sent: true };
 });
@@ -126,6 +238,7 @@ await order.start("order-1", {
 
 await order.worker({
   batchSize: 50,
+  concurrency: 8,
   states: ["created", "charged"],
   worker: "order-worker-1"
 }).run();
@@ -139,6 +252,49 @@ Handlers return explicit durable outcomes:
 - `fail({ error })`
 
 FerricFlow does not replay TypeScript handler code. Workers claim a durable state, run normal code, then write the next state through the FerricFlow API.
+
+Per-job `run()` workers cap every claim to currently available concurrency. They continuously refill slots by default, so if five of ten jobs finish and their terminal writes are acknowledged, one client-side `claim(limit: 5)` can start five replacements while the other five continue. Queue completions produced in the same event-loop turn remain batched. A slot stays occupied through its `complete`, `retry`, or `fail` acknowledgement; the worker never exceeds its local concurrency limit.
+
+Full-record claims across multiple states are returned by the claim command itself, including requested payloads and named values. `FLOW.GET` hydration is retained only for compatibility with a server that unexpectedly returns legacy compact tuples. That fallback preserves result order and is bounded to 16 concurrent reads by default; set `legacyClaimHydrationConcurrency` on the client to tune it. If a fallback read fails, `ClaimHydrationError.claimed` contains every already-leased job, while `hydratedItems` contains the indexed records that finished successfully; `failedIndex` and `cause` identify the first observed failure. Set `jobOnly: true` when compact claim metadata is sufficient; compact state metadata is decoded directly from the claim response without per-job `FLOW.GET` calls.
+
+Use `refillStrategy: "wave"` to wait for the entire current claim to settle before claiming again. `refillDelayMs` adds a small coalescing window before a continuous refill; the default `0` still coalesces completions for one event-loop turn. Batchable queue completions and same-route replacement claims share one ordered native pipeline by default; set `fuseCompleteClaim: false` to keep them as separate requests. `runOnce()` and batch-handler APIs remain finite and wave-oriented. These controls are local to one worker instance or pod: two pods configured with `concurrency: 10` can execute up to twenty jobs collectively.
+
+Worker claim and terminal-write batches use the client's `flowManyBatchLimit`,
+which defaults to FerricStore's standard 1,000-item limit and should match the
+server's `flow_max_batch_items` setting. Higher handler concurrency remains
+supported and is filled through multiple bounded claims. `completeAsyncDepth`
+is normalized to a finite, non-negative integer; non-finite values use the safe
+worker-mode default. If an asynchronous completion fails after earlier writes
+succeed, `QueueCompletionError.completed` reports every successful completion
+drained by the same call, regardless of where the failed completion appeared.
+
+When a worker combines `blockMs` with an `AbortSignal`, native long polls are
+bounded by `abortPollMs` (default `1_000`) so shutdown is observed without
+abandoning an in-flight claim that may already have leased work. Finite server
+blocking time is added to the transport timeout rather than consuming it.
+
+Unpartitioned `enqueueMany` calls group items in linear time, preserve caller
+result order, keep chunks for the same auto-partition sequential, and dispatch
+different partitions with bounded concurrency. The defaults above match the
+server's standard 1,000-item Flow batch limit while avoiding unbounded requests.
+Explicit and mixed-partition independent batches use the same hard request cap;
+all Flow many mutations split larger inputs only when `independent: true`.
+`independent: false` is never silently split and rejects oversized inputs before
+dispatch. Set `flowManyBatchLimit` on the client when the server uses a custom
+`flow_max_batch_items` value. If a later independent chunk fails,
+`FlowBatchError.completedItems` reports the exact input indices and values whose
+results were already confirmed; the original failure remains available as
+`cause`.
+
+Workers renew active leases every half lease by default and stop renewal before the fenced terminal write. Set `leaseRenewal: false` only when the handler is guaranteed to finish comfortably inside `leaseMs`; use `leaseRenewIntervalMs` to override the renewal interval.
+
+`ctx.valueMany(names)` deduplicates shared references and fetches every missing referenced value with one `FLOW.VALUE.MGET`. Inline and locally cached values do not consume network work, and a stored JSON `null` remains distinct from a missing reference.
+
+Flow fencing tokens remain `number` values while safe and are returned as
+`bigint` once they exceed JavaScript's safe integer range. Pass the token back
+unchanged; all fenced mutation APIs accept the exported `FencingToken` type,
+and native compact claim and batch paths preserve its signed 64-bit value
+exactly.
 
 ## Low-Level Flow Commands
 
@@ -169,6 +325,51 @@ for (const job of jobs) {
     partitionKey: job.partitionKey
   });
 }
+```
+
+Flow attributes can be returned without hydrating each record and can be
+updated atomically with the fenced state mutation:
+
+```ts
+const attributed = await flow.claimDue("order", {
+  includeAttributes: true,
+  jobOnly: true,
+  state: "created",
+  worker: "worker-1"
+});
+
+await flow.transition(attributed[0]!.id, {
+  attributesDelete: ["temporary"],
+  attributesMerge: { processor: "payments-v2" },
+  fencingToken: attributed[0]!.fencingToken,
+  fromState: "created",
+  leaseToken: attributed[0]!.leaseToken,
+  toState: "charged"
+});
+```
+
+The low-level client also exposes the fused `startAndClaim`, `stepContinue`,
+and `runStepsMany` operations, schedule administration, Flow statistics and
+attribute queries, effects, approvals, circuits, budgets, and distributed
+limits. History supports the complete server filter surface, including event,
+time, and version bounds plus cold/consistent reads and payload hydration:
+
+```ts
+const events = await flow.history("order-1", {
+  consistentProjection: true,
+  fromVersion: 2,
+  includeCold: true,
+  payloadMaxBytes: 64_000,
+  toVersion: 8,
+  values: true
+});
+
+await flow.scheduleCreate("orders-every-five-minutes", {
+  cron: "*/5 * * * *",
+  kind: "cron",
+  target: { state: "created", type: "order" },
+  timezone: "UTC"
+});
 ```
 
 FIFO Flow state policy is opt-in per state:
@@ -207,9 +408,15 @@ await client.lists.lpush("jobs", { id: "job-1" });
 await client.sets.sadd("seen-users", "user:1");
 await client.zset.zadd("leaderboard", [{ score: 42, member: "user:1" }]);
 await client.stream.xadd("events", "*", { type: "created", id: "user:1" });
-await client.json.set("user:1:json", "$", { name: "Ada" });
 await client.bloom.add("seen-filter", "user:1");
 ```
+
+Large unambiguous scalar batches accept an array without spreading, for example
+`client.kv.del(keys)` and `client.tdigest.add(key, values)`. Codec-backed APIs,
+where an array may itself be one stored value, expose explicit methods such as
+`lpushMany`, `saddMany`, `zremMany`, `maddMany`, and `queryMany`. These forms
+avoid JavaScript's variadic-call limit and build the command in one linear pass;
+the existing rest-argument forms retain their original meaning.
 
 Available store helpers:
 
@@ -223,9 +430,13 @@ Available store helpers:
 - `client.hyperloglog` — HyperLogLog commands.
 - `client.geo` — geospatial commands.
 - `client.bloom`, `client.cuckoo`, `client.cms`, `client.topk`, `client.tdigest` — probabilistic data structures.
-- `client.json` — RedisJSON-compatible JSON commands.
 
-For connection-mode commands such as raw subscription flows or transactions, use `client.command(...)` directly so protocol behavior stays explicit.
+`JsonCodec` serializes ordinary FerricStore values as JSON; FerricStore does not expose RedisJSON `JSON.*` commands.
+
+Transactions and raw subscription flows require an exclusive pinned connection
+session, which the multiplexed native client does not currently expose. The SDK
+rejects those commands before dispatch so a failed transaction cannot partially
+apply mutations.
 
 ## Auto-Batching
 
@@ -249,17 +460,17 @@ await Promise.all([
 ]);
 ```
 
-Auto-batching groups eligible concurrent commands into native `PIPELINE` frames and resolves each original promise independently. Blocking/session commands such as `FLOW.CLAIM_DUE`, `AUTH`, `QUIT`, `SUBSCRIBE`, and client-control commands bypass auto-batching.
+Auto-batching groups eligible concurrent commands into native `PIPELINE` frames and resolves each original promise independently. Across frames and individual-request fallbacks, same-key write dependencies retain invocation order, while read-only and disjoint-key work remains concurrent. Commands whose direct native representation uses a custom binary body are safely wrapped as typed `COMMAND_EXEC` pipeline items, preserving one pipeline request instead of issuing each command separately. Blocking/session and control commands such as `FLOW.CLAIM_DUE`, `BLPOP`, `XREAD`, `AUTH`, `PING`, `OPTIONS`, and `QUIT` bypass auto-batching. Explicit pipelines issue unsupported or connection-blocking items individually; blocking fallbacks and state-changing controls are sequenced with dependent data commands. Other fallbacks remain concurrent unless `client.pipeline(commands, { ordered: true })` is requested. Individual fallbacks continuously refill a bounded pool instead of starting every request at once; the default limit is 64 and `fallbackConcurrency` on the pipeline options can tune it per call. Native pipeline paths are unchanged. Reconnecting and topology executors reject connection-local mutations before dispatch, and an uncertain native pipeline is never replayed automatically.
 
 Queue workers are latency-first by default. For high-throughput queue workers, use one profile flag:
 
 ```ts
-await emails.worker({ profile: "throughput" }).run(async (job) => {
+await emails.worker({ profile: "throughput", concurrency: 32 }).run(async (job) => {
   await sendEmail(job.id);
 });
 ```
 
-The throughput profile uses compact claims, larger claim batches, and async completion batching. Explicit worker options still override the profile.
+The throughput profile uses compact claims, a larger batch ceiling, and concurrent completion batching. Per-job claim credit follows currently available `concurrency` (or its `workers` alias), capped by `batchSize`; explicit worker options override profile defaults.
 
 ## Examples
 

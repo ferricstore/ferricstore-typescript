@@ -1,0 +1,13 @@
+{
+  "magic": "FSNP",
+  "requestVersion": 1,
+  "responseVersion": 129,
+  "headerSize": 24,
+  "flagCustomPayload": 2,
+  "flagCompressed": 8,
+  "flagMoreChunks": 32,
+  "statusOk": 0,
+  "defaultMaxValueItems": 100000,
+  "defaultMaxValueDepth": 64,
+  "maxFramesPerDecode": 128
+}

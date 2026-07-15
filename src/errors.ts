@@ -9,6 +9,46 @@ export class FerricStoreError extends Error {
   }
 }
 
+export type RequestDisposition = "unsent" | "possibly_sent";
+/** @deprecated Use RequestDisposition; retained for source compatibility. */
+export type ConnectionRequestDisposition = RequestDisposition;
+
+/** Connection closure annotated with whether the current request may have reached the server. */
+export class ConnectionClosedError extends FerricStoreError {
+  override readonly code = "connection_closed";
+  readonly requestDisposition: RequestDisposition;
+
+  constructor(
+    requestDisposition: RequestDisposition,
+    options: { raw?: unknown; cause?: unknown; message?: string } = {}
+  ) {
+    super(
+      options.message ?? (requestDisposition === "unsent"
+        ? "FerricStore connection is closed"
+        : "FerricStore connection closed"),
+      options
+    );
+    this.requestDisposition = requestDisposition;
+  }
+}
+
+/** Request timeout annotated with whether the request may have reached the server. */
+export class RequestTimeoutError extends FerricStoreError {
+  override readonly code = "request_timeout";
+  readonly requestDisposition: RequestDisposition;
+  readonly timeoutMs: number;
+
+  constructor(
+    timeoutMs: number,
+    requestDisposition: RequestDisposition,
+    options: { raw?: unknown; cause?: unknown } = {}
+  ) {
+    super(`FerricStore request timed out after ${timeoutMs}ms`, options);
+    this.requestDisposition = requestDisposition;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 export class FlowNotFoundError extends FerricStoreError {
   override readonly code = "flow_not_found";
 }
@@ -52,36 +92,68 @@ export class OverloadedError extends FerricStoreError {
   }
 }
 
-export function classifyServerError(message: string, raw?: unknown, cause?: unknown): FerricStoreError {
-  const lower = message.toLowerCase();
+/** The contacted endpoint cannot serve this route and topology should be refreshed. */
+export class RerouteError extends FerricStoreError {
+  override readonly code = "reroute";
+}
 
-  if (lower.includes("overloaded") || lower.includes("busy")) {
+const OVERLOAD_CODES = new Set([
+  "backpressure",
+  "busy",
+  "flow_control_window_exhausted",
+  "lane_queue_full",
+  "overloaded"
+]);
+
+export function classifyServerError(
+  message: string,
+  raw?: unknown,
+  cause?: unknown,
+  status?: number | string
+): FerricStoreError {
+  const lower = message.toLowerCase();
+  const structuredCode = structuredStringField(raw, "code");
+  const code = structuredCode?.toLowerCase();
+
+  if (isRerouteStatus(status) || code === "reroute") {
+    return new RerouteError(message, { cause, raw });
+  }
+  if (isBusyStatus(status) || isOverloadCode(structuredCode) || overloadMessage(lower)) {
     return new OverloadedError(message, {
       cause,
       raw,
-      reason: stringField(lower, "reason"),
-      retryAfterMs: intField(lower, "retry_after_ms")
+      reason: structuredStringField(raw, "reason") ?? structuredCode ?? stringField(lower, "reason"),
+      retryAfterMs: structuredIntegerField(raw, "retry_after_ms") ?? intField(lower, "retry_after_ms")
     });
   }
-  if (lower.includes("already exists")) {
+  if (code === "flow_already_exists" || (lower.includes("flow") && lower.includes("already exists"))) {
     return new FlowAlreadyExistsError(message, { cause, raw });
   }
-  if (lower.includes("wrong state")) {
+  if (lower.includes("flow wrong state") || code === "flow_wrong_state") {
     return new FlowWrongStateError(message, { cause, raw });
   }
-  if (lower.includes("stale flow lease") || lower.includes("stale lease") || lower.includes("stale token")) {
+  if (
+    code === "stale_lease"
+    || code === "stale_flow_lease"
+    || lower.includes("stale flow lease")
+    || lower.includes("stale lease")
+    || lower.includes("stale token")
+  ) {
     return new StaleLeaseError(message, { cause, raw });
   }
-  if (lower.includes("not found") || lower.includes("does not exist")) {
+  if (
+    code === "flow_not_found"
+    || (lower.includes("flow") && (lower.includes("not found") || lower.includes("does not exist")))
+  ) {
     return new FlowNotFoundError(message, { cause, raw });
   }
-  if (lower.includes("lock is held") || lower.includes("held by another owner")) {
+  if (code === "lock_held" || lower.includes("lock is held") || lower.includes("held by another owner")) {
     return new LockHeldError(message, { cause, raw });
   }
-  if (lower.includes("not the lock owner") || lower.includes("caller is not the lock owner")) {
+  if (code === "lock_not_owned" || lower.includes("not the lock owner") || lower.includes("caller is not the lock owner")) {
     return new LockNotOwnedError(message, { cause, raw });
   }
-  if (lower.includes("wrong number of arguments") || lower.includes("syntax error")) {
+  if (code === "invalid_command" || lower.includes("wrong number of arguments") || lower.includes("syntax error")) {
     return new InvalidCommandError(message, { cause, raw });
   }
 
@@ -113,7 +185,65 @@ export function mapException(error: unknown): unknown {
 
 function intField(message: string, name: string): number | undefined {
   const match = new RegExp(`\\b${name}=([0-9]+)\\b`).exec(message);
-  return match?.[1] == null ? undefined : Number.parseInt(match[1], 10);
+  return match?.[1] == null ? undefined : nonNegativeSafeIntegerText(match[1]);
+}
+
+function isBusyStatus(status: number | string | undefined): boolean {
+  return status === 4 || (typeof status === "string" && (status === "4" || status.toLowerCase() === "busy"));
+}
+
+function isRerouteStatus(status: number | string | undefined): boolean {
+  return status === 5 || (typeof status === "string" && (status === "5" || status.toLowerCase() === "reroute"));
+}
+
+function isOverloadCode(code: string | undefined): boolean {
+  return code != null && OVERLOAD_CODES.has(code.toLowerCase());
+}
+
+function overloadMessage(message: string): boolean {
+  return /\boverloaded\b/u.test(message) || /(?:^|\s)busy(?:\s|:|$)/u.test(message);
+}
+
+function structuredIntegerField(raw: unknown, name: string): number | undefined {
+  const value = structuredField(raw, name);
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  }
+  if (typeof value === "bigint") {
+    return value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : undefined;
+  }
+  const text = binaryText(value);
+  return text == null ? undefined : nonNegativeSafeIntegerText(text);
+}
+
+function nonNegativeSafeIntegerText(value: string): number | undefined {
+  if (!/^[0-9]+$/u.test(value)) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function structuredStringField(raw: unknown, name: string): string | undefined {
+  return binaryText(structuredField(raw, name));
+}
+
+function structuredField(raw: unknown, name: string): unknown {
+  if (raw instanceof Map) {
+    if (raw.has(name)) return raw.get(name);
+    for (const [key, value] of raw.entries()) {
+      if (binaryText(key) === name) return value;
+    }
+    return undefined;
+  }
+  if (typeof raw === "object" && raw != null && Object.hasOwn(raw, name)) {
+    return (raw as Record<string, unknown>)[name];
+  }
+  return undefined;
+}
+
+function binaryText(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) return Buffer.from(value).toString("utf8");
+  return undefined;
 }
 
 function stringField(message: string, name: string): string | undefined {

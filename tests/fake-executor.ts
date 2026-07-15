@@ -11,7 +11,11 @@ export class FakeExecutor implements CommandExecutor {
   }
 
   async executeCommand(...args: CommandArgument[]): Promise<unknown> {
-    this.calls.push(args);
+    return await this.executeCommandArgs(args);
+  }
+
+  async executeCommandArgs(args: readonly CommandArgument[]): Promise<unknown> {
+    this.calls.push([...args]);
     if (this.responses.length > 0) {
       const response = this.responses.shift();
       if (response instanceof Error) {
@@ -24,6 +28,10 @@ export class FakeExecutor implements CommandExecutor {
 
   async executePipeline(commands: readonly (readonly CommandArgument[])[]): Promise<unknown[]> {
     this.pipelineCalls.push(commands.map((command) => [...command]));
-    return await Promise.all(commands.map((command) => this.executeCommand(...command)));
+    return await Promise.all(commands.map((command) => this.executeCommandArgs(command)));
+  }
+
+  async executeFusedPipeline(commands: readonly (readonly CommandArgument[])[]): Promise<unknown[]> {
+    return await this.executePipeline(commands);
   }
 }

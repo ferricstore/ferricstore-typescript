@@ -12,13 +12,13 @@ await client.lists.rpush(`jobs:${suffix}`, { id: "job-1" }, { id: "job-2" });
 await client.sets.sadd(`seen:${suffix}`, "user-1", "user-2");
 await client.zset.zadd(`scores:${suffix}`, [{ member: "user-1", score: 42 }]);
 await client.stream.xadd(`events:${suffix}`, "*", { id: "evt-1", type: "created" });
-await client.json.set(`json:user:${suffix}`, "$", { id: "user-1", flags: ["beta"] });
+await client.kv.set(`json:user:${suffix}`, { id: "user-1", flags: ["beta"] });
 await client.bloom.add(`bf:seen:${suffix}`, "user-1");
 await client.tdigest.create(`latency:${suffix}`);
 await client.tdigest.add(`latency:${suffix}`, 12, 18, 31);
 
 console.log({
-  json: await client.json.get(`json:user:${suffix}`),
+  json: await client.kv.get(`json:user:${suffix}`),
   session: await client.kv.get(`session:${suffix}`),
   tdigestP95: await client.tdigest.quantile(`latency:${suffix}`, 0.95)
 });

@@ -5,17 +5,46 @@ on:
     tags:
       - "v*.*.*"
 
-permissions:
-  contents: write
-  id-token: write
-
 jobs:
+  integration:
+    name: live integration ${{ matrix.server }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - server: release-0.7.5
+            image: ghcr.io/ferricstore/ferricstore:0.7.5@sha256:423e498ecb76e986da51fb1675c215f317e1e38bcaa6b66274bbe65207e45311
+          - server: pinned-core
+            image: ghcr.io/ferricstore/ferricstore:ci-7ccc4efadbb0e30bbbb5bcce3761b8d6859b7e9f@sha256:7298c8d00045d2e5dfca051fd45fecb7c1ad75fa8d13e82f769c6f67837ad7be
+    env:
+      FERRICSTORE_IMAGE: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22.22.0
+          cache: npm
+      - run: npm ci
+      - run: npm run integration:up
+      - run: npm run test:integration
+      - if: always()
+        run: docker compose logs ferricstore
+      - if: always()
+        run: npm run integration:down
+
   npm:
     name: publish npm
+    needs: integration
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24.x
           cache: npm
@@ -34,6 +63,13 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - run: npm publish --provenance --access public
-      - uses: softprops/action-gh-release@v3
+  release:
+    name: create GitHub release
+    needs: npm
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           generate_release_notes: true

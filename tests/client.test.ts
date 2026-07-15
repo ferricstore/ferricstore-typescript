@@ -1,9 +1,112 @@
-import { describe, expect, it } from "vitest";
-import { FerricStoreClient, FlowAlreadyExistsError, JsonCodec, OverloadedError, RoutingTopology, StaleLeaseError } from "../src/index.js";
-import type { CommandExecutor } from "../src/adapters.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  FerricStoreClient,
+  FerricStoreError,
+  RoutingTopology,
+  type RoutingRoute
+} from "../src/index.js";
+import { executeCommandsIndividually, type CommandExecutor } from "../src/adapters.js";
 import { FakeExecutor } from "./fake-executor.js";
 
 describe("FerricStoreClient", () => {
+  it("rejects sparse FLOW.VALUE.MGET reference arrays before dispatch", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.valueMGet(new Array<string>(1))).rejects.toThrow(
+      "FLOW.VALUE.MGET refs must be dense"
+    );
+    expect(executor.calls).toEqual([]);
+  });
+
+  it("keeps a delayed auto-batch flush referenced while commands are pending", async () => {
+    const delayMs = 12_345;
+    const timerSpy = vi.spyOn(globalThis, "setTimeout");
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("PONG");
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        return commands.map(() => Buffer.from("value"));
+      }
+    };
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, maxDelayMs: delayMs }
+    });
+    const pending = client.kv.get("key");
+
+    try {
+      const timerCall = timerSpy.mock.calls.findIndex((call) => call[1] === delayMs);
+      const timer = timerSpy.mock.results[timerCall]?.value as NodeJS.Timeout | undefined;
+      expect(timer?.hasRef()).toBe(true);
+
+      // An excluded command flushes immediately so the test does not wait for the delay.
+      await client.ping();
+      await expect(pending).resolves.toEqual(Buffer.from("value"));
+    } finally {
+      await client.close().catch(() => undefined);
+      await pending.catch(() => undefined);
+      timerSpy.mockRestore();
+    }
+  });
+
+  it("dispatches large Flow state filters through the array-native path", async () => {
+    const states = new Array<string>(150_000).fill("queued");
+    const executor = new FakeExecutor([[]]);
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.claimDue("email", {
+      jobOnly: true,
+      states,
+      worker: "worker-1"
+    })).resolves.toEqual([]);
+
+    expect(executor.calls[0]).toHaveLength(12 + states.length);
+    expect(executor.calls[0]?.slice(0, 4)).toEqual(["FLOW.CLAIM_DUE", "email", "STATES", states.length]);
+  });
+
+  it("orders state-changing controls when a command-only executor backs pipeline", async () => {
+    let authenticated = false;
+    const executor: CommandExecutor = {
+      async executeCommand(...args): Promise<unknown> {
+        if (args[0] === "AUTH") {
+          await new Promise((resolve) => setImmediate(resolve));
+          authenticated = true;
+          return Buffer.from("OK");
+        }
+        return Buffer.from(authenticated ? "after-auth" : "before-auth");
+      }
+    };
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.pipeline([
+      ["AUTH", "default", "secret"],
+      ["GET", "protected-key"]
+    ])).resolves.toEqual([Buffer.from("OK"), Buffer.from("after-auth")]);
+  });
+
+  it("honors public ordered pipeline options with a command-only executor", async () => {
+    let value = Buffer.from("before-set");
+    const executor: CommandExecutor = {
+      async executeCommand(...args): Promise<unknown> {
+        if (args[0] === "SET") {
+          await new Promise((resolve) => setImmediate(resolve));
+          const nextValue = args[2];
+          if (typeof nextValue !== "string") throw new TypeError("expected string SET value");
+          value = Buffer.from(nextValue);
+          return Buffer.from("OK");
+        }
+        return value;
+      }
+    };
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.pipeline([
+      ["SET", "dependent", "after-set"],
+      ["GET", "dependent"]
+    ], { ordered: true })).resolves.toEqual([Buffer.from("OK"), Buffer.from("after-set")]);
+  });
+
   it("auto-batches concurrent safe commands when enabled", async () => {
     const executor = new FakeExecutor();
     const client = new FerricStoreClient(executor, { autoBatch: true });
@@ -21,6 +124,769 @@ describe("FerricStoreClient", () => {
     ]);
   });
 
+  it("orders same-key auto-batch fallback dependencies while overlapping independent keys", async () => {
+    let value = Buffer.from("before-set");
+    let releaseWrite: (() => void) | undefined;
+    const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    let dependentReadStarted = false;
+    let independentReadStarted = false;
+    const executeCommand: CommandExecutor["executeCommand"] = async (...args) => {
+      if (args[0] === "SET") {
+        await writeGate;
+        if (args[2] !== "after-set") throw new Error("unexpected SET value");
+        value = Buffer.from(args[2]);
+        return Buffer.from("OK");
+      }
+      if (args[1] === "dependent") {
+        dependentReadStarted = true;
+        return value;
+      }
+      independentReadStarted = true;
+      return Buffer.from("independent");
+    };
+    const executor: CommandExecutor = {
+      executeCommand,
+      async executePipeline(commands, options): Promise<unknown[]> {
+        return await executeCommandsIndividually(executeCommand, commands, options);
+      }
+    };
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+
+    const resultsPromise = Promise.all([
+      client.command("SET", "dependent", "after-set"),
+      client.command("GET", "dependent"),
+      client.command("GET", "independent")
+    ]);
+    await new Promise((resolve) => setImmediate(resolve));
+    const startsBeforeWriteFinished = { dependentReadStarted, independentReadStarted };
+    releaseWrite?.();
+    const results = await resultsPromise;
+
+    expect(startsBeforeWriteFinished).toEqual({
+      dependentReadStarted: false,
+      independentReadStarted: true
+    });
+    expect(results).toEqual([
+      Buffer.from("OK"),
+      Buffer.from("after-set"),
+      Buffer.from("independent")
+    ]);
+  });
+
+  it("keeps every supported Flow auto-batch footprint explicit", async () => {
+    let pipelineOptions: Parameters<NonNullable<CommandExecutor["executePipeline"]>>[1];
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("OK");
+      },
+      async executePipeline(commands, options): Promise<unknown[]> {
+        pipelineOptions = options;
+        return commands.map(() => Buffer.from("OK"));
+      }
+    };
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+    const lease = Buffer.from("lease");
+    const commands = [
+      ["FLOW.CREATE_MANY", "tenant-a", "TYPE", "order", "ITEMS", "create-1", Buffer.from("payload")],
+      ["FLOW.COMPLETE_MANY", "tenant-a", "ITEMS", "complete-1", lease, 1],
+      ["FLOW.TRANSITION_MANY", "tenant-a", "from", "to", "ITEMS", "transition-1", 1, lease],
+      ["FLOW.RETRY_MANY", "tenant-a", "ITEMS", "retry-1", lease, 1],
+      ["FLOW.FAIL_MANY", "tenant-a", "ITEMS", "fail-1", lease, 1],
+      ["FLOW.CANCEL_MANY", "tenant-a", "ITEMS", "cancel-1", 1],
+      ["FLOW.RUN_STEPS_MANY", "TYPE", "order", "ITEMS", [{ id: "steps-1" }]],
+      ["FLOW.VALUE.MGET", "ref-1", "ref-2", "MAX_BYTES", 1_024],
+      ["FLOW.VALUE.PUT", Buffer.from("one"), "OWNER_FLOW_ID", "owner-1", "NAME", "profile"],
+      ["FLOW.VALUE.PUT", Buffer.from("two"), "OWNER_FLOW_ID", "owner-2", "NAME", "profile"]
+    ] as const;
+
+    await Promise.all(commands.map(async (command) => await client.command(...command)));
+
+    expect(pipelineOptions?.ordered).not.toBe(true);
+    expect(pipelineOptions?.fallbackDependencies).toHaveLength(commands.length);
+    expect(pipelineOptions?.fallbackDependencies?.every((dependencies) => dependencies.length === 0)).toBe(true);
+  });
+
+  it("orders named value puts for the same owner while keeping other owners independent", async () => {
+    let dependencies: readonly (readonly number[])[] | undefined;
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("OK");
+      },
+      async executePipeline(commands, options): Promise<unknown[]> {
+        dependencies = options?.fallbackDependencies;
+        return commands.map(() => Buffer.from("OK"));
+      }
+    };
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+
+    await Promise.all([
+      client.command("FLOW.VALUE.PUT", Buffer.from("one"), "OWNER_FLOW_ID", "owner-a", "NAME", "profile"),
+      client.command("FLOW.VALUE.PUT", Buffer.from("two"), "OWNER_FLOW_ID", "owner-a", "NAME", "profile"),
+      client.command("FLOW.VALUE.PUT", Buffer.from("three"), "OWNER_FLOW_ID", "owner-b", "NAME", "profile")
+    ]);
+
+    expect(dependencies).toEqual([[], [0], []]);
+  });
+
+  it("flushes queued auto-batch work before an excluded direct command", async () => {
+    const order: string[] = [];
+    const executor: CommandExecutor = {
+      async executeCommand(...args): Promise<unknown> {
+        order.push(`direct:${args[0] as string}`);
+        return 1;
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        order.push(`pipeline:${commands[0]?.[0] as string}`);
+        return commands.map(() => Buffer.from("OK"));
+      }
+    };
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, maxDelayMs: 1_000 }
+    });
+
+    await Promise.all([
+      client.command("SET", "ordered", "1"),
+      client.command("INCR", "ordered")
+    ]);
+
+    expect(order).toEqual(["pipeline:SET", "direct:INCR"]);
+  });
+
+  it("releases the ordering barrier after dispatching a blocking command", async () => {
+    let releasePop: (() => void) | undefined;
+    let markPopStarted: (() => void) | undefined;
+    const popGate = new Promise<void>((resolve) => { releasePop = resolve; });
+    const popStarted = new Promise<void>((resolve) => { markPopStarted = resolve; });
+    let pushStarted = false;
+    const executor: CommandExecutor = {
+      async executeCommand(...args): Promise<unknown> {
+        if (args[0] === "BLPOP") {
+          markPopStarted?.();
+          await popGate;
+        }
+        return Buffer.from("OK");
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        pushStarted = commands.some((command) => command[0] === "RPUSH");
+        return commands.map(() => Buffer.from("OK"));
+      }
+    };
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, maxCommands: 1, maxDelayMs: 0 }
+    });
+
+    const pop = client.command("BLPOP", "queue", 0);
+    await popStarted;
+    const push = client.command("RPUSH", "queue", "value");
+    await new Promise((resolve) => setImmediate(resolve));
+    const pushStartedBeforePopFinished = pushStarted;
+
+    releasePop?.();
+    await Promise.all([pop, push]);
+    expect(pushStartedBeforePopFinished).toBe(true);
+  });
+
+  it("closes the underlying executor while a blocking command is pending", async () => {
+    let releasePop: (() => void) | undefined;
+    let markPopStarted: (() => void) | undefined;
+    const popGate = new Promise<void>((resolve) => { releasePop = resolve; });
+    const popStarted = new Promise<void>((resolve) => { markPopStarted = resolve; });
+    let closeCalls = 0;
+    const executor: CommandExecutor = {
+      async executeCommand(...args): Promise<unknown> {
+        if (args[0] === "BLPOP") {
+          markPopStarted?.();
+          await popGate;
+        }
+        return Buffer.from("OK");
+      },
+      async executePipeline(): Promise<unknown[]> {
+        return [];
+      },
+      async close(): Promise<void> {
+        closeCalls += 1;
+        releasePop?.();
+      }
+    };
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+
+    const pop = client.command("BLPOP", "queue", 0);
+    await popStarted;
+    const closing = client.close();
+    await new Promise((resolve) => setImmediate(resolve));
+    const closeReachedExecutorBeforePopFinished = closeCalls === 1;
+
+    releasePop?.();
+    await Promise.allSettled([pop, closing]);
+    expect(closeReachedExecutorBeforePopFinished).toBe(true);
+  });
+
+  it("keeps an explicit pipeline behind an in-flight excluded command", async () => {
+    let releaseDirect: (() => void) | undefined;
+    let markDirectStarted: (() => void) | undefined;
+    const directGate = new Promise<void>((resolve) => { releaseDirect = resolve; });
+    const directStarted = new Promise<void>((resolve) => { markDirectStarted = resolve; });
+    const order: string[] = [];
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        order.push("direct");
+        markDirectStarted?.();
+        await directGate;
+        return 1;
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        order.push("pipeline");
+        return commands.map(() => Buffer.from("OK"));
+      }
+    };
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+    const direct = client.command("INCR", "ordered");
+    await directStarted;
+    const explicit = client.pipeline([["GET", "ordered"]]);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(order).toEqual(["direct"]);
+
+    releaseDirect?.();
+    await Promise.all([direct, explicit]);
+    expect(order).toEqual(["direct", "pipeline"]);
+  });
+
+  it("waits for an in-flight auto-batch before sending an explicit pipeline", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let markFirstStarted: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+    const pipelineCalls: string[][] = [];
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("OK");
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        pipelineCalls.push(commands.map((command) => {
+          const key = command[1];
+          return typeof key === "string" ? key : Buffer.isBuffer(key) ? key.toString("utf8") : "";
+        }));
+        if (pipelineCalls.length === 1) {
+          markFirstStarted?.();
+          await firstGate;
+        }
+        return commands.map(() => Buffer.from("OK"));
+      }
+    };
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, maxCommands: 1, maxDelayMs: 0 }
+    });
+    const first = client.command("SET", "first", "1");
+    await firstStarted;
+    const explicit = client.pipeline([["GET", "second"]]);
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(pipelineCalls).toEqual([["first"]]);
+
+    releaseFirst?.();
+    await Promise.all([first, explicit]);
+    expect(pipelineCalls).toEqual([["first"], ["second"]]);
+  });
+
+  it("does not let a later auto-batch overtake an earlier write", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let markFirstStarted: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+    const pipelineCalls: string[][] = [];
+    let stored = "initial";
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("OK");
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        const values = commands.map((command) => {
+          const value = command[2];
+          return typeof value === "string"
+            ? value
+            : Buffer.isBuffer(value)
+              ? value.toString("utf8")
+              : "";
+        });
+        pipelineCalls.push(values);
+        if (pipelineCalls.length === 1) {
+          markFirstStarted?.();
+          await firstGate;
+        }
+        for (const value of values) stored = value;
+        return commands.map(() => Buffer.from("OK"));
+      }
+    };
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, maxCommands: 1, maxDelayMs: 0 }
+    });
+
+    const first = client.command("SET", "shared", "first");
+    await firstStarted;
+    const second = client.command("SET", "shared", "second");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(pipelineCalls).toEqual([["first"]]);
+    releaseFirst?.();
+    await Promise.all([first, second]);
+    expect(pipelineCalls).toEqual([["first"], ["second"]]);
+    expect(stored).toBe("second");
+  });
+
+  it("keeps disjoint auto-batch keys concurrent", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let markFirstStarted: (() => void) | undefined;
+    let markSecondStarted: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+    const secondStarted = new Promise<void>((resolve) => { markSecondStarted = resolve; });
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("OK");
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        if (commands[0]?.[1] === "first-key") {
+          markFirstStarted?.();
+          await firstGate;
+        } else {
+          markSecondStarted?.();
+        }
+        return commands.map(() => Buffer.from("OK"));
+      }
+    };
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, maxCommands: 1, maxDelayMs: 0 }
+    });
+
+    const first = client.command("SET", "first-key", "1");
+    await firstStarted;
+    const second = client.command("SET", "second-key", "2");
+    const secondStartedBeforeFirstFinished = await Promise.race([
+      secondStarted.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50))
+    ]);
+
+    releaseFirst?.();
+    await Promise.all([first, second]);
+    expect(secondStartedBeforeFirstFinished).toBe(true);
+  });
+
+  it("keeps disjoint Flow ids concurrent across auto-batch flushes", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let markFirstStarted: (() => void) | undefined;
+    let markSecondStarted: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+    const secondStarted = new Promise<void>((resolve) => { markSecondStarted = resolve; });
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("OK");
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        if (commands[0]?.[1] === "flow-1") {
+          markFirstStarted?.();
+          await firstGate;
+        } else {
+          markSecondStarted?.();
+        }
+        return commands.map(() => Buffer.from("OK"));
+      }
+    };
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, maxCommands: 1, maxDelayMs: 0 }
+    });
+
+    const first = client.command("FLOW.SIGNAL", "flow-1", "SIGNAL", "go");
+    await firstStarted;
+    const second = client.command("FLOW.SIGNAL", "flow-2", "SIGNAL", "go");
+    const overlapped = await Promise.race([
+      secondStarted.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50))
+    ]);
+
+    releaseFirst?.();
+    await Promise.all([first, second]);
+    expect(overlapped).toBe(true);
+  });
+
+  it("keeps disjoint lease renewals concurrent across auto-batch flushes", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let markFirstStarted: (() => void) | undefined;
+    let markSecondStarted: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+    const secondStarted = new Promise<void>((resolve) => { markSecondStarted = resolve; });
+    const executor: CommandExecutor = {
+      async executeCommand(...args): Promise<unknown> {
+        if (args[1] === "flow-1") {
+          markFirstStarted?.();
+          await firstGate;
+        } else {
+          markSecondStarted?.();
+        }
+        return Buffer.from("OK");
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        if (commands[0]?.[1] === "flow-1") {
+          markFirstStarted?.();
+          await firstGate;
+        } else {
+          markSecondStarted?.();
+        }
+        return commands.map(() => Buffer.from("OK"));
+      }
+    };
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, maxCommands: 1, maxDelayMs: 0 }
+    });
+
+    const first = client.command(
+      "FLOW.EXTEND_LEASE", "flow-1", Buffer.from("lease-1"),
+      "FENCING", 1, "LEASE_MS", 30_000, "RETURN", "OK_ON_SUCCESS"
+    );
+    await firstStarted;
+    const second = client.command(
+      "FLOW.EXTEND_LEASE", "flow-2", Buffer.from("lease-2"),
+      "FENCING", 2, "LEASE_MS", 30_000, "RETURN", "OK_ON_SUCCESS"
+    );
+    const overlapped = await Promise.race([
+      secondStarted.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50))
+    ]);
+
+    releaseFirst?.();
+    await Promise.all([first, second]);
+    expect(overlapped).toBe(true);
+  });
+
+  it("requests an OK-only response for lightweight lease renewal", async () => {
+    const executor = new FakeExecutor([Buffer.from("OK")]);
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.extendLease("flow-1", {
+      fencingToken: 7,
+      leaseMs: 30_000,
+      leaseToken: Buffer.from("lease-1"),
+      returnOkOnSuccess: true
+    })).resolves.toBe(true);
+
+    expect(executor.calls).toHaveLength(1);
+    expect(executor.calls[0]).toContain("RETURN");
+    expect(executor.calls[0]).toContain("OK_ON_SUCCESS");
+  });
+
+  it("falls back once when an older server does not support OK-only lease renewal", async () => {
+    const legacyRecord = {
+      id: "flow-1",
+      partition_key: "tenant-a",
+      state: "running",
+      type: "job"
+    };
+    const executor = new FakeExecutor([
+      new Error("ERR syntax error"),
+      legacyRecord,
+      legacyRecord
+    ]);
+    const client = new FerricStoreClient(executor);
+    const options = {
+      fencingToken: 7,
+      leaseMs: 30_000,
+      leaseToken: Buffer.from("lease-1"),
+      partitionKey: "tenant-a",
+      returnOkOnSuccess: true as const
+    };
+
+    await expect(client.extendLease("flow-1", options)).resolves.toBe(true);
+    await expect(client.extendLease("flow-1", options)).resolves.toBe(true);
+
+    expect(executor.calls).toHaveLength(3);
+    expect(executor.calls[0]).toContain("RETURN");
+    expect(executor.calls[1]).not.toContain("RETURN");
+    expect(executor.calls[2]).not.toContain("RETURN");
+  });
+
+  it("single-flights the OK-only capability probe without serializing lease renewals", async () => {
+    let releaseProbe: (() => void) | undefined;
+    let markProbeStarted: (() => void) | undefined;
+    const probeGate = new Promise<void>((resolve) => { releaseProbe = resolve; });
+    const probeStarted = new Promise<void>((resolve) => { markProbeStarted = resolve; });
+    let probeCalls = 0;
+    let legacyCalls = 0;
+    const executor: CommandExecutor = {
+      async executeCommand(...args): Promise<unknown> {
+        if (args.includes("RETURN")) {
+          probeCalls += 1;
+          markProbeStarted?.();
+          await probeGate;
+          throw new Error("ERR syntax error");
+        }
+        legacyCalls += 1;
+        const id = args[1];
+        if (typeof id !== "string") throw new TypeError("expected string flow id");
+        return {
+          id,
+          partition_key: "tenant-a",
+          state: "running",
+          type: "job"
+        };
+      }
+    };
+    const client = new FerricStoreClient(executor);
+    const renew = (id: string): Promise<boolean> => client.extendLease(id, {
+      fencingToken: 7,
+      leaseMs: 30_000,
+      leaseToken: Buffer.from(`lease-${id}`),
+      partitionKey: "tenant-a",
+      returnOkOnSuccess: true
+    });
+
+    const first = renew("flow-0");
+    await probeStarted;
+    const rest = Array.from({ length: 5 }, (_, index) => renew(`flow-${index + 1}`));
+    await new Promise((resolve) => setImmediate(resolve));
+    const renewalsStartedWhileProbeWasPending = legacyCalls;
+
+    releaseProbe?.();
+    await Promise.all([first, ...rest]);
+    expect(renewalsStartedWhileProbeWasPending).toBe(5);
+    expect(probeCalls).toBe(1);
+    expect(legacyCalls).toBe(6);
+  });
+
+  it("orders same-id Flow writes while allowing unrelated KV work", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let markFirstStarted: (() => void) | undefined;
+    let markKvStarted: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+    const kvStarted = new Promise<void>((resolve) => { markKvStarted = resolve; });
+    const started: string[] = [];
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("OK");
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        const name = commands[0]?.[0];
+        const key = commands[0]?.[1];
+        started.push(`${name as string}:${key as string}`);
+        if (name === "FLOW.SIGNAL" && started.length === 1) {
+          markFirstStarted?.();
+          await firstGate;
+        } else if (name === "SET") {
+          markKvStarted?.();
+        }
+        return commands.map(() => Buffer.from("OK"));
+      }
+    };
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, maxCommands: 1, maxDelayMs: 0 }
+    });
+
+    const first = client.command("FLOW.SIGNAL", "flow-1", "SIGNAL", "first");
+    await firstStarted;
+    const sameId = client.command("FLOW.SIGNAL", "flow-1", "SIGNAL", "second");
+    const kv = client.command("SET", "kv-key", "value");
+    const kvOverlapped = await Promise.race([
+      kvStarted.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50))
+    ]);
+
+    expect(started).toEqual(["FLOW.SIGNAL:flow-1", "SET:kv-key"]);
+    releaseFirst?.();
+    await Promise.all([first, sameId, kv]);
+    expect(kvOverlapped).toBe(true);
+    expect(started).toEqual([
+      "FLOW.SIGNAL:flow-1",
+      "SET:kv-key",
+      "FLOW.SIGNAL:flow-1"
+    ]);
+  });
+
+  it("keeps same-key read-only auto-batches concurrent", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let markFirstStarted: (() => void) | undefined;
+    let markSecondStarted: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+    const secondStarted = new Promise<void>((resolve) => { markSecondStarted = resolve; });
+    let calls = 0;
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("value");
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        calls += 1;
+        if (calls === 1) {
+          markFirstStarted?.();
+          await firstGate;
+        } else {
+          markSecondStarted?.();
+        }
+        return commands.map(() => Buffer.from("value"));
+      }
+    };
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, maxCommands: 1, maxDelayMs: 0 }
+    });
+
+    const first = client.command("GET", "shared-key");
+    await firstStarted;
+    const second = client.command("GET", "shared-key");
+    const overlapped = await Promise.race([
+      secondStarted.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50))
+    ]);
+
+    releaseFirst?.();
+    await Promise.all([first, second]);
+    expect(overlapped).toBe(true);
+  });
+
+  it("waits for in-flight auto-batches before closing the executor", async () => {
+    let releaseBatch: (() => void) | undefined;
+    let markBatchStarted: (() => void) | undefined;
+    const batchGate = new Promise<void>((resolve) => { releaseBatch = resolve; });
+    const batchStarted = new Promise<void>((resolve) => { markBatchStarted = resolve; });
+    let executorClosed = false;
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("OK");
+      },
+      async executePipeline(commands): Promise<unknown[]> {
+        markBatchStarted?.();
+        await batchGate;
+        return commands.map(() => Buffer.from("OK"));
+      },
+      async close(): Promise<void> {
+        executorClosed = true;
+      }
+    };
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, maxCommands: 1, maxDelayMs: 0 }
+    });
+    const request = client.command("SET", "first", "1");
+    await batchStarted;
+    let closeFinished = false;
+    const closing = client.close().then(() => { closeFinished = true; });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(closeFinished).toBe(false);
+    expect(executorClosed).toBe(false);
+
+    releaseBatch?.();
+    await Promise.all([request, closing]);
+    expect(executorClosed).toBe(true);
+  });
+
+  it("rejects fused operations admitted after auto-batch close starts", async () => {
+    const events: string[] = [];
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("OK");
+      },
+      async executeFusedPipeline(): Promise<unknown[]> {
+        events.push("fused");
+        return [Buffer.from("OK"), []];
+      },
+      async close(): Promise<void> {
+        events.push("close");
+      }
+    };
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+
+    await client.close();
+    await expect(client.completeJobsAndClaimJobs(
+      [{ id: "flow-1", leaseToken: Buffer.from("lease"), fencingToken: 1, type: "order", state: "running" }],
+      "order",
+      { jobOnly: true, state: "queued", worker: "worker-1" }
+    )).rejects.toThrow("client is closed");
+    expect(events).toEqual(["close"]);
+  });
+
+  it("waits for admitted topology helpers before auto-batch close", async () => {
+    let markRouteStarted: (() => void) | undefined;
+    let releaseRoute: (() => void) | undefined;
+    const routeStarted = new Promise<void>((resolve) => { markRouteStarted = resolve; });
+    const routeGate = new Promise<void>((resolve) => { releaseRoute = resolve; });
+    const expected = RoutingTopology.build({
+      ranges: [{
+        endpoint: { host: "node.local", native_port: 6388, node: "node@local" },
+        first_slot: 0,
+        lane_id: 1,
+        last_slot: 1023,
+        shard: 0
+      }],
+      shard_count: 1
+    }).routeKey("key");
+    let executorClosed = false;
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("OK");
+      },
+      async route(): Promise<RoutingRoute> {
+        markRouteStarted?.();
+        await routeGate;
+        return expected;
+      },
+      async close(): Promise<void> {
+        executorClosed = true;
+      }
+    };
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+    const route = client.route("key");
+    await routeStarted;
+    let closeFinished = false;
+    const closing = client.close().then(() => { closeFinished = true; });
+
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(closeFinished).toBe(false);
+      expect(executorClosed).toBe(false);
+
+      releaseRoute?.();
+      await expect(route).resolves.toBe(expected);
+      await closing;
+      expect(executorClosed).toBe(true);
+    } finally {
+      releaseRoute?.();
+      await closing;
+    }
+  });
+
+  it("joins concurrent close callers to one auto-batch shutdown", async () => {
+    let releaseClose: (() => void) | undefined;
+    let markCloseStarted: (() => void) | undefined;
+    const closeGate = new Promise<void>((resolve) => { releaseClose = resolve; });
+    const closeStarted = new Promise<void>((resolve) => { markCloseStarted = resolve; });
+    let closeCalls = 0;
+    const executor: CommandExecutor = {
+      async executeCommand(): Promise<unknown> {
+        return Buffer.from("OK");
+      },
+      async executePipeline(): Promise<unknown[]> {
+        return [];
+      },
+      async close(): Promise<void> {
+        closeCalls += 1;
+        markCloseStarted?.();
+        await closeGate;
+      }
+    };
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+
+    const first = client.close();
+    await closeStarted;
+    let secondFinished = false;
+    const second = client.close().then(() => { secondFinished = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(closeCalls).toBe(1);
+    expect(secondFinished).toBe(false);
+    releaseClose?.();
+    await Promise.all([first, second]);
+  });
+
   it("does not auto-batch blocking claim commands", async () => {
     const executor = new FakeExecutor();
     const client = new FerricStoreClient(executor, { autoBatch: true });
@@ -32,6 +898,65 @@ describe("FerricStoreClient", () => {
 
     expect(executor.calls[0]).toEqual(["FLOW.CLAIM_DUE", "email", "WORKER", "worker-1"]);
     expect(executor.pipelineCalls).toEqual([[["SET", "auto-batch:claim-safe", "1"]]]);
+  });
+
+  it("auto-batches nonblocking fused Flow commands in safe mode", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor, { autoBatch: true });
+
+    await Promise.all([
+      client.command("FLOW.STEP_CONTINUE", "flow-1", "lease-1", "created", "charged"),
+      client.command("FLOW.RUN_STEPS_MANY", "TYPE", "order", "ITEMS", [])
+    ]);
+
+    expect(executor.pipelineCalls).toEqual([[
+      ["FLOW.STEP_CONTINUE", "flow-1", "lease-1", "created", "charged"],
+      ["FLOW.RUN_STEPS_MANY", "TYPE", "order", "ITEMS", []]
+    ]]);
+  });
+
+  it("never auto-batches blocking or session commands in all mode", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor, {
+      autoBatch: { enabled: true, mode: "all" }
+    });
+
+    await Promise.all([
+      client.command("XREADGROUP", "GROUP", "workers", "worker-1", "STREAMS", "jobs", ">"),
+      client.command("BLMOVE", "source", "destination", "LEFT", "RIGHT", 1),
+      client.command("BRPOPLPUSH", "source", "destination", 1),
+      client.command("BLMPOP", 1, 1, "jobs", "LEFT"),
+      client.command("WAIT", 1, 100),
+      client.command("WAITAOF", 1, 1, 100),
+      client.command("PING", "health"),
+      client.command("OPTIONS"),
+      client.command("SSUBSCRIBE", "shard-events"),
+      client.command("SUNSUBSCRIBE", "shard-events"),
+      client.command("SANDBOX", "tenant-a"),
+      client.command("COMMAND_EXEC", "SSUBSCRIBE", "wrapped-events"),
+      client.command("COMMAND_EXEC", "SANDBOX", "wrapped-tenant"),
+      client.command("COMMAND_EXEC", "BLPOP", "wrapped-queue", 0),
+      client.command("FLOW.SCHEDULE.FIRE_DUE", "WORKER", "scheduler-1", "BLOCK", 100)
+    ]);
+
+    expect(executor.pipelineCalls).toEqual([]);
+    expect(executor.calls.map((call) => call[0])).toEqual([
+      "XREADGROUP",
+      "BLMOVE",
+      "BRPOPLPUSH",
+      "BLMPOP",
+      "WAIT",
+      "WAITAOF",
+      "PING",
+      "OPTIONS",
+      "SSUBSCRIBE",
+      "SUNSUBSCRIBE",
+      "SANDBOX",
+      "COMMAND_EXEC",
+      "COMMAND_EXEC",
+      "COMMAND_EXEC",
+      "FLOW.SCHEDULE.FIRE_DUE"
+    ]);
   });
 
   it("delegates topology helpers through client wrappers", async () => {
@@ -80,702 +1005,89 @@ describe("FerricStoreClient", () => {
     ]);
 
     expect(first).toMatchObject({ status: "fulfilled", value: Buffer.from("OK") });
-    expect(second).toMatchObject({ status: "rejected", reason: itemError });
+    expect(second).toMatchObject({ status: "rejected" });
+    if (second.status === "rejected") {
+      const reason = second.reason as unknown;
+      expect(reason).toBeInstanceOf(FerricStoreError);
+      expect((reason as Error).message).toBe("ERR item failed");
+    }
   });
 
-  it("builds FLOW.CREATE with explicit state-machine data", async () => {
-    const executor = new FakeExecutor();
-    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
-
-    await client.create("order-1", {
-      correlationId: "cart-1",
-      idempotent: true,
-      nowMs: 100,
-      partitionKey: "tenant-a",
-      payload: { amount: 42 },
-      priority: 3,
-      runAtMs: 150,
-      state: "created",
-      type: "order",
-      values: { customer: { id: "c1" } }
-    });
-
-    expect(executor.calls[0]).toEqual([
-      "FLOW.CREATE",
-      "order-1",
-      "TYPE",
-      "order",
-      "STATE",
-      "created",
-      "NOW",
-      100,
-      "PARTITION",
-      "tenant-a",
-      "PAYLOAD",
-      Buffer.from('{"amount":42}'),
-      "CORRELATION_ID",
-      "cart-1",
-      "RUN_AT",
-      150,
-      "PRIORITY",
-      3,
-      "IDEMPOTENT",
-      "true",
-      "VALUE",
-      "customer",
-      Buffer.from('{"id":"c1"}')
-    ]);
-  });
-
-  it("builds flow mutation commands with state metadata", async () => {
-    const executor = new FakeExecutor();
-    const client = new FerricStoreClient(executor);
-    const lease = Buffer.from("lease");
-    const claimed = [{ id: "flow-1", leaseToken: lease, fencingToken: 7, partitionKey: "tenant-a", type: "order", state: "queued" }];
-    const fenced = [{ id: "flow-1", leaseToken: lease, fencingToken: 7, partitionKey: "tenant-a" }];
-
-    const expectStateMeta = (value: string): void => {
-      const call = executor.calls.at(-1);
-      expect(call).toBeDefined();
-      const index = call?.indexOf("STATE_META") ?? -1;
-      expect(call?.slice(index, index + 3)).toEqual(["STATE_META", "version", value]);
+  it("preserves successful auto-batch results when a command-only executor item fails", async () => {
+    const applied: string[] = [];
+    const executor: CommandExecutor = {
+      async executeCommand(...args) {
+        const keyArg = args[1];
+        const key = typeof keyArg === "string"
+          ? keyArg
+          : Buffer.isBuffer(keyArg)
+            ? keyArg.toString("utf8")
+            : "";
+        applied.push(key);
+        if (key === "auto-batch:error") {
+          throw new Error("ERR item failed");
+        }
+        return Buffer.from("OK");
+      }
     };
+    const client = new FerricStoreClient(executor, { autoBatch: true });
 
-    await client.create("flow-1", { nowMs: 100, stateMeta: { version: "1" }, type: "order" });
-    expectStateMeta("1");
-
-    await client.transition("flow-1", {
-      fencingToken: 7,
-      fromState: "queued",
-      leaseToken: lease,
-      nowMs: 101,
-      stateMeta: { version: "2" },
-      toState: "charged"
-    });
-    expectStateMeta("2");
-
-    await client.complete("flow-1", {
-      fencingToken: 7,
-      leaseToken: lease,
-      stateMeta: { version: "3" }
-    });
-    expectStateMeta("3");
-
-    await client.retry("flow-1", {
-      fencingToken: 7,
-      leaseToken: lease,
-      stateMeta: { version: "4" }
-    });
-    expectStateMeta("4");
-
-    await client.fail("flow-1", {
-      fencingToken: 7,
-      leaseToken: lease,
-      stateMeta: { version: "5" }
-    });
-    expectStateMeta("5");
-
-    await client.cancel("flow-1", {
-      fencingToken: 7,
-      leaseToken: lease,
-      stateMeta: { version: "6" }
-    });
-    expectStateMeta("6");
-
-    await client.completeMany("tenant-a", claimed, { stateMeta: { version: "7" } });
-    expectStateMeta("7");
-
-    await client.transitionMany("tenant-a", {
-      fromState: "queued",
-      items: fenced,
-      stateMeta: { version: "8" },
-      toState: "charged"
-    });
-    expectStateMeta("8");
-
-    await client.retryMany("tenant-a", claimed, { stateMeta: { version: "9" } });
-    expectStateMeta("9");
-
-    await client.failMany("tenant-a", claimed, { stateMeta: { version: "10" } });
-    expectStateMeta("10");
-
-    await client.cancelMany("tenant-a", fenced, { stateMeta: { version: "11" } });
-    expectStateMeta("11");
-  });
-
-  it("builds cancelMany without lease tokens", async () => {
-    const executor = new FakeExecutor();
-    const client = new FerricStoreClient(executor);
-    const lease = Buffer.from("lease");
-
-    await client.cancelMany("tenant-a", [
-      { id: "flow-1", leaseToken: lease, fencingToken: 7, partitionKey: "tenant-a" }
-    ], { nowMs: 100 });
-    expect(executor.calls[0]).toEqual([
-      "FLOW.CANCEL_MANY",
-      "tenant-a",
-      "NOW",
-      100,
-      "ITEMS",
-      "flow-1",
-      7
+    const [first, second] = await Promise.allSettled([
+      client.command("SET", "auto-batch:ok", "1"),
+      client.command("SET", "auto-batch:error", "2")
     ]);
 
-    await client.cancelMany(undefined, [
-      { id: "flow-2", leaseToken: lease, fencingToken: 8, partitionKey: "tenant-b" }
-    ], { nowMs: 101 });
-    expect(executor.calls[1]).toEqual([
-      "FLOW.CANCEL_MANY",
-      "MIXED",
-      "NOW",
-      101,
-      "ITEMS",
-      "flow-2",
-      "tenant-b",
-      8
-    ]);
+    expect(applied).toEqual(["auto-batch:ok", "auto-batch:error"]);
+    expect(first).toMatchObject({ status: "fulfilled", value: Buffer.from("OK") });
+    expect(second).toMatchObject({ status: "rejected" });
   });
 
-  it("builds createMany with shared state metadata", async () => {
-    const executor = new FakeExecutor();
-    const client = new FerricStoreClient(executor);
+  it("preserves arbitrary rejection reasons through command-only auto-batches", async () => {
+    const reasons: readonly unknown[] = [null, "plain rejection", { code: "custom_rejection" }];
+    const executor: CommandExecutor = {
+      async executeCommand(...args): Promise<unknown> {
+        const index = Number(args[1]);
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- JavaScript promises may reject with any value
+        return await Promise.reject(reasons[index]);
+      }
+    };
+    const client = new FerricStoreClient(executor, { autoBatch: true });
 
-    await client.createMany("tenant-a", [
-      { id: "flow-1", payload: "one" },
-      { id: "flow-2", payload: "two" }
-    ], {
-      nowMs: 100,
-      state: "queued",
-      stateMeta: { owner: "risk", version: "1" },
-      type: "order"
+    const settled = await Promise.allSettled(reasons.map(async (_reason, index) =>
+      await client.command("SET", index, "value")
+    ));
+
+    settled.forEach((result, index) => {
+      expect(result.status).toBe("rejected");
+      if (result.status === "rejected") expect(result.reason).toBe(reasons[index]);
     });
-
-    expect(executor.calls[0]).toEqual([
-      "FLOW.CREATE_MANY",
-      "tenant-a",
-      "TYPE",
-      "order",
-      "STATE",
-      "queued",
-      "NOW",
-      100,
-      "RUN_AT",
-      100,
-      "STATE_META",
-      "owner",
-      "risk",
-      "STATE_META",
-      "version",
-      "1",
-      "ITEMS",
-      "flow-1",
-      Buffer.from("one"),
-      "flow-2",
-      Buffer.from("two")
-    ]);
   });
 
-  it("reuses identical createMany item state metadata and rejects mixed state metadata", async () => {
-    const executor = new FakeExecutor();
-    const client = new FerricStoreClient(executor);
-
-    await client.createMany("tenant-a", [
-      { id: "flow-1", stateMeta: { version: "1" } },
-      { id: "flow-2", stateMeta: { version: "1" } }
-    ], {
-      nowMs: 100,
-      type: "order"
-    });
-
-    const call = executor.calls[0];
-    const index = call?.indexOf("STATE_META") ?? -1;
-    expect(call?.slice(index, index + 3)).toEqual(["STATE_META", "version", "1"]);
-
-    await expect(client.createMany("tenant-a", [
-      { id: "flow-3", stateMeta: { version: "1" } },
-      { id: "flow-4", stateMeta: { version: "2" } }
-    ], {
-      nowMs: 100,
-      type: "order"
-    })).rejects.toThrow("shared stateMeta");
-  });
-
-  it("builds policy indexing and decodes state metadata fields", async () => {
-    const executor = new FakeExecutor([
-      Buffer.from("OK"),
-      new Map<unknown, unknown>([
-        ["id", "flow-1"],
-        ["type", "order"],
-        ["state", "completed"],
-        ["partition_key", "tenant-a"],
-        ["version", 3],
-        ["state_meta", new Map<unknown, unknown>([
-          ["accept", new Map<unknown, unknown>([["version", "1"]])],
-          ["completed", new Map<unknown, unknown>([["version", "3"]])]
-        ])],
-        ["indexed_state_meta", "version"]
-      ])
-    ]);
-    const client = new FerricStoreClient(executor);
-
-    await client.installPolicy("order", { indexedStateMeta: "version" });
-    expect(executor.calls[0]).toEqual(["FLOW.POLICY.SET", "order", "INDEXED_STATE_META", "version"]);
-
-    await expect(client.get("flow-1", { partitionKey: "tenant-a" })).resolves.toMatchObject({
-      indexedStateMeta: "version",
-      stateMeta: {
-        accept: { version: "1" },
-        completed: { version: "3" }
+  it("normalizes non-finite auto-batch and backpressure controls", () => {
+    const client = new FerricStoreClient(new FakeExecutor(), {
+      autoBatch: {
+        maxCommands: Number.NaN,
+        maxDelayMs: Number.NaN
+      },
+      backpressure: {
+        baseDelayMs: Number.NaN,
+        jitterPct: Number.NaN,
+        maxDelayMs: Number.NaN,
+        maxRetries: Number.NaN
       }
     });
+
+    expect(client.backpressure).toEqual({
+      baseDelayMs: 25,
+      jitterPct: 20,
+      maxDelayMs: 1_000,
+      maxRetries: 8
+    });
+    expect(
+      (client.executor as unknown as {
+        options: { maxCommands: number; maxDelayMs: number };
+      }).options
+    ).toMatchObject({ maxCommands: 512, maxDelayMs: 0 });
   });
 
-  it("builds state-scoped Flow mode policies without making FIFO the default", async () => {
-    const executor = new FakeExecutor();
-    const client = new FerricStoreClient(executor);
-
-    await client.installPolicy("order", {
-      states: {
-        audit: { maxRetries: 2 },
-        queued: {
-          mode: "fifo",
-          retry: { maxRetries: 1, exhaustedTo: "failed" }
-        },
-        ready: { mode: "parallel" }
-      }
-    });
-    expect(executor.calls[0]).toEqual([
-      "FLOW.POLICY.SET",
-      "order",
-      "STATE",
-      "audit",
-      "MAX_RETRIES",
-      2,
-      "STATE",
-      "queued",
-      "MODE",
-      "FIFO",
-      "MAX_RETRIES",
-      1,
-      "EXHAUSTED_TO",
-      "failed",
-      "STATE",
-      "ready",
-      "MODE",
-      "PARALLEL"
-    ]);
-
-    await client.installPolicy("order", {
-      mode: "fifo",
-      retry: { maxRetries: 1, exhaustedTo: "failed" },
-      state: "queued"
-    });
-    expect(executor.calls[1]).toEqual([
-      "FLOW.POLICY.SET",
-      "order",
-      "STATE",
-      "queued",
-      "MODE",
-      "FIFO",
-      "MAX_RETRIES",
-      1,
-      "EXHAUSTED_TO",
-      "failed"
-    ]);
-
-    await client.installPolicy("order", { mode: "parallel", state: "ready" });
-    expect(executor.calls[2]).toEqual([
-      "FLOW.POLICY.SET",
-      "order",
-      "STATE",
-      "ready",
-      "MODE",
-      "PARALLEL"
-    ]);
-
-    await client.installPolicy("order", { state: "audit" });
-    expect(executor.calls[3]).toEqual(["FLOW.POLICY.SET", "order", "STATE", "audit"]);
-  });
-
-  it("builds FIFO-compatible partitioned create, transition, and partition-list claims", async () => {
-    const lease = Buffer.from("lease");
-    const executor = new FakeExecutor([
-      Buffer.from("OK"),
-      Buffer.from("OK"),
-      [["order-1", "tenant-a", lease, 17, "queued"]]
-    ]);
-    const client = new FerricStoreClient(executor);
-
-    await client.create("order-1", {
-      nowMs: 100,
-      partitionKey: "tenant-a",
-      state: "queued",
-      type: "order"
-    });
-    expect(executor.calls[0]).toEqual([
-      "FLOW.CREATE",
-      "order-1",
-      "TYPE",
-      "order",
-      "STATE",
-      "queued",
-      "NOW",
-      100,
-      "PARTITION",
-      "tenant-a",
-      "RUN_AT",
-      100
-    ]);
-
-    await client.transition("order-1", {
-      fencingToken: 17,
-      fromState: "running",
-      leaseToken: lease,
-      nowMs: 110,
-      partitionKey: "tenant-a",
-      toState: "ready"
-    });
-    expect(executor.calls[1]).toEqual([
-      "FLOW.TRANSITION",
-      "order-1",
-      "running",
-      "ready",
-      "LEASE_TOKEN",
-      lease,
-      "FENCING",
-      17,
-      "NOW",
-      110,
-      "PARTITION",
-      "tenant-a",
-      "RUN_AT",
-      110
-    ]);
-
-    const jobs = await client.claimJobs("order", {
-      includeState: true,
-      partitionKeys: ["tenant-a", "tenant-b"],
-      state: "queued",
-      worker: "worker-1"
-    });
-    expect(executor.calls[2]).toEqual([
-      "FLOW.CLAIM_DUE",
-      "order",
-      "STATE",
-      "queued",
-      "WORKER",
-      "worker-1",
-      "LEASE_MS",
-      30_000,
-      "LIMIT",
-      100,
-      "PARTITIONS",
-      2,
-      "tenant-a",
-      "tenant-b",
-      "RETURN",
-      "JOBS_COMPACT_STATE"
-    ]);
-    expect(jobs).toEqual([
-      {
-        fencingToken: 17,
-        id: "order-1",
-        leaseToken: lease,
-        partitionKey: "tenant-a",
-        runState: "queued",
-        state: "running",
-        type: ""
-      }
-    ]);
-  });
-
-  it("builds FLOW.SEARCH with attributes and state metadata", async () => {
-    const executor = new FakeExecutor([
-      [
-        new Map<unknown, unknown>([
-          ["id", "flow-1"],
-          ["type", "order"],
-          ["state", "queued"],
-          ["partition_key", "tenant-a"],
-          ["version", 1]
-        ])
-      ]
-    ]);
-    const client = new FerricStoreClient(executor);
-
-    const records = await client.search("order", {
-      attributes: { tenant: "acme" },
-      consistentProjection: true,
-      count: 10,
-      state: "queued",
-      stateMeta: { version: 1 },
-      terminalOnly: true
-    });
-
-    expect(records[0]).toMatchObject({ id: "flow-1", partitionKey: "tenant-a" });
-    expect(executor.calls[0]).toEqual([
-      "FLOW.SEARCH",
-      "order",
-      "COUNT",
-      10,
-      "STATE",
-      "queued",
-      "TERMINAL_ONLY",
-      "true",
-      "CONSISTENT_PROJECTION",
-      "true",
-      "ATTRIBUTE",
-      "tenant",
-      "acme",
-      "STATE_META",
-      "queued",
-      { version: 1 }
-    ]);
-
-    await expect(client.search("order", { stateMeta: { version: 1 } })).rejects.toThrow(
-      "search stateMeta filters require state"
-    );
-  });
-
-  it("decodes claimed flow records from wire maps", async () => {
-    const executor = new FakeExecutor([
-      [
-        new Map<unknown, unknown>([
-          ["id", "order-1"],
-          ["type", "order"],
-          ["state", "created"],
-          ["partition_key", "tenant-a"],
-          ["lease_token", Buffer.from("lease")],
-          ["fencing_token", 7],
-          ["version", 2],
-          ["payload", Buffer.from('{"amount":42}')]
-        ])
-      ]
-    ]);
-    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
-
-    const records = await client.claimDue("order", {
-      leaseMs: 30_000,
-      payload: true,
-      state: "created",
-      worker: "worker-1"
-    });
-
-    expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({
-      fencingToken: 7,
-      id: "order-1",
-      partitionKey: "tenant-a",
-      payload: { amount: 42 },
-      state: "created",
-      type: "order",
-      version: 2
-    });
-  });
-
-  it("maps common FerricStore server errors", async () => {
-    const alreadyExists = new Error("ERR flow already exists");
-    alreadyExists.name = "ResponseError";
-    const staleLease = new Error("ERR stale flow lease");
-    staleLease.name = "ResponseError";
-    const overloaded = new Error("BUSY FerricStore overloaded: retry_after_ms=25 reason=rss_pressure");
-    overloaded.name = "ResponseError";
-    const executor = new FakeExecutor([alreadyExists, staleLease, overloaded]);
-    const client = new FerricStoreClient(executor);
-
-    await expect(client.command("FLOW.CREATE", "f1")).rejects.toBeInstanceOf(FlowAlreadyExistsError);
-    await expect(client.command("FLOW.COMPLETE", "f1")).rejects.toBeInstanceOf(StaleLeaseError);
-    await expect(client.command("FLOW.CREATE", "f2")).rejects.toMatchObject({
-      constructor: OverloadedError,
-      reason: "rss_pressure",
-      retryAfterMs: 25
-    });
-  });
-
-  it("builds native admin and cluster helper commands", async () => {
-    const executor = new FakeExecutor([
-      Buffer.from("OK"),
-      Buffer.from("OK"),
-      Buffer.from("OK"),
-      Buffer.from("OK"),
-      Buffer.from("OK"),
-      Buffer.from("OK"),
-      ["leader", "node-a"],
-      "shards: 1",
-      "hot: 1",
-      Buffer.from("OK"),
-      ["status", "ok"]
-    ]);
-    const client = new FerricStoreClient(executor);
-
-    await client.clusterJoin("node-b", { replace: true });
-    await client.clusterLeave();
-    await client.clusterFailover(0, "node-b");
-    await client.clusterPromote("node-b");
-    await client.clusterDemote("node-a");
-    await client.ferricstoreConfig("GET", "*");
-    await client.clusterRole();
-    await client.ferricstoreMetrics();
-    await client.ferricstoreHotness();
-    await client.ferricstoreBlobgc("RUN");
-    await client.ferricstoreDoctor("CHECK");
-
-    expect(executor.calls).toEqual([
-      ["CLUSTER.JOIN", "node-b", "REPLACE"],
-      ["CLUSTER.LEAVE"],
-      ["CLUSTER.FAILOVER", 0, "node-b"],
-      ["CLUSTER.PROMOTE", "node-b"],
-      ["CLUSTER.DEMOTE", "node-a"],
-      ["FERRICSTORE.CONFIG", "GET", "*"],
-      ["CLUSTER.ROLE"],
-      ["FERRICSTORE.METRICS"],
-      ["FERRICSTORE.HOTNESS"],
-      ["FERRICSTORE.BLOBGC", "RUN"],
-      ["FERRICSTORE.DOCTOR", "CHECK"]
-    ]);
-  });
-
-  it("builds control-plane helper commands and normalizes responses", async () => {
-    const executor = new FakeExecutor([
-      new Map<unknown, unknown>([["sdk", true]]),
-      Buffer.from("OK"),
-      new Map<unknown, unknown>([["prefix", Buffer.from("tenant:")]]),
-      [Buffer.from("tenant:")],
-      Buffer.from("OK"),
-      Buffer.from("OK"),
-      new Map<unknown, unknown>([["keys", 10]]),
-      new Map<unknown, unknown>([["keys", 1]]),
-      new Map<unknown, unknown>([["nodes", 1]]),
-      new Map<unknown, unknown>([["keys", 1]]),
-      [[Buffer.from("id"), Buffer.from("flow-1")]],
-      [[Buffer.from("event"), Buffer.from("created")]]
-    ]);
-    const client = new FerricStoreClient(executor);
-
-    await expect(client.capabilities()).resolves.toEqual({ sdk: true });
-    await expect(client.ensureNamespace("tenant:", { durability: "hot" })).resolves.toBe("OK");
-    await expect(client.getNamespace("tenant:")).resolves.toEqual({ prefix: "tenant:" });
-    await expect(client.listNamespaces()).resolves.toEqual(["tenant:"]);
-    await expect(client.deleteNamespace("tenant:")).resolves.toBe("OK");
-    await expect(client.setQuota("tenant:", { keys: 10 })).resolves.toBe("OK");
-    await expect(client.getQuota("tenant:")).resolves.toEqual({ keys: 10 });
-    await expect(client.quotaUsage("tenant:")).resolves.toEqual({ keys: 1 });
-    await expect(client.clusterInfo()).resolves.toEqual({ nodes: 1 });
-    await expect(client.namespaceUsage("tenant:")).resolves.toEqual({ keys: 1 });
-    await expect(client.flowQuery({ type: "order" })).resolves.toEqual([["id", "flow-1"]]);
-    await expect(client.flowHistory("flow-1", { partition: "tenant:" })).resolves.toEqual([["event", "created"]]);
-
-    expect(executor.calls).toEqual([
-      ["FERRICSTORE.CAPABILITIES"],
-      ["FERRICSTORE.NAMESPACE", "ENSURE", "tenant:", "DURABILITY", "hot"],
-      ["FERRICSTORE.NAMESPACE", "GET", "tenant:"],
-      ["FERRICSTORE.NAMESPACE", "LIST"],
-      ["FERRICSTORE.NAMESPACE", "DELETE", "tenant:"],
-      ["FERRICSTORE.QUOTA", "SET", "tenant:", "KEYS", 10],
-      ["FERRICSTORE.QUOTA", "GET", "tenant:"],
-      ["FERRICSTORE.QUOTA", "USAGE", "tenant:"],
-      ["FERRICSTORE.TELEMETRY", "CLUSTER_INFO"],
-      ["FERRICSTORE.TELEMETRY", "NAMESPACE_USAGE", "tenant:"],
-      ["FERRICSTORE.TELEMETRY", "FLOW_QUERY", "TYPE", "order"],
-      ["FERRICSTORE.TELEMETRY", "FLOW_HISTORY", "flow-1", "PARTITION", "tenant:"]
-    ]);
-  });
-
-  it("builds invocation helper commands and carries request context", async () => {
-    const executor = new FakeExecutor([
-      new Map<unknown, unknown>([["name", Buffer.from("send-email")]]),
-      new Map<unknown, unknown>([["name", Buffer.from("send-email")]]),
-      [new Map<unknown, unknown>([["name", Buffer.from("send-email")]])],
-      new Map<unknown, unknown>([["invocation_id", Buffer.from("inv-1")]]),
-      new Map<unknown, unknown>([["id", Buffer.from("inv-1")]]),
-      [new Map<unknown, unknown>([["scope", Buffer.from("tenant:acme")]])]
-    ]);
-    const client = new FerricStoreClient(executor);
-
-    await expect(client.invocationDefinitionPut({
-      acl: { scopeRequired: true },
-      name: "send-email"
-    })).resolves.toEqual({ name: "send-email" });
-    await expect(client.invocationDefinitionGet("send-email")).resolves.toEqual({ name: "send-email" });
-    await expect(client.invocationDefinitionList()).resolves.toEqual([{ name: "send-email" }]);
-    await expect(client.invocationCreate("send-email", { tenant: "acme" }, {
-      context: { subject: "user-1" },
-      idempotencyKey: "idem-1",
-      requestContext: {
-        scopes: ["invocation:create:*"],
-        subject: "proxy",
-        tenant: "acme"
-      }
-    })).resolves.toEqual({ invocation_id: "inv-1" });
-    await expect(client.invocationGet("inv-1")).resolves.toEqual({ id: "inv-1" });
-    await expect(client.invocationPartitionList("send-email", { scope: "tenant:acme" })).resolves.toEqual([
-      { scope: "tenant:acme" }
-    ]);
-
-    const definitionArg = executor.calls[0]?.[1];
-    expect(typeof definitionArg).toBe("string");
-    expect(JSON.parse(definitionArg as string)).toEqual({
-      acl: { scopeRequired: true },
-      name: "send-email"
-    });
-    expect(executor.calls[3]?.slice(0, 2)).toEqual(["INVOCATION.CREATE", "send-email"]);
-    const createArg = executor.calls[3]?.[2];
-    expect(typeof createArg).toBe("string");
-    expect(JSON.parse(createArg as string)).toEqual({
-      attrs: { tenant: "acme" },
-      context: { subject: "user-1" },
-      idempotency_key: "idem-1"
-    });
-    expect(executor.calls[3]?.slice(3)).toEqual([
-      "REQUEST_CONTEXT",
-      {
-        scopes: ["invocation:create:*"],
-        subject: "proxy",
-        tenant: "acme"
-      }
-    ]);
-    expect(executor.calls[5]).toEqual([
-      "INVOCATION.PARTITION.LIST",
-      "send-email",
-      "SCOPE",
-      "tenant:acme"
-    ]);
-  });
-
-  it("builds server helper commands", async () => {
-    const executor = new FakeExecutor([
-      Buffer.from("PONG"),
-      "server info",
-      Buffer.from("OK"),
-      ["GET", "SET"],
-      2,
-      Buffer.from("OK"),
-      "client info",
-      3,
-      "user-1"
-    ]);
-    const client = new FerricStoreClient(executor);
-
-    await client.ping();
-    await client.serverInfo("server");
-    await client.configSet("maxmemory", "0");
-    await client.commandList();
-    await client.clientId();
-    await client.clientTracking("ON", { bcast: true, prefixes: ["user:"], redirect: 7 });
-    await client.clientInfo();
-    await client.publish("events", "hello");
-    await client.aclWhoami();
-
-    expect(executor.calls).toEqual([
-      ["PING"],
-      ["INFO", "server"],
-      ["CONFIG", "SET", "maxmemory", "0"],
-      ["COMMAND", "LIST"],
-      ["CLIENT", "ID"],
-      ["CLIENT", "TRACKING", "ON", "REDIRECT", 7, "PREFIX", "user:", "BCAST"],
-      ["CLIENT", "INFO"],
-      ["PUBLISH", "events", "hello"],
-      ["ACL", "WHOAMI"]
-    ]);
-  });
 });

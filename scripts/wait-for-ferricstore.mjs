@@ -1,12 +1,13 @@
 import net from "node:net";
+import nativeProtocol from "../src/native-protocol-manifest.json" with { type: "json" };
 
-const MAGIC = "FSNP";
-const REQUEST_VERSION = 0x01;
-const RESPONSE_VERSION = 0x81;
-const HEADER_SIZE = 24;
+const MAGIC = nativeProtocol.magic;
+const REQUEST_VERSION = nativeProtocol.requestVersion;
+const RESPONSE_VERSION = nativeProtocol.responseVersion;
+const HEADER_SIZE = nativeProtocol.headerSize;
 const OP_STARTUP = 0x000c;
 const OP_PING = 0x0003;
-const STATUS_OK = 0;
+const STATUS_OK = nativeProtocol.statusOk;
 
 const host = process.env.FERRICSTORE_HOST ?? "127.0.0.1";
 const port = Number(process.env.FERRICSTORE_PORT ?? "6388");

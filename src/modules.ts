@@ -1,14 +1,29 @@
-import { okResponse, type CommandArgument } from "./internal.js";
-import type { StoreCommandClient } from "./store.js";
+import { binaryBooleanResponse, integerReply, okResponse, type CommandArgument } from "./internal.js";
+import {
+  array,
+  arrayOrRest,
+  binaryInteger,
+  commandArgs,
+  concatArgs,
+  decode,
+  denseArray,
+  encode,
+  encodedArgs,
+  encodedEntryArgs,
+  mapArray,
+  mapArrayResponse,
+  ownOption,
+  requireNonEmpty,
+  string
+} from "./store-utilities.js";
+import type { IntegerReply, StoreCommandClient } from "./store.js";
 
-export interface TopKReserveOptions {
-  width?: number;
-  depth?: number;
-  decay?: number;
-}
+export type TopKReserveOptions =
+  | { width?: never; depth?: never; decay?: never }
+  | { width: number; depth: number; decay: number };
 
 export interface CountMinMergeOptions {
-  weights?: number[];
+  weights?: readonly (number | bigint)[];
 }
 
 export interface TDigestCreateOptions {
@@ -19,11 +34,6 @@ export interface TDigestMergeOptions extends TDigestCreateOptions {
   override?: boolean;
 }
 
-export interface JsonSetOptions {
-  nx?: boolean;
-  xx?: boolean;
-}
-
 export class BloomFilterStore {
   constructor(private readonly client: StoreCommandClient) {}
 
@@ -32,27 +42,49 @@ export class BloomFilterStore {
   }
 
   async add(key: string, element: unknown): Promise<boolean> {
-    return number(await this.client.command("BF.ADD", key, encode(this.client, element))) === 1;
+    return binaryBooleanResponse(await this.client.command("BF.ADD", key, encode(this.client.codec, element)));
   }
 
-  async madd(key: string, ...elements: unknown[]): Promise<number[]> {
-    return array(await this.client.command("BF.MADD", key, ...elements.map((item) => encode(this.client, item)))).map(number);
+  madd(key: string, element: unknown, ...elements: unknown[]): Promise<number[]>;
+  madd(key: string, ...elements: unknown[]): Promise<number[]> {
+    return this.maddMany(key, elements);
+  }
+
+  async maddMany(key: string, elements: readonly unknown[]): Promise<number[]> {
+    const elementCount = elements.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, encodedArgs(["BF.MADD", key], this.client.codec, elements)),
+      elementCount,
+      "BF.MADD",
+      binaryInteger
+    );
   }
 
   async exists(key: string, element: unknown): Promise<boolean> {
-    return number(await this.client.command("BF.EXISTS", key, encode(this.client, element))) === 1;
+    return binaryBooleanResponse(await this.client.command("BF.EXISTS", key, encode(this.client.codec, element)));
   }
 
-  async mexists(key: string, ...elements: unknown[]): Promise<number[]> {
-    return array(await this.client.command("BF.MEXISTS", key, ...elements.map((item) => encode(this.client, item)))).map(number);
+  mexists(key: string, element: unknown, ...elements: unknown[]): Promise<number[]>;
+  mexists(key: string, ...elements: unknown[]): Promise<number[]> {
+    return this.mexistsMany(key, elements);
   }
 
-  async card(key: string): Promise<number> {
-    return number(await this.client.command("BF.CARD", key));
+  async mexistsMany(key: string, elements: readonly unknown[]): Promise<number[]> {
+    const elementCount = elements.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, encodedArgs(["BF.MEXISTS", key], this.client.codec, elements)),
+      elementCount,
+      "BF.MEXISTS",
+      binaryInteger
+    );
+  }
+
+  async card(key: string): Promise<IntegerReply> {
+    return integerReply(await this.client.command("BF.CARD", key));
   }
 
   async info(key: string): Promise<unknown[]> {
-    return array(await this.client.command("BF.INFO", key));
+    return denseArray(await this.client.command("BF.INFO", key), "BF.INFO");
   }
 }
 
@@ -64,31 +96,42 @@ export class CuckooFilterStore {
   }
 
   async add(key: string, element: unknown): Promise<boolean> {
-    return number(await this.client.command("CF.ADD", key, encode(this.client, element))) === 1;
+    return binaryBooleanResponse(await this.client.command("CF.ADD", key, encode(this.client.codec, element)));
   }
 
   async addnx(key: string, element: unknown): Promise<boolean> {
-    return number(await this.client.command("CF.ADDNX", key, encode(this.client, element))) === 1;
+    return binaryBooleanResponse(await this.client.command("CF.ADDNX", key, encode(this.client.codec, element)));
   }
 
   async del(key: string, element: unknown): Promise<boolean> {
-    return number(await this.client.command("CF.DEL", key, encode(this.client, element))) === 1;
+    return binaryBooleanResponse(await this.client.command("CF.DEL", key, encode(this.client.codec, element)));
   }
 
   async exists(key: string, element: unknown): Promise<boolean> {
-    return number(await this.client.command("CF.EXISTS", key, encode(this.client, element))) === 1;
+    return binaryBooleanResponse(await this.client.command("CF.EXISTS", key, encode(this.client.codec, element)));
   }
 
-  async mexists(key: string, ...elements: unknown[]): Promise<number[]> {
-    return array(await this.client.command("CF.MEXISTS", key, ...elements.map((item) => encode(this.client, item)))).map(number);
+  mexists(key: string, element: unknown, ...elements: unknown[]): Promise<number[]>;
+  mexists(key: string, ...elements: unknown[]): Promise<number[]> {
+    return this.mexistsMany(key, elements);
   }
 
-  async count(key: string, element: unknown): Promise<number> {
-    return number(await this.client.command("CF.COUNT", key, encode(this.client, element)));
+  async mexistsMany(key: string, elements: readonly unknown[]): Promise<number[]> {
+    const elementCount = elements.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, encodedArgs(["CF.MEXISTS", key], this.client.codec, elements)),
+      elementCount,
+      "CF.MEXISTS",
+      binaryInteger
+    );
+  }
+
+  async count(key: string, element: unknown): Promise<IntegerReply> {
+    return integerReply(await this.client.command("CF.COUNT", key, encode(this.client.codec, element)));
   }
 
   async info(key: string): Promise<unknown[]> {
-    return array(await this.client.command("CF.INFO", key));
+    return denseArray(await this.client.command("CF.INFO", key), "CF.INFO");
   }
 }
 
@@ -103,24 +146,45 @@ export class CountMinSketchStore {
     return okResponse(await this.client.command("CMS.INITBYPROB", key, error, probability));
   }
 
-  async incrBy(key: string, entries: [unknown, number][]): Promise<number[]> {
-    return array(await this.client.command("CMS.INCRBY", key, ...flattenEntries(this.client, entries))).map(number);
+  async incrBy(key: string, entries: [unknown, number | bigint][]): Promise<IntegerReply[]> {
+    const entryCount = entries.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, encodedEntryArgs(["CMS.INCRBY", key], this.client.codec, entries)),
+      entryCount,
+      "CMS.INCRBY",
+      integerReply
+    );
   }
 
-  async query(key: string, ...items: unknown[]): Promise<number[]> {
-    return array(await this.client.command("CMS.QUERY", key, ...items.map((item) => encode(this.client, item)))).map(number);
+  query(key: string, item: unknown, ...items: unknown[]): Promise<IntegerReply[]>;
+  query(key: string, ...items: unknown[]): Promise<IntegerReply[]> {
+    return this.queryMany(key, items);
   }
 
-  async merge(destination: string, sources: string[], options: CountMinMergeOptions = {}): Promise<boolean> {
-    const args: CommandArgument[] = ["CMS.MERGE", destination, sources.length, ...sources];
-    if (options.weights != null) {
-      args.push("WEIGHTS", ...options.weights);
+  async queryMany(key: string, items: readonly unknown[]): Promise<IntegerReply[]> {
+    const itemCount = items.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, encodedArgs(["CMS.QUERY", key], this.client.codec, items)),
+      itemCount,
+      "CMS.QUERY",
+      integerReply
+    );
+  }
+
+  async merge(destination: string, sources: readonly string[], options: CountMinMergeOptions = {}): Promise<boolean> {
+    if (sources.length === 0) throw new TypeError("CMS.MERGE requires at least one source");
+    const weights = ownOption(options, "weights");
+    if (weights != null && weights.length !== sources.length) {
+      throw new TypeError("CMS.MERGE weights must match the source count");
     }
-    return okResponse(await this.client.command(...args));
+    const args = weights == null
+      ? concatArgs(["CMS.MERGE", destination, sources.length], sources)
+      : concatArgs(["CMS.MERGE", destination, sources.length], sources, ["WEIGHTS"], weights);
+    return okResponse(await commandArgs(this.client, args));
   }
 
   async info(key: string): Promise<unknown[]> {
-    return array(await this.client.command("CMS.INFO", key));
+    return denseArray(await this.client.command("CMS.INFO", key), "CMS.INFO");
   }
 }
 
@@ -129,42 +193,89 @@ export class TopKStore {
 
   async reserve(key: string, k: number, options: TopKReserveOptions = {}): Promise<boolean> {
     const args: CommandArgument[] = ["TOPK.RESERVE", key, k];
-    if (options.width != null) {
-      args.push(options.width);
-      if (options.depth != null) {
-        args.push(options.depth);
-        if (options.decay != null) {
-          args.push(options.decay);
-        }
-      }
+    const width = ownOption(options, "width");
+    const depth = ownOption(options, "depth");
+    const decay = ownOption(options, "decay");
+    const tuningCount = [width, depth, decay]
+      .filter((value) => value != null)
+      .length;
+    if (tuningCount !== 0 && tuningCount !== 3) {
+      throw new TypeError("TOPK.RESERVE width, depth, and decay must be provided together");
     }
-    return okResponse(await this.client.command(...args));
+    if (tuningCount === 3) {
+      args.push(width, depth, decay);
+    }
+    return okResponse(await commandArgs(this.client, args));
   }
 
-  async add<T = unknown>(key: string, ...elements: unknown[]): Promise<(T | null)[]> {
-    return array(await this.client.command("TOPK.ADD", key, ...elements.map((item) => encode(this.client, item)))).map((item) =>
-      decode<T>(this.client, item)
+  add<T = unknown>(key: string, element: unknown, ...elements: unknown[]): Promise<(T | null)[]>;
+  add<T = unknown>(key: string, ...elements: unknown[]): Promise<(T | null)[]> {
+    return this.addMany<T>(key, elements);
+  }
+
+  async addMany<T = unknown>(key: string, elements: readonly unknown[]): Promise<(T | null)[]> {
+    const elementCount = elements.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, encodedArgs(["TOPK.ADD", key], this.client.codec, elements)),
+      elementCount,
+      "TOPK.ADD",
+      (item) => decode<T>(this.client.codec, item)
     );
   }
 
-  async incrBy<T = unknown>(key: string, entries: [unknown, number][]): Promise<(T | null)[]> {
-    return array(await this.client.command("TOPK.INCRBY", key, ...flattenEntries(this.client, entries))).map((item) =>
-      decode<T>(this.client, item)
+  async incrBy<T = unknown>(key: string, entries: [unknown, number | bigint][]): Promise<(T | null)[]> {
+    const entryCount = entries.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, encodedEntryArgs(["TOPK.INCRBY", key], this.client.codec, entries)),
+      entryCount,
+      "TOPK.INCRBY",
+      (item) => decode<T>(this.client.codec, item)
     );
   }
 
-  async query(key: string, ...elements: unknown[]): Promise<number[]> {
-    return array(await this.client.command("TOPK.QUERY", key, ...elements.map((item) => encode(this.client, item)))).map(number);
+  query(key: string, element: unknown, ...elements: unknown[]): Promise<number[]>;
+  query(key: string, ...elements: unknown[]): Promise<number[]> {
+    return this.queryMany(key, elements);
   }
 
-  async list<T = unknown>(key: string, options: { withCount?: boolean } = {}): Promise<(T | number | null)[]> {
-    return array(await this.client.command("TOPK.LIST", key, ...(options.withCount === true ? ["WITHCOUNT"] : []))).map((item, index) =>
-      options.withCount === true && index % 2 === 1 ? number(item) : decode<T>(this.client, item)
+  async queryMany(key: string, elements: readonly unknown[]): Promise<number[]> {
+    const elementCount = elements.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, encodedArgs(["TOPK.QUERY", key], this.client.codec, elements)),
+      elementCount,
+      "TOPK.QUERY",
+      binaryInteger
+    );
+  }
+
+  count(key: string, element: unknown, ...elements: unknown[]): Promise<IntegerReply[]>;
+  count(key: string, ...elements: unknown[]): Promise<IntegerReply[]> {
+    return this.countMany(key, elements);
+  }
+
+  async countMany(key: string, elements: readonly unknown[]): Promise<IntegerReply[]> {
+    const elementCount = elements.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, encodedArgs(["TOPK.COUNT", key], this.client.codec, elements)),
+      elementCount,
+      "TOPK.COUNT",
+      integerReply
+    );
+  }
+
+  async list<T = unknown>(key: string, options: { withCount?: boolean } = {}): Promise<(T | IntegerReply | null)[]> {
+    const withCount = ownOption(options, "withCount") === true;
+    const items = array(await this.client.command("TOPK.LIST", key, ...(withCount ? ["WITHCOUNT"] : [])));
+    if (withCount && items.length % 2 !== 0) {
+      throw new TypeError("TOPK.LIST WITHCOUNT must return item/count pairs");
+    }
+    return mapArray(items, "TOPK.LIST", (item, index) =>
+      withCount && index % 2 === 1 ? integerReply(item) : decode<T>(this.client.codec, item)
     );
   }
 
   async info(key: string): Promise<unknown[]> {
-    return array(await this.client.command("TOPK.INFO", key));
+    return denseArray(await this.client.command("TOPK.INFO", key), "TOPK.INFO");
   }
 }
 
@@ -175,36 +286,96 @@ export class TDigestStore {
     return okResponse(await this.client.command("TDIGEST.CREATE", key, ...compressionOptions(options)));
   }
 
-  async add(key: string, ...values: number[]): Promise<boolean> {
-    return okResponse(await this.client.command("TDIGEST.ADD", key, ...values));
+  add(key: string, values: readonly number[]): Promise<boolean>;
+  add(key: string, value: number, ...values: number[]): Promise<boolean>;
+  async add(key: string, ...valuesOrArray: (number | readonly number[])[]): Promise<boolean> {
+    const values = requireNonEmpty(arrayOrRest<number>(valuesOrArray), "TDIGEST.ADD", "value");
+    return okResponse(await commandArgs(this.client, concatArgs(
+      ["TDIGEST.ADD", key],
+      values
+    )));
   }
 
   async reset(key: string): Promise<boolean> {
     return okResponse(await this.client.command("TDIGEST.RESET", key));
   }
 
-  async quantile(key: string, ...quantiles: number[]): Promise<string[]> {
-    return array(await this.client.command("TDIGEST.QUANTILE", key, ...quantiles)).map(string);
+  quantile(key: string, quantiles: readonly number[]): Promise<string[]>;
+  quantile(key: string, quantile: number, ...quantiles: number[]): Promise<string[]>;
+  async quantile(key: string, ...quantilesOrArray: (number | readonly number[])[]): Promise<string[]> {
+    const quantiles = requireNonEmpty(arrayOrRest<number>(quantilesOrArray), "TDIGEST.QUANTILE", "quantile");
+    const quantileCount = quantiles.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, concatArgs(["TDIGEST.QUANTILE", key], quantiles)),
+      quantileCount,
+      "TDIGEST.QUANTILE",
+      string
+    );
   }
 
-  async cdf(key: string, ...values: number[]): Promise<string[]> {
-    return array(await this.client.command("TDIGEST.CDF", key, ...values)).map(string);
+  cdf(key: string, values: readonly number[]): Promise<string[]>;
+  cdf(key: string, value: number, ...values: number[]): Promise<string[]>;
+  async cdf(key: string, ...valuesOrArray: (number | readonly number[])[]): Promise<string[]> {
+    const values = requireNonEmpty(arrayOrRest<number>(valuesOrArray), "TDIGEST.CDF", "value");
+    const valueCount = values.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, concatArgs(["TDIGEST.CDF", key], values)),
+      valueCount,
+      "TDIGEST.CDF",
+      string
+    );
   }
 
-  async rank(key: string, ...values: number[]): Promise<number[]> {
-    return array(await this.client.command("TDIGEST.RANK", key, ...values)).map(number);
+  rank(key: string, values: readonly number[]): Promise<IntegerReply[]>;
+  rank(key: string, value: number, ...values: number[]): Promise<IntegerReply[]>;
+  async rank(key: string, ...valuesOrArray: (number | readonly number[])[]): Promise<IntegerReply[]> {
+    const values = requireNonEmpty(arrayOrRest<number>(valuesOrArray), "TDIGEST.RANK", "value");
+    const valueCount = values.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, concatArgs(["TDIGEST.RANK", key], values)),
+      valueCount,
+      "TDIGEST.RANK",
+      integerReply
+    );
   }
 
-  async revrank(key: string, ...values: number[]): Promise<number[]> {
-    return array(await this.client.command("TDIGEST.REVRANK", key, ...values)).map(number);
+  revrank(key: string, values: readonly number[]): Promise<IntegerReply[]>;
+  revrank(key: string, value: number, ...values: number[]): Promise<IntegerReply[]>;
+  async revrank(key: string, ...valuesOrArray: (number | readonly number[])[]): Promise<IntegerReply[]> {
+    const values = requireNonEmpty(arrayOrRest<number>(valuesOrArray), "TDIGEST.REVRANK", "value");
+    const valueCount = values.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, concatArgs(["TDIGEST.REVRANK", key], values)),
+      valueCount,
+      "TDIGEST.REVRANK",
+      integerReply
+    );
   }
 
-  async byrank(key: string, ...ranks: number[]): Promise<string[]> {
-    return array(await this.client.command("TDIGEST.BYRANK", key, ...ranks)).map(string);
+  byrank(key: string, ranks: readonly number[]): Promise<string[]>;
+  byrank(key: string, rank: number, ...ranks: number[]): Promise<string[]>;
+  async byrank(key: string, ...ranksOrArray: (number | readonly number[])[]): Promise<string[]> {
+    const ranks = requireNonEmpty(arrayOrRest<number>(ranksOrArray), "TDIGEST.BYRANK", "rank");
+    const rankCount = ranks.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, concatArgs(["TDIGEST.BYRANK", key], ranks)),
+      rankCount,
+      "TDIGEST.BYRANK",
+      string
+    );
   }
 
-  async byrevrank(key: string, ...ranks: number[]): Promise<string[]> {
-    return array(await this.client.command("TDIGEST.BYREVRANK", key, ...ranks)).map(string);
+  byrevrank(key: string, ranks: readonly number[]): Promise<string[]>;
+  byrevrank(key: string, rank: number, ...ranks: number[]): Promise<string[]>;
+  async byrevrank(key: string, ...ranksOrArray: (number | readonly number[])[]): Promise<string[]> {
+    const ranks = requireNonEmpty(arrayOrRest<number>(ranksOrArray), "TDIGEST.BYREVRANK", "rank");
+    const rankCount = ranks.length;
+    return mapArrayResponse(
+      await commandArgs(this.client, concatArgs(["TDIGEST.BYREVRANK", key], ranks)),
+      rankCount,
+      "TDIGEST.BYREVRANK",
+      string
+    );
   }
 
   async trimmedMean(key: string, low: number, high: number): Promise<string> {
@@ -220,126 +391,24 @@ export class TDigestStore {
   }
 
   async info(key: string): Promise<unknown[]> {
-    return array(await this.client.command("TDIGEST.INFO", key));
+    return denseArray(await this.client.command("TDIGEST.INFO", key), "TDIGEST.INFO");
   }
 
   async merge(destination: string, sources: string[], options: TDigestMergeOptions = {}): Promise<boolean> {
+    requireNonEmpty(sources, "TDIGEST.MERGE", "source");
+    const override = ownOption(options, "override") === true;
     return okResponse(
-      await this.client.command(
-        "TDIGEST.MERGE",
-        destination,
-        sources.length,
-        ...sources,
-        ...compressionOptions(options),
-        ...(options.override === true ? ["OVERRIDE"] : [])
-      )
+      await commandArgs(this.client, concatArgs(
+        ["TDIGEST.MERGE", destination, sources.length],
+        sources,
+        compressionOptions(options),
+        override ? ["OVERRIDE"] : []
+      ))
     );
   }
-}
-
-export class JsonStore {
-  constructor(private readonly client: StoreCommandClient) {}
-
-  async set(key: string, path: string, value: unknown, options: JsonSetOptions = {}): Promise<boolean> {
-    const response = await this.client.command(
-      "JSON.SET",
-      key,
-      path,
-      JSON.stringify(value),
-      ...(options.nx === true ? ["NX"] : options.xx === true ? ["XX"] : [])
-    );
-    return okResponse(response);
-  }
-
-  async get<T = unknown>(key: string, paths: string | string[] = "$"): Promise<T | null> {
-    const response = await this.client.command("JSON.GET", key, ...toArray(paths));
-    return parseJson<T>(response);
-  }
-
-  async del(key: string, path?: string): Promise<number> {
-    return number(await this.client.command("JSON.DEL", key, ...(path == null ? [] : [path])));
-  }
-
-  async numIncrBy(key: string, path: string, value: number): Promise<string> {
-    return string(await this.client.command("JSON.NUMINCRBY", key, path, value));
-  }
-
-  async type(key: string, path?: string): Promise<string | null> {
-    const response = await this.client.command("JSON.TYPE", key, ...(path == null ? [] : [path]));
-    return response == null ? null : string(response);
-  }
-
-  async strlen(key: string, path?: string): Promise<number | null> {
-    const response = await this.client.command("JSON.STRLEN", key, ...(path == null ? [] : [path]));
-    return response == null ? null : number(response);
-  }
-
-  async objKeys(key: string, path?: string): Promise<unknown[]> {
-    return array(await this.client.command("JSON.OBJKEYS", key, ...(path == null ? [] : [path])));
-  }
-
-  async objLen(key: string, path?: string): Promise<number> {
-    return number(await this.client.command("JSON.OBJLEN", key, ...(path == null ? [] : [path])));
-  }
-
-  async arrAppend(key: string, path: string, ...values: unknown[]): Promise<number> {
-    return number(await this.client.command("JSON.ARRAPPEND", key, path, ...values.map((value) => JSON.stringify(value))));
-  }
-
-  async arrLen(key: string, path?: string): Promise<number> {
-    return number(await this.client.command("JSON.ARRLEN", key, ...(path == null ? [] : [path])));
-  }
-
-  async toggle(key: string, path: string): Promise<number> {
-    return number(await this.client.command("JSON.TOGGLE", key, path));
-  }
-
-  async clear(key: string, path?: string): Promise<number> {
-    return number(await this.client.command("JSON.CLEAR", key, ...(path == null ? [] : [path])));
-  }
-
-  async mget<T = unknown>(keys: string[], path: string): Promise<(T | null)[]> {
-    return array(await this.client.command("JSON.MGET", ...keys, path)).map((item) => parseJson<T>(item));
-  }
-}
-
-function encode(client: StoreCommandClient, value: unknown): Buffer {
-  return client.codec.encode(value);
-}
-
-function decode<T>(client: StoreCommandClient, value: unknown): T | null {
-  if (value == null) return null;
-  if (Buffer.isBuffer(value)) return client.codec.decode(value) as T | null;
-  if (value instanceof Uint8Array) return client.codec.decode(Buffer.from(value)) as T | null;
-  return value as T;
-}
-
-function number(value: unknown): number {
-  return Number(value);
-}
-
-function string(value: unknown): string {
-  return Buffer.isBuffer(value) ? value.toString("utf8") : String(value);
-}
-
-function array(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function flattenEntries(client: StoreCommandClient, entries: [unknown, number][]): CommandArgument[] {
-  return entries.flatMap(([item, value]) => [encode(client, item), value]);
 }
 
 function compressionOptions(options: TDigestCreateOptions): CommandArgument[] {
-  return options.compression == null ? [] : ["COMPRESSION", options.compression];
-}
-
-function toArray<T>(value: T | T[]): T[] {
-  return Array.isArray(value) ? value : [value];
-}
-
-function parseJson<T>(value: unknown): T | null {
-  if (value == null) return null;
-  const text = string(value);
-  return JSON.parse(text) as T;
+  const compression = ownOption(options, "compression");
+  return compression == null ? [] : ["COMPRESSION", compression];
 }

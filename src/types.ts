@@ -1,56 +1,32 @@
 import type { Codec } from "./codecs.js";
-import { bytes, field, integer, normalizeRefMeta, optionalString, text, toStringKeyMap } from "./internal.js";
+import {
+  bytes,
+  field,
+  integer,
+  integerReply,
+  normalizeRefMeta,
+  optionalString,
+  setOwnValue,
+  text,
+  toStringKeyMap,
+  type CommandArgument
+} from "./internal.js";
+import { toStringKeyMapPreservingValues } from "./response-map-preservation.js";
+import type { ExceptionPolicy } from "./worker-types.js";
+export type {
+  BackoffKind,
+  BackpressurePolicy,
+  ExceptionPolicy,
+  RetryPolicy,
+  ValueConfig,
+  WorkerConfig,
+  WorkerProfile,
+  WorkerRefillStrategy
+} from "./worker-types.js";
 
-export type ExceptionPolicy = "retry" | "fail" | "raise";
-export type BackoffKind = "fixed" | "linear" | "exponential";
-export type WorkerProfile = "latency" | "throughput";
-
-export interface RetryPolicy {
-  maxRetries?: number;
-  backoff?: BackoffKind | string;
-  baseMs?: number;
-  maxMs?: number;
-  jitterPct?: number;
-  exhaustedTo?: string;
-}
-
-export interface BackpressurePolicy {
-  maxRetries?: number;
-  baseDelayMs?: number;
-  maxDelayMs?: number;
-  jitterPct?: number;
-}
-
-export interface ValueConfig {
-  valueMaxBytes?: number;
-  localCache?: boolean;
-}
-
-export interface WorkerConfig {
-  profile?: WorkerProfile;
-  workers?: number;
-  concurrency?: number;
-  batchSize?: number;
-  leaseMs?: number;
-  priority?: number;
-  nowMs?: number;
-  partitionKey?: string;
-  partitionKeys?: string[];
-  reclaimExpired?: boolean;
-  reclaimRatio?: number;
-  claimPayload?: boolean;
-  claimValues?: string[];
-  valueMaxBytes?: number;
-  blockMs?: number;
-  idleSleepMs?: number;
-  maxIdleSleepMs?: number;
-  exceptionPolicy?: ExceptionPolicy;
-  completeAsyncDepth?: number;
-  completeIndependent?: boolean;
-  claimDrainBatches?: number;
-  signal?: AbortSignal;
-  worker?: string;
-}
+export type MaxActiveMs = number | "infinity";
+/** An exact Flow fencing token; bigint is used beyond JavaScript's safe integer range. */
+export type FencingToken = number | bigint;
 
 export interface ChildSpec {
   id: string;
@@ -68,6 +44,7 @@ export interface CreateItem {
   id: string;
   payload?: unknown;
   partitionKey?: string;
+  attributes?: Record<string, CommandArgument>;
   values?: Record<string, unknown>;
   valueRefs?: Record<string, string>;
   stateMeta?: StateMeta;
@@ -81,15 +58,16 @@ export interface ClaimedItemWire {
   id: Buffer;
   partitionKey?: Buffer | null;
   leaseToken: Buffer;
-  fencingToken: number;
+  fencingToken: FencingToken;
 }
 
 export interface ClaimedItem<TPayload = unknown> {
   id: string;
   leaseToken: Buffer;
-  fencingToken: number;
+  fencingToken: FencingToken;
   partitionKey?: string;
-  type: string;
+  /** Present when supplied by a full response or known compact-claim context. */
+  type?: string;
   state: string;
   runState?: string;
   payload?: TPayload | null;
@@ -100,7 +78,7 @@ export interface ClaimedItem<TPayload = unknown> {
 
 export interface FencedItem {
   id: string;
-  fencingToken: number;
+  fencingToken: FencingToken;
   leaseToken?: Buffer;
   partitionKey?: string;
 }
@@ -122,13 +100,38 @@ export interface KeyInfo {
   raw: Record<string, unknown>;
 }
 
-export interface FetchOrComputeResult<T = unknown> {
-  status: "hit" | "compute" | string;
-  value?: T | null;
-  computeToken?: Buffer;
-  hit: boolean;
-  shouldCompute: boolean;
+export interface FetchOrComputeHitResult<T = unknown> {
+  readonly computeMode: "hit";
+  readonly hit: true;
+  readonly shouldCompute: false;
+  readonly status: "hit";
+  readonly value: T | null;
 }
+
+export interface FetchOrComputeLegacyResult {
+  /** Opaque application hint echoed for the process elected to compute. */
+  readonly computeHint: Buffer;
+  readonly computeMode: "legacy";
+  /** Explicit null distinguishes a legacy tokenless lease from an omitted token. */
+  readonly computeToken: null;
+  readonly hit: false;
+  readonly shouldCompute: true;
+  readonly status: "compute";
+}
+
+export interface FetchOrComputeFencedResult {
+  /** Opaque application hint echoed for the process elected to compute. */
+  readonly computeHint: Buffer;
+  readonly computeMode: "fenced";
+  /** Fencing token required when publishing the computed result or error. */
+  readonly computeToken: Buffer;
+  readonly hit: false;
+  readonly shouldCompute: true;
+  readonly status: "compute";
+}
+
+export type FetchOrComputeComputeResult = FetchOrComputeLegacyResult | FetchOrComputeFencedResult;
+export type FetchOrComputeResult<T = unknown> = FetchOrComputeHitResult<T> | FetchOrComputeComputeResult;
 
 export interface FlowRecord<TPayload = unknown> {
   id: string;
@@ -138,11 +141,12 @@ export interface FlowRecord<TPayload = unknown> {
   runState?: string;
   payload?: TPayload | null;
   leaseToken: Buffer;
-  fencingToken: number;
+  fencingToken: FencingToken;
   version: number;
   parentFlowId?: string;
   rootFlowId?: string;
   correlationId?: string;
+  maxActiveMs?: number;
   valueRefs?: Record<string, unknown>;
   values?: Record<string, unknown>;
   valueSizes?: Record<string, unknown>;
@@ -153,6 +157,8 @@ export interface FlowRecord<TPayload = unknown> {
   indexedStateMeta?: string;
   raw?: unknown;
 }
+
+export { fetchOrComputeResultFromResp, keyInfoFromResp, rateLimitResultFromResp } from "./native-kv-responses.js";
 
 export function normalizeExceptionPolicy(value: ExceptionPolicy | undefined): ExceptionPolicy {
   if (value == null) {
@@ -166,23 +172,32 @@ export function normalizeExceptionPolicy(value: ExceptionPolicy | undefined): Ex
 
 export function claimedItemFromResp<TPayload = unknown>(
   value: unknown,
-  codec?: Codec
+  codec?: Codec,
+  context: { readonly type?: string } = {}
 ): ClaimedItem<TPayload> {
   if (Array.isArray(value)) {
     const tuple = value as unknown[];
-    const id = bytes(tuple[0]);
-    const partition = tuple[1] == null ? null : bytes(tuple[1]);
-    const leaseToken = bytes(tuple[2]);
-    const fencingToken = integer(tuple[3]);
-    const attrs = tuple[5] ?? (isPlainObject(tuple[4]) ? tuple[4] : undefined);
+    if (tuple.length < 4 || tuple.length > 6) {
+      throw new TypeError("compact claim returned an unexpected response");
+    }
+    const id = requiredBytes(tuple[0], "compact claim id");
+    const partition = tuple[1] == null ? null : requiredBytes(tuple[1], "compact claim partition");
+    const leaseToken = requiredBytes(tuple[2], "compact claim lease token");
+    const fencingToken = requiredFencingToken(tuple[3], "compact claim fencing token");
+    const legacyAttributes = toStringKeyMapPreservingValues(tuple[4]);
+    const rawAttributes = tuple[5] ?? legacyAttributes;
+    const attributes = rawAttributes == null ? undefined : toStringKeyMapPreservingValues(rawAttributes);
+    if (rawAttributes != null && attributes == null) {
+      throw new TypeError("compact claim attributes returned an unexpected response");
+    }
     const item: ClaimedItem<TPayload> = {
       id: text(id),
       partitionKey: optionalString(partition),
       leaseToken,
       fencingToken,
-      runState: optionalString(tuple[4]),
-      attributes: isPlainObject(attrs) ? attrs : undefined,
-      type: "",
+      runState: legacyAttributes == null ? optionalResponseString(tuple[4], "compact claim run state") : undefined,
+      ...(attributes == null ? {} : { attributes }),
+      ...(context.type == null ? {} : { type: context.type }),
       state: "running"
     };
     Object.defineProperty(item, CLAIMED_ITEM_WIRE, {
@@ -192,16 +207,17 @@ export function claimedItemFromResp<TPayload = unknown>(
     return item;
   }
 
+  assertResponseRecord(value, "FLOW claim");
   const payload = field(value, "payload");
   return {
-    id: text(field(value, "id") ?? ""),
-    leaseToken: bytes(field(value, "lease_token")),
-    fencingToken: integer(field(value, "fencing_token")),
-    partitionKey: optionalString(field(value, "partition_key")),
-    type: text(field(value, "type") ?? ""),
-    state: optionalString(field(value, "state")) ?? "running",
-    runState: optionalString(field(value, "run_state")),
-    attributes: plainObjectField(value, "attributes"),
+    id: requiredTextField(value, "id", "FLOW claim"),
+    leaseToken: requiredBytes(field(value, "lease_token"), "FLOW claim lease_token"),
+    fencingToken: requiredFencingToken(field(value, "fencing_token"), "FLOW claim fencing_token"),
+    partitionKey: optionalResponseString(field(value, "partition_key"), "FLOW claim partition_key"),
+    type: requiredTextField(value, "type", "FLOW claim"),
+    state: requiredTextField(value, "state", "FLOW claim"),
+    runState: optionalResponseString(field(value, "run_state"), "FLOW claim run_state"),
+    attributes: optionalMapField(value, "attributes", "FLOW claim", true),
     payload: payload == null ? undefined : (decodePayload(codec, payload) as TPayload | null)
   };
 }
@@ -210,81 +226,37 @@ export function flowRecordFromResp<TPayload = unknown>(
   value: unknown,
   codec?: Codec
 ): FlowRecord<TPayload> {
+  assertResponseRecord(value, "FLOW record");
   const payload = field(value, "payload");
-  const values = decodeValues(field(value, "values"), codec);
+  const values = decodeValues(field(value, "values"), codec, "FLOW record values");
+  const maxActiveMs = optionalPositiveResponseInteger(
+    field(value, "max_active_ms"),
+    "FLOW record max_active_ms"
+  );
 
   return {
-    id: text(field(value, "id") ?? ""),
-    type: text(field(value, "type") ?? ""),
-    state: text(field(value, "state") ?? ""),
-    partitionKey: text(field(value, "partition_key") ?? ""),
-    runState: optionalString(field(value, "run_state")),
+    id: requiredTextField(value, "id", "FLOW record"),
+    type: requiredTextField(value, "type", "FLOW record"),
+    state: requiredTextField(value, "state", "FLOW record"),
+    partitionKey: optionalResponseString(field(value, "partition_key"), "FLOW record partition_key") ?? "",
+    runState: optionalResponseString(field(value, "run_state"), "FLOW record run_state"),
     payload: payload == null ? undefined : (decodePayload(codec, payload) as TPayload | null),
-    leaseToken: bytes(field(value, "lease_token")),
-    fencingToken: integer(field(value, "fencing_token")),
-    version: integer(field(value, "version")),
-    parentFlowId: optionalString(field(value, "parent_flow_id")),
-    rootFlowId: optionalString(field(value, "root_flow_id")),
-    correlationId: optionalString(field(value, "correlation_id")),
-    valueRefs: toStringKeyMap(field(value, "value_refs")),
+    leaseToken: optionalResponseBytes(field(value, "lease_token"), "FLOW record lease_token"),
+    fencingToken: optionalFencingToken(field(value, "fencing_token"), "FLOW record fencing_token"),
+    version: optionalResponseInteger(field(value, "version"), "FLOW record version"),
+    parentFlowId: optionalResponseString(field(value, "parent_flow_id"), "FLOW record parent_flow_id"),
+    rootFlowId: optionalResponseString(field(value, "root_flow_id"), "FLOW record root_flow_id"),
+    correlationId: optionalResponseString(field(value, "correlation_id"), "FLOW record correlation_id"),
+    ...(maxActiveMs == null ? {} : { maxActiveMs }),
+    valueRefs: optionalMapField(value, "value_refs", "FLOW record"),
     values,
-    valueSizes: toStringKeyMap(field(value, "value_sizes")),
-    valueOmitted: toStringKeyMap(field(value, "value_omitted")),
-    valueMissing: toStringKeyMap(field(value, "value_missing")),
-    attributes: plainObjectField(value, "attributes"),
-    stateMeta: toStringKeyMap(field(value, "state_meta")),
-    indexedStateMeta: optionalString(field(value, "indexed_state_meta")),
+    valueSizes: optionalMapField(value, "value_sizes", "FLOW record"),
+    valueOmitted: optionalMapField(value, "value_omitted", "FLOW record"),
+    valueMissing: optionalMapField(value, "value_missing", "FLOW record"),
+    attributes: optionalMapField(value, "attributes", "FLOW record", true),
+    stateMeta: optionalMapField(value, "state_meta", "FLOW record", true),
+    indexedStateMeta: optionalResponseString(field(value, "indexed_state_meta"), "FLOW record indexed_state_meta"),
     raw: value
-  };
-}
-
-export function rateLimitResultFromResp(value: unknown): RateLimitResult {
-  if (!Array.isArray(value)) {
-    throw new TypeError("RATELIMIT.ADD returned an unexpected response");
-  }
-  const status = text(value[0]);
-  return {
-    status,
-    count: integer(value[1]),
-    remaining: integer(value[2]),
-    resetMs: integer(value[3]),
-    allowed: status === "allowed"
-  };
-}
-
-export function keyInfoFromResp(value: unknown): KeyInfo {
-  const raw = toStringKeyMap(value) ?? {};
-  return {
-    type: text(raw.type ?? ""),
-    valueSize: integer(raw.value_size),
-    ttlMs: integer(raw.ttl_ms),
-    hotCacheStatus: text(raw.hot_cache_status ?? ""),
-    lastWriteShard: integer(raw.last_write_shard),
-    raw
-  };
-}
-
-export function fetchOrComputeResultFromResp<T = unknown>(
-  value: unknown,
-  codec: Codec
-): FetchOrComputeResult<T> {
-  if (!Array.isArray(value)) {
-    throw new TypeError("FETCH_OR_COMPUTE returned an unexpected response");
-  }
-  const status = text(value[0]);
-  if (status === "hit") {
-    return {
-      status,
-      value: decodePayload(codec, value[1]) as T | null,
-      hit: true,
-      shouldCompute: false
-    };
-  }
-  return {
-    status,
-    computeToken: bytes(value[1]),
-    hit: false,
-    shouldCompute: true
   };
 }
 
@@ -299,27 +271,138 @@ function decodePayload(codec: Codec | undefined, value: unknown): unknown {
     const buffer = Buffer.from(value);
     return codec?.decode(buffer) ?? buffer;
   }
+  if (typeof value === "string" && codec != null) {
+    return codec.decode(Buffer.from(value));
+  }
   return normalizeRefMeta(value);
 }
 
-function decodeValues(value: unknown, codec: Codec | undefined): Record<string, unknown> | undefined {
-  const map = toStringKeyMap(value);
-  if (map == null) {
+function decodeValues(
+  value: unknown,
+  codec: Codec | undefined,
+  context: string
+): Record<string, unknown> | undefined {
+  if (value == null) {
     return undefined;
+  }
+  const map = toStringKeyMapPreservingValues(value);
+  if (map == null) {
+    throw new TypeError(`${context} returned an unexpected response`);
   }
 
   const decoded: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(map)) {
-    decoded[key] = decodePayload(codec, item);
+    setOwnValue(decoded, key, decodePayload(codec, item));
   }
   return decoded;
 }
 
-function plainObjectField(value: unknown, key: string): Record<string, unknown> | undefined {
+function optionalMapField(
+  value: unknown,
+  key: string,
+  context: string,
+  preserveValues = false
+): Record<string, unknown> | undefined {
   const item = field(value, key);
-  return isPlainObject(item) ? item : undefined;
+  if (item == null) {
+    return undefined;
+  }
+  const map = preserveValues ? toStringKeyMapPreservingValues(item) : toStringKeyMap(item);
+  if (map == null) {
+    throw new TypeError(`${context} ${key} returned an unexpected response`);
+  }
+  return map;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value != null && !Buffer.isBuffer(value) && !(value instanceof Uint8Array) && !Array.isArray(value);
+  if (typeof value !== "object" || value == null || Buffer.isBuffer(value) || value instanceof Uint8Array || Array.isArray(value)) {
+    return false;
+  }
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function assertResponseRecord(value: unknown, context: string): asserts value is Map<unknown, unknown> | Record<string, unknown> {
+  if (!(value instanceof Map) && !isPlainObject(value)) {
+    throw new TypeError(`${context} returned an unexpected response`);
+  }
+}
+
+function requiredTextField(value: unknown, key: string, context: string): string {
+  const item = field(value, key);
+  if (typeof item !== "string" && !Buffer.isBuffer(item) && !(item instanceof Uint8Array)) {
+    throw new TypeError(`${context} is missing required ${key}`);
+  }
+  const result = text(item);
+  if (result.length === 0) {
+    throw new TypeError(`${context} is missing required ${key}`);
+  }
+  return result;
+}
+
+function requiredBytes(value: unknown, context: string): Buffer {
+  if (typeof value !== "string" && !Buffer.isBuffer(value) && !(value instanceof Uint8Array)) {
+    throw new TypeError(`${context} returned an unexpected response`);
+  }
+  const result = bytes(value);
+  if (result.byteLength === 0) {
+    throw new TypeError(`${context} returned an unexpected response`);
+  }
+  return result;
+}
+
+function requiredInteger(value: unknown, context: string): number {
+  if (value == null || value === "") {
+    throw new TypeError(`${context} returned an unexpected response`);
+  }
+  return integer(value);
+}
+
+function requiredFencingToken(value: unknown, context: string): FencingToken {
+  if (value == null || value === "") {
+    throw new TypeError(`${context} returned an unexpected response`);
+  }
+  return integerReply(value);
+}
+
+function optionalResponseString(value: unknown, context: string): string | undefined {
+  if (
+    value == null ||
+    value === "" ||
+    ((Buffer.isBuffer(value) || value instanceof Uint8Array) && value.byteLength === 0)
+  ) {
+    return undefined;
+  }
+  if (typeof value !== "string" && !Buffer.isBuffer(value) && !(value instanceof Uint8Array)) {
+    throw new TypeError(`${context} returned an unexpected response`);
+  }
+  return text(value);
+}
+
+function responseBytes(value: unknown, context: string): Buffer {
+  if (typeof value !== "string" && !Buffer.isBuffer(value) && !(value instanceof Uint8Array)) {
+    throw new TypeError(`${context} returned an unexpected response`);
+  }
+  return bytes(value);
+}
+
+function optionalResponseBytes(value: unknown, context: string): Buffer {
+  return value == null ? Buffer.alloc(0) : responseBytes(value, context);
+}
+
+function optionalResponseInteger(value: unknown, context: string): number {
+  return value == null ? 0 : requiredInteger(value, context);
+}
+
+function optionalFencingToken(value: unknown, context: string): FencingToken {
+  return value == null ? 0 : requiredFencingToken(value, context);
+}
+
+function optionalPositiveResponseInteger(value: unknown, context: string): number | undefined {
+  if (value == null) return undefined;
+  const result = requiredInteger(value, context);
+  if (result <= 0) {
+    throw new TypeError(`${context} returned an unexpected response`);
+  }
+  return result;
 }
