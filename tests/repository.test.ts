@@ -23,12 +23,24 @@ function testFiles(directory: string): string[] {
 describe("release workflow", () => {
   it("gates npm publishing on live FerricStore integration tests", () => {
     const source = readFileSync(`${repositoryRoot}/.github/workflows/release.yml`, "utf8");
+    const isolated = readFileSync(
+      `${repositoryRoot}/scripts/run-isolated-integration.mjs`,
+      "utf8"
+    );
     const integration = workflowJob(source, "integration");
     const npm = workflowJob(source, "npm");
 
-    expect(integration).toContain("npm run integration:up");
-    expect(integration).toContain("npm run test:integration");
+    expect(integration).toContain("npm run test:integration:isolated");
     expect(integration).toMatch(/- if: always\(\)\s+run: npm run integration:down/);
+    expect(isolated).toContain("npm, [\"run\", \"integration:up\"]");
+    expect(isolated).toContain("npm, [\"run\", \"integration:down\"]");
+    for (const file of [
+      "tests/integration/live.test.ts",
+      "tests/integration/live-store-flow.test.ts",
+      "tests/integration/live-governance-workflow.test.ts"
+    ]) {
+      expect(isolated).toContain(file);
+    }
     expect(npm).toMatch(/needs:\s+integration/);
     expect(npm).toContain("npm publish --provenance --access public");
   });

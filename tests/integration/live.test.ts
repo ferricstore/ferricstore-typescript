@@ -22,8 +22,6 @@ import {
   text,
   url
 } from "./live-support.js";
-import { registerStoreFlowIntegrationTests } from "./live-store-flow-cases.js";
-import { registerGovernanceWorkflowIntegrationTests } from "./live-governance-workflow-cases.js";
 
 const nativeProtocolCommands = new Set<string>(
   `
@@ -932,7 +930,4 @@ describe("FerricStore integration", () => {
       await flow.close();
     }
   });
-
-  registerStoreFlowIntegrationTests();
-  registerGovernanceWorkflowIntegrationTests();
 });

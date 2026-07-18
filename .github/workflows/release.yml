@@ -28,10 +28,7 @@ jobs:
           node-version: 22.22.0
           cache: npm
       - run: npm ci
-      - run: npm run integration:up
-      - run: npm run test:integration
-      - if: always()
-        run: docker compose logs ferricstore
+      - run: npm run test:integration:isolated
       - if: always()
         run: npm run integration:down
 
