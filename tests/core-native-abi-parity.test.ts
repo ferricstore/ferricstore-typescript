@@ -31,7 +31,6 @@ import {
   COMPACT_OK_LIST,
   COMPACT_PIPELINE_REQUEST,
   COMPACT_PIPELINE_RESPONSE,
-  COMPACT_RESPONSE_OPCODES,
   DEFAULT_MAX_VALUE_DEPTH,
   DEFAULT_MAX_VALUE_ITEMS,
   FLAG_COMPRESSED,
@@ -93,41 +92,6 @@ function compactTags(codec: string, nif: string): Record<string, number> {
   if (fixed == null) throw new Error("core compact KV MGET fixed tag was not found");
   entries.push(["kv_mget_fixed", Number.parseInt(fixed, 16)]);
   return Object.fromEntries(entries);
-}
-
-function compactOpcodeMatrix(source: string): Record<string, number[]> {
-  const definitions = new Map<string, string>();
-  for (const match of source.matchAll(/^ {2}@(compact_\w+_opcodes)\s+(.+)$/gmu)) {
-    definitions.set(match[1] ?? "", match[2] ?? "");
-  }
-
-  const resolved = new Map<string, number[]>();
-  const resolveAttribute = (name: string): number[] => {
-    const cached = resolved.get(name);
-    if (cached != null) return cached;
-    const definition = definitions.get(name);
-    if (definition == null) throw new Error(`core compact opcode attribute ${name} was not found`);
-    const values = definition.startsWith("[")
-      ? [...definition.matchAll(/0x([\dA-Fa-f]+)/gu)].map((match) =>
-          Number.parseInt(match[1] ?? "", 16)
-        )
-      : [...definition.matchAll(/@(compact_\w+_opcodes)/gu)].flatMap((match) =>
-          resolveAttribute(match[1] ?? "")
-        );
-    resolved.set(name, values);
-    return values;
-  };
-
-  const functionStart = source.indexOf("def compact_response_opcodes do");
-  const functionEnd = source.indexOf("\n  end", functionStart);
-  if (functionStart < 0 || functionEnd < 0) {
-    throw new Error("core compact response opcode manifest was not found");
-  }
-  return Object.fromEntries(
-    [...source.slice(functionStart, functionEnd).matchAll(/"([^"]+)"\s*=>\s*@(\w+)/gu)].map(
-      (match) => [match[1] ?? "", resolveAttribute(match[2] ?? "")] as const
-    )
-  );
 }
 
 function flowRecordFieldKeys(source: string): string[] {
@@ -233,10 +197,6 @@ describe.skipIf(!coreAvailable)("FerricStore core native ABI parity", () => {
 
   it("matches every compact wire tag", () => {
     expect(sdkCompactTags).toEqual(compactTags(codec, nif));
-  });
-
-  it("matches the compact response opcode matrix", () => {
-    expect(COMPACT_RESPONSE_OPCODES).toEqual(compactOpcodeMatrix(codec));
   });
 
   it("matches every compact Flow record field ID", () => {

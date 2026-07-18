@@ -10,6 +10,7 @@ import {
   decodeResponse,
   type ResponseFrame
 } from "../src/protocol.js";
+import { compactResponseHints } from "./compact-response-test-support.js";
 
 function responseFrame(opcode: number, payload: Buffer): ResponseFrame {
   const body = Buffer.concat([Buffer.from([0, 0]), payload]);
@@ -27,7 +28,9 @@ describe("compact response validation", () => {
   it("rejects trailing bytes after a missing compact GET marker", () => {
     const payload = Buffer.from([COMPACT_KV_GET, 0, 0xff]);
 
-    expect(() => decodeResponse(responseFrame(OPCODES.get, payload), OPCODES.get)).toThrow(
+    expect(() => decodeResponse(
+      responseFrame(OPCODES.get, payload), OPCODES.get, compactResponseHints
+    )).toThrow(
       "trailing compact GET bytes"
     );
   });
@@ -50,7 +53,8 @@ describe("compact response validation", () => {
           valueRef,
           Buffer.alloc((DEFAULT_MAX_VALUE_ITEMS - 1) * 2)
         ])),
-        OPCODES.pipeline
+        OPCODES.pipeline,
+        compactResponseHints
       )
     ).toThrow("total items exceed max items");
   });

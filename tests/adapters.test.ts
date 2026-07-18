@@ -389,6 +389,15 @@ test("NativeAdapter correlates compact claim response modes with their requests"
     sized("running:step")
   ]);
   const server = await startCountingServer((request, socket) => {
+    if (request.opcode === OPCODES.startup) {
+      return {
+        capabilities: {
+          response_codecs: {
+            compact_response_opcodes: { flow_claim_jobs_v1: [OPCODES.flowClaimDue] }
+          }
+        }
+      };
+    }
     if (request.opcode !== OPCODES.flowClaimDue) return undefined;
     socket.write(responseFrameFromBody(
       request.opcode,

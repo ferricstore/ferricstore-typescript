@@ -50,17 +50,14 @@ export function fetchOrComputeResultFromResp<T = unknown>(
       shouldCompute: false
     };
   }
-  if (status !== "compute") throw new TypeError("FETCH_OR_COMPUTE returned an unexpected response");
+  if (status !== "compute" || value.length !== 3) {
+    throw new TypeError("FETCH_OR_COMPUTE returned an unexpected response");
+  }
   return {
     status,
     computeHint: responseBytes(value[1], "FETCH_OR_COMPUTE"),
-    ...(value.length === 3 ? {
-      computeMode: "fenced" as const,
-      computeToken: responseBytes(value[2], "FETCH_OR_COMPUTE")
-    } : {
-      computeMode: "legacy" as const,
-      computeToken: null
-    }),
+    computeMode: "fenced",
+    computeToken: responseBytes(value[2], "FETCH_OR_COMPUTE"),
     hit: false,
     shouldCompute: true
   };

@@ -21,13 +21,13 @@ import { RoutingTopology, type RoutingRoute } from "./routing-topology.js";
 export { RoutingTopology, type RoutingRoute } from "./routing-topology.js";
 import {
   assertTopologyNativeAdapterOptions,
-  isExplicitlySafeReroute,
   isRetryableRouteError,
   nativeOnlyOptions,
   normalizeTopologyConcurrency,
   seedAuthIdentity,
   seedConnectionOptions,
   snapshotTopologyNativeAdapterOptions,
+  waitForExplicitlySafeReroute,
   withSeedAuthDefaults
 } from "./topology-options.js";
 import {
@@ -340,7 +340,9 @@ export class TopologyNativeAdapterPool implements CommandExecutor {
       () => true,
       () => false
     );
-    return refreshed && isExplicitlySafeReroute(error);
+    if (!refreshed || !(await waitForExplicitlySafeReroute(error))) return false;
+    this.assertOpen();
+    return true;
   }
 
   private async executePipelineOnRoute(
@@ -441,7 +443,6 @@ export class TopologyNativeAdapterPool implements CommandExecutor {
     return topologyRefreshCandidates(this.seedUrls, this.topologyValue.endpoints.values(), this.tls,
       this.lastSuccessfulRefreshKey);
   }
-
   private assertOpen(): void {
     if (this.closed) throw new FerricStoreError("FerricStore topology adapter pool is closed");
   }

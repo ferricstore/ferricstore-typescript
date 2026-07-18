@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           repository: ferricstore/ferricstore
-          ref: 7ccc4efadbb0e30bbbb5bcce3761b8d6859b7e9f
+          ref: 72452814231f592aff051c22fdbe7114476e2879
           path: ferricstore-core
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
@@ -69,14 +69,14 @@ jobs:
       matrix:
         include:
           - node-version: 22.22.0
-            server: release-0.7.5
-            image: ghcr.io/ferricstore/ferricstore:0.7.5@sha256:423e498ecb76e986da51fb1675c215f317e1e38bcaa6b66274bbe65207e45311
+            server: release-0.8.0
+            image: ghcr.io/ferricstore/ferricstore:0.8.0@sha256:abc16a208a8b2dd4077245ea77992b99883e2753b45acde93eef0088a8996783
           - node-version: 24.x
-            server: release-0.7.5
-            image: ghcr.io/ferricstore/ferricstore:0.7.5@sha256:423e498ecb76e986da51fb1675c215f317e1e38bcaa6b66274bbe65207e45311
+            server: release-0.8.0
+            image: ghcr.io/ferricstore/ferricstore:0.8.0@sha256:abc16a208a8b2dd4077245ea77992b99883e2753b45acde93eef0088a8996783
           - node-version: 22.22.0
             server: pinned-core
-            image: ghcr.io/ferricstore/ferricstore:ci-7ccc4efadbb0e30bbbb5bcce3761b8d6859b7e9f@sha256:7298c8d00045d2e5dfca051fd45fecb7c1ad75fa8d13e82f769c6f67837ad7be
+            image: ghcr.io/ferricstore/ferricstore:ci-72452814231f592aff051c22fdbe7114476e2879@sha256:d019f239de8c4465cf9f0d0ed070287caa51f75c3c292d5ba08918b773e4befd
     env:
       FERRICSTORE_IMAGE: ${{ matrix.image }}
     steps:

@@ -172,22 +172,14 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
         amount: 2, nowMs: now + 19, shardId: 0
       });
       const spentReservationIds = field(spentLimit, "reservation_ids");
-      if (spentReservationIds == null) {
-        // FerricStore 0.7.5 predates identified credits. Verify its exact
-        // aggregate response, but do not weaken the SDK's safe release API by
-        // releasing an unidentified credit. The short lease expires naturally.
-        expect(field(field(spentLimit, "lease"), "available")).toBe(3);
-        expect(field(field(spentLimit, "lease"), "in_use")).toBe(2);
-      } else {
-        if (!isReadonlyArray(spentReservationIds) || spentReservationIds.length !== 2) {
-          throw new Error("FLOW.LIMIT.SPEND did not return one reservation id per credit");
-        }
-        await expect(flow.limitRelease(limitScope, {
-          amount: 1,
-          reservationIds: [text(spentReservationIds[0])],
-          shardId: 0
-        })).resolves.toBeTypeOf("object");
+      if (!isReadonlyArray(spentReservationIds) || spentReservationIds.length !== 2) {
+        throw new Error("FLOW.LIMIT.SPEND did not return one reservation id per credit");
       }
+      await expect(flow.limitRelease(limitScope, {
+        amount: 1,
+        reservationIds: [text(spentReservationIds[0])],
+        shardId: 0
+      })).resolves.toBeTypeOf("object");
       await expect(flow.governanceOverview({ limit: 10 })).resolves.toBeTypeOf("object");
     } finally {
       await flow.close();
@@ -300,7 +292,7 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
             customer: { id: "customer-1" },
             nullable: null
           });
-          await expect(ctx.flow.putValue("handler", { stored: true }, { ttlMs: 60_000 })).resolves.toBeDefined();
+          await expect(ctx.flow.putValue("handler", { stored: true })).resolves.toBeDefined();
           await expect(ctx.flow.value("missing", "fallback")).resolves.toBe("fallback");
           await expect(ctx.flow.values(["missing"])).resolves.toHaveProperty("missing", undefined);
           return transition("validated", {

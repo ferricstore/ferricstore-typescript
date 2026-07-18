@@ -116,7 +116,7 @@ export {
 } from "./outcomes.js";
 export type { Command, CommandArgument } from "./internal.js";
 export { LeaseRenewalError } from "./worker-internal.js";
-export { COMMAND_OPCODES, COMPACT_RESPONSE_OPCODES } from "./protocol.js";
+export { COMMAND_OPCODES } from "./protocol.js";
 export type { ProtocolCommand } from "./protocol.js";
 export {
   BloomFilterStore,
@@ -191,9 +191,9 @@ export type {
   FetchOrComputeComputeResult,
   FetchOrComputeFencedResult,
   FetchOrComputeHitResult,
-  FetchOrComputeLegacyResult,
   FetchOrComputeResult,
   FlowRecord,
+  FlowMaxActiveFailure,
   KeyInfo,
   MaxActiveMs,
   RateLimitResult,
@@ -205,3 +205,8 @@ export type {
   WorkerProfile,
   WorkerRefillStrategy
 } from "./types.js";
+export {
+  FERRICSTORE_MINIMUM_SERVER_VERSION,
+  FERRICSTORE_NATIVE_PROTOCOL_VERSION,
+  FERRICSTORE_SDK_VERSION
+} from "./version.js";

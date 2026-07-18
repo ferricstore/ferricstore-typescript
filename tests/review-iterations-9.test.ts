@@ -214,15 +214,20 @@ describe("review iterations 9", () => {
     const adapter = directNativeAdapter(new BackpressureSocket(), 1_024);
     const internals = adapter as unknown as {
       applyStartupLimits(value: unknown): void;
-      maxRequestFrameBytes: number;
+      capabilities: {
+        activateAuthenticated(): void;
+        requestFrameBytes: number;
+      };
     };
 
     try {
-      expect(internals.maxRequestFrameBytes).toBe(16 * 1_024 * 1_024);
+      expect(internals.capabilities.requestFrameBytes).toBe(64 * 1_024);
       internals.applyStartupLimits({ limits: { max_frame_bytes: 32 * 1_024 * 1_024 } });
-      expect(internals.maxRequestFrameBytes).toBe(16 * 1_024 * 1_024);
+      expect(internals.capabilities.requestFrameBytes).toBe(64 * 1_024);
+      internals.capabilities.activateAuthenticated();
+      expect(internals.capabilities.requestFrameBytes).toBe(16 * 1_024 * 1_024);
       internals.applyStartupLimits({ limits: { max_frame_bytes: 1_024 } });
-      expect(internals.maxRequestFrameBytes).toBe(1_024);
+      expect(internals.capabilities.requestFrameBytes).toBe(1_024);
     } finally {
       await adapter.close();
     }

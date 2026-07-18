@@ -161,9 +161,12 @@ function fetchOrComputeCommand(args: readonly CommandArgument[]): ProtocolComman
 }
 
 function fetchOrComputeResultCommand(args: readonly CommandArgument[]): ProtocolCommand | undefined {
-  if (args.length !== 4 || !isBinaryCommandArgument(args[0]) || !isBinaryCommandArgument(args[1])) return undefined;
+  if (args.length !== 4 || !isBinaryCommandArgument(args[0]) || !isBinaryCommandArgument(args[1])) {
+    throw new FerricStoreError("FETCH_OR_COMPUTE_RESULT requires key, ownership token, value, and ttl_ms");
+  }
   const ttlMs = positiveSafeInteger(args[3]);
-  return ttlMs == null ? undefined : {
+  if (ttlMs == null) throw new FerricStoreError("FETCH_OR_COMPUTE_RESULT ttl_ms must be positive");
+  return {
     opcode: COMMAND_OPCODES.FETCH_OR_COMPUTE_RESULT,
     payload: { key: args[0], token: args[1], ttl_ms: ttlMs, value: args[2] }
   };
@@ -175,7 +178,9 @@ function fetchOrComputeErrorCommand(args: readonly CommandArgument[]): ProtocolC
     !isBinaryCommandArgument(args[0]) ||
     !isBinaryCommandArgument(args[1]) ||
     !isBinaryCommandArgument(args[2])
-  ) return undefined;
+  ) {
+    throw new FerricStoreError("FETCH_OR_COMPUTE_ERROR requires key, ownership token, and message");
+  }
   return {
     opcode: COMMAND_OPCODES.FETCH_OR_COMPUTE_ERROR,
     payload: { key: args[0], message: args[2], token: args[1] }

@@ -26,6 +26,7 @@ import type {
   SetOptions,
   StoreCommandClient
 } from "./store.js";
+import { assertKeyValueCommandSharesSlot } from "./key-slot-validation.js";
 
 export class KeyValueStore {
   constructor(private readonly client: StoreCommandClient) {}
@@ -67,11 +68,15 @@ export class KeyValueStore {
   }
 
   async mset(entries: Record<string, unknown> | [string, unknown][]): Promise<boolean> {
-    return okResponse(await commandArgs(this.client, keyValueArgs(["MSET"], this.client.codec, entries)));
+    const args = keyValueArgs(["MSET"], this.client.codec, entries);
+    assertKeyValueCommandSharesSlot(args, "MSET");
+    return okResponse(await commandArgs(this.client, args));
   }
 
   async msetnx(entries: Record<string, unknown> | [string, unknown][]): Promise<boolean> {
-    return binaryBooleanResponse(await commandArgs(this.client, keyValueArgs(["MSETNX"], this.client.codec, entries)));
+    const args = keyValueArgs(["MSETNX"], this.client.codec, entries);
+    assertKeyValueCommandSharesSlot(args, "MSETNX");
+    return binaryBooleanResponse(await commandArgs(this.client, args));
   }
 
   async incr(key: string): Promise<IntegerReply> {

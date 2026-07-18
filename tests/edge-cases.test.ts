@@ -195,25 +195,18 @@ describe("FerricStoreClient edge cases", () => {
     );
   });
 
-  it("treats the legacy two-item compute response as a hint rather than a fence token", async () => {
+  it("rejects the removed tokenless compute response", async () => {
     const client = new FerricStoreClient(new FakeExecutor([["compute", Buffer.alloc(0)]]));
 
-    await expect(client.fetchOrCompute("cache", { ttlMs: 1 })).resolves.toMatchObject({
-      computeHint: Buffer.alloc(0),
-      computeMode: "legacy",
-      computeToken: null,
-      hit: false,
-      shouldCompute: true,
-      status: "compute"
-    });
+    await expect(client.fetchOrCompute("cache", { ttlMs: 1 })).rejects.toThrow(
+      "FETCH_OR_COMPUTE returned an unexpected response"
+    );
   });
 
-  it("round-trips fenced fetch-or-compute tokens without breaking legacy publishing", async () => {
+  it("round-trips mandatory fetch-or-compute ownership tokens", async () => {
     const token = Buffer.from("fence");
     const executor = new FakeExecutor([
       ["compute", Buffer.from("hint"), token],
-      Buffer.from("OK"),
-      Buffer.from("OK"),
       Buffer.from("OK")
     ]);
     const client = new FerricStoreClient(executor);
@@ -236,15 +229,9 @@ describe("FerricStoreClient edge cases", () => {
     await expect(client.fetchOrComputeError("cache", "failed", {
       computeToken: miss.computeToken
     })).resolves.toBe(true);
-    await expect(client.fetchOrComputeResult("legacy", "value", {
-      computeToken: null,
-      ttlMs: 5_000
-    })).resolves.toBe(true);
-
     expect(executor.calls.slice(1)).toEqual([
       ["FETCH_OR_COMPUTE_RESULT", "cache", token, Buffer.from("value"), 5_000],
-      ["FETCH_OR_COMPUTE_ERROR", "cache", token, "failed"],
-      ["FETCH_OR_COMPUTE_RESULT", "legacy", Buffer.from("value"), 5_000]
+      ["FETCH_OR_COMPUTE_ERROR", "cache", token, "failed"]
     ]);
   });
 
@@ -252,11 +239,11 @@ describe("FerricStoreClient edge cases", () => {
     const executor = new FakeExecutor([Buffer.from("OK")]);
     const client = new FerricStoreClient(executor);
 
-    // @ts-expect-error A fenced token or explicit null legacy token is required.
+    // @ts-expect-error An ownership token is required.
     await expect(client.fetchOrComputeResult("cache", "value", {
       ttlMs: 5_000
     })).rejects.toThrow(/computeToken/u);
-    // @ts-expect-error A fenced token or explicit null legacy token is required.
+    // @ts-expect-error An ownership token is required.
     await expect(client.fetchOrComputeError("cache", "failed")).rejects.toThrow(/computeToken/u);
     expect(executor.calls).toEqual([]);
   });
@@ -856,7 +843,10 @@ describe("FerricStoreClient edge cases", () => {
   });
 
   it("backs off and retries overloaded producer writes", async () => {
-    const overloaded = new Error("BUSY FerricStore overloaded: retry_after_ms=0 reason=rss_pressure");
+    const overloaded = Object.assign(
+      new Error("BUSY FerricStore overloaded: retry_after_ms=0 reason=rss_pressure"),
+      { retryable: true, safe_to_retry: true }
+    );
     overloaded.name = "ResponseError";
     const executor = new FakeExecutor([overloaded, Buffer.from("OK")]);
     const client = new FerricStoreClient(executor, {
@@ -877,7 +867,10 @@ describe("FerricStoreClient edge cases", () => {
   it("caps server-directed producer retry delays after jitter", async () => {
     vi.useFakeTimers();
     const random = vi.spyOn(Math, "random").mockReturnValue(1);
-    const overloaded = new Error("BUSY FerricStore overloaded: retry_after_ms=10000 reason=rss_pressure");
+    const overloaded = Object.assign(
+      new Error("BUSY FerricStore overloaded: retry_after_ms=10000 reason=rss_pressure"),
+      { retryable: true, safe_to_retry: true }
+    );
     overloaded.name = "ResponseError";
     const executor = new FakeExecutor([overloaded, Buffer.from("OK")]);
     const client = new FerricStoreClient(executor, {

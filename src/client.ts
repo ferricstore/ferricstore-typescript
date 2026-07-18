@@ -165,6 +165,9 @@ export class FerricStoreClient extends FerricStoreProducerClient {
       nowMs?: number;
     } = {}
   ): Promise<unknown> {
+    if (options.ownerFlowId != null && options.name != null && options.ttlMs != null) {
+      throw new TypeError("named Flow values cannot have a TTL");
+    }
     const args: CommandArgument[] = ["FLOW.VALUE.PUT", this.codec.encode(value), "NOW", options.nowMs ?? nowMs()];
     append(args, "PARTITION", options.partitionKey);
     append(args, "OWNER_FLOW_ID", options.ownerFlowId);
@@ -188,7 +191,6 @@ export class FerricStoreClient extends FerricStoreProducerClient {
     transitionTo?: string;
     runAtMs?: number;
     nowMs?: number;
-    priority?: number;
     values?: Record<string, unknown>;
     valueRefs?: Record<string, string>;
     dropValues?: string[];
@@ -211,7 +213,6 @@ export class FerricStoreClient extends FerricStoreProducerClient {
     append(args, "TRANSITION_TO", options.transitionTo);
     append(args, "RUN_AT", options.runAtMs);
     append(args, "NOW", options.nowMs ?? nowMs());
-    append(args, "PRIORITY", options.priority);
     appendNamedValues(args, this.codec, options);
     return await this.commandArgs(args);
   }
@@ -243,6 +244,7 @@ export class FerricStoreClient extends FerricStoreProducerClient {
     append(args, "CORRELATION_ID", options.correlationId);
     append(args, "PRIORITY", options.priority);
     append(args, "RETENTION_TTL_MS", options.retentionTtlMs);
+    append(args, "MAX_ACTIVE_MS", options.maxActiveMs);
     appendAttributes(args, options.attributes);
     appendStateMeta(args, options.stateMeta);
     appendNamedValues(args, this.codec, options);

@@ -16,6 +16,14 @@ npm install @ferricstore/ferricstore
 
 Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is tested with Node 22, 24, and 26.
 
+## Compatibility
+
+SDK `0.2.x` requires FerricStore server `0.8.0` or newer. FerricStore 0.8 is a
+breaking beta API contract update, while the native wire protocol remains v1
+(`FSNP` framing and existing opcode numbers are unchanged). Capabilities and
+response-size limits are negotiated per connection from the HELLO-shaped
+startup response rather than inferred from a server version table.
+
 ESM:
 
 ```ts
@@ -34,7 +42,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.7.5
+  ghcr.io/ferricstore/ferricstore:0.8.0
 ```
 
 ## Cluster-aware client
@@ -114,8 +122,10 @@ timeouts while waiting for a local flow-control or write-queue slot are
 
 Topology-aware clients retry one routed command or one physical fused pipeline
 after a successful topology refresh only when the server's typed reroute error
-explicitly reports `safe_to_retry: true`. Split or scattered pipelines and
-uncertain connection failures are never replayed.
+explicitly reports both `retryable: true` and `safe_to_retry: true`. Producer
+backpressure follows the same flags and honors `retry_after_ms` within the
+configured delay cap. Split or scattered pipelines and uncertain connection
+failures are never replayed.
 
 Connection-local state mutations (`AUTH`, `CLIENT SETNAME`, `QUIT`, `RESET`,
 and related native controls) are rejected on reconnecting and topology clients
@@ -161,12 +171,14 @@ const flow = await FerricStoreClient.fromUrl("ferric://fs0.example.com:6388", {
 });
 ```
 
-Native connections honor the flow-control windows advertised by `STARTUP` and
+Native connections honor the flow-control windows advertised by the
+HELLO-shaped `STARTUP` response and
 `WINDOW_UPDATE`. Available data-request slots are refilled immediately as
 responses finish; waiting requests are scheduled fairly across protocol lanes.
 The adapter also caps automatic lanes and same-lane work to the advertised lane
 queue, and caps ordered pipeline chunks and outbound frame bodies to the limits
-negotiated during `STARTUP`.
+negotiated during startup. Compact response codecs and aggregate response sizes
+are enabled only when advertised for that connection.
 Set `nativeOptions.maxQueuedRequests` to bound the local waiter queue (default
 `65_536`, or `0` to reject immediately when all advertised slots are occupied).
 Queue waiting counts toward `nativeOptions.timeoutMs`.

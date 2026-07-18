@@ -220,7 +220,7 @@ describe("typed data stores", () => {
     const entryCount = 70_000;
     const entries: [string, string][] = Array.from(
       { length: entryCount },
-      (_, index) => [`key:${index}`, `value:${index}`]
+      (_, index) => [`{bulk}:key:${index}`, `value:${index}`]
     );
     const executor = new FakeExecutor([Buffer.from("OK")]);
     const client = new FerricStoreClient(executor);
@@ -832,26 +832,20 @@ describe("typed data stores", () => {
       "topk:urls",
       10,
       { depth: 7 } as unknown as TopKReserveOptions
-    )).rejects.toThrow("width, depth, and decay must be provided together");
-    await expect(client.topk.reserve(
-      "topk:urls",
-      10,
-      { width: 8, depth: 7 } as unknown as TopKReserveOptions
-    )).rejects.toThrow("width, depth, and decay must be provided together");
+    )).rejects.toThrow("width and depth must be provided together");
     expect(executor.calls).toEqual([]);
 
     await expect(client.topk.reserve("topk:urls", 10, {
-      decay: 0.9,
       depth: 7,
       width: 8
     })).resolves.toBe(true);
-    expect(executor.calls).toEqual([["TOPK.RESERVE", "topk:urls", 10, 8, 7, 0.9]]);
+    expect(executor.calls).toEqual([["TOPK.RESERVE", "topk:urls", 10, 8, 7]]);
 
     const assertPartialTuningIsRejectedByTypeScript = (): void => {
       // @ts-expect-error TOPK.RESERVE tuning parameters are all-or-none.
       void client.topk.reserve("topk:urls", 10, { depth: 7 });
-      // @ts-expect-error TOPK.RESERVE tuning parameters are all-or-none.
-      void client.topk.reserve("topk:urls", 10, { width: 8, depth: 7 });
+      // @ts-expect-error FerricStore 0.8 removed TOPK.RESERVE decay.
+      void client.topk.reserve("topk:urls", 10, { width: 8, depth: 7, decay: 0.9 });
     };
     void assertPartialTuningIsRejectedByTypeScript;
   });

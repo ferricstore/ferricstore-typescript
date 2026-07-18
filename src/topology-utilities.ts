@@ -1,9 +1,9 @@
 import { Buffer } from "node:buffer";
-import { crc32 } from "./crc32.js";
+import { crc32, crc32Utf8 } from "./crc32.js";
 import { FerricStoreError } from "./errors.js";
 import { normalizeFerricUrlHost } from "./internal.js";
 import type { NativeProtocolEvent } from "./adapters.js";
-export { crc32 } from "./crc32.js";
+export { crc32, crc32Utf8 } from "./crc32.js";
 
 export interface RoutingEndpoint {
   readonly node: string;
@@ -233,24 +233,19 @@ export function hashTagOrKey(key: Buffer): Buffer {
   return end > start + 1 ? key.subarray(start + 1, end) : key;
 }
 
-export function flowHashTag(rest: Buffer, fallbackKey: Buffer): Buffer {
-  const end = rest.indexOf(CLOSE_BRACE);
-  return end > 0 ? rest.subarray(0, end) : hashTagOrKey(fallbackKey);
-}
-
 const ROUTE_SLOT_MASK = 1_023;
-const FLOW_KEY_PREFIX = Buffer.from("f:{");
-const VALUE_REF_FLOW_KEY_PREFIX = Buffer.from("X:f:{");
 
 export function routingSlotForKey(key: string | Buffer): number {
-  const keyBytes = Buffer.isBuffer(key) ? key : Buffer.from(key);
-  let hashInput: Buffer;
-  if (bufferStartsWith(keyBytes, FLOW_KEY_PREFIX)) {
-    hashInput = flowHashTag(keyBytes.subarray(FLOW_KEY_PREFIX.byteLength), keyBytes);
-  } else if (bufferStartsWith(keyBytes, VALUE_REF_FLOW_KEY_PREFIX)) {
-    hashInput = flowHashTag(keyBytes.subarray(VALUE_REF_FLOW_KEY_PREFIX.byteLength), keyBytes);
-  } else {
-    hashInput = hashTagOrKey(keyBytes);
+  if (typeof key === "string") {
+    const [start, end] = stringHashRange(key);
+    return crc32Utf8(key, start, end) & ROUTE_SLOT_MASK;
   }
-  return crc32(hashInput) & ROUTE_SLOT_MASK;
+  const keyBytes = key;
+  return crc32(hashTagOrKey(keyBytes)) & ROUTE_SLOT_MASK;
+}
+
+function stringHashRange(key: string): readonly [number, number] {
+  const startBrace = key.indexOf("{");
+  const endBrace = startBrace < 0 ? -1 : key.indexOf("}", startBrace + 1);
+  return endBrace > startBrace + 1 ? [startBrace + 1, endBrace] : [0, key.length];
 }

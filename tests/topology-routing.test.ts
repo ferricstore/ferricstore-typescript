@@ -728,8 +728,8 @@ test("TopologyNativeAdapterPool fans out decomposable cross-shard commands and r
       request.opcode === OPCODES.flowClaimDue && (request.flags & FLAG_CUSTOM_PAYLOAD) !== 0
     )).toBe(true);
     expect(highRequests.some((request) => request.opcode === OPCODES.flowClaimDue)).toBe(false);
-    expect(lowRequests.some((request) => commandExecName(request) === "FLOW.SIGNAL")).toBe(true);
-    expect(highRequests.some((request) => commandExecName(request) === "FLOW.SIGNAL")).toBe(false);
+    expect(lowRequests.some((request) => request.opcode === OPCODES.flowSignal)).toBe(true);
+    expect(highRequests.some((request) => request.opcode === OPCODES.flowSignal)).toBe(false);
     expect(lowRequests.some((request) => request.opcode === OPCODES.flowValuePut)).toBe(true);
     expect(highRequests.some((request) => request.opcode === OPCODES.flowValuePut)).toBe(false);
   } finally {
@@ -967,7 +967,7 @@ test("TopologyNativeAdapterPool retries one explicitly safe reroute on the refre
   }));
   const endpoints: string[] = [];
   const reroute = new RerouteError("try another node", {
-    raw: { code: "reroute", safe_to_retry: true }
+    raw: { code: "reroute", retryable: true, safe_to_retry: true }
   });
   const internals = pool as unknown as {
     adapterForEndpoint(endpoint: { host: string }): Promise<NativeAdapter>;
@@ -1009,7 +1009,7 @@ test("TopologyNativeAdapterPool retries one explicitly safe fused request on the
   }));
   const endpoints: string[] = [];
   const reroute = new RerouteError("try another node", {
-    raw: { code: "reroute", safe_to_retry: true }
+    raw: { code: "reroute", retryable: true, safe_to_retry: true }
   });
   const internals = pool as unknown as {
     adapterForEndpoint(endpoint: { host: string }): Promise<NativeAdapter>;
@@ -1051,7 +1051,7 @@ test("TopologyNativeAdapterPool refreshes only for typed or exact route failures
     })
   );
   let failure: Error = new RerouteError("try another node", {
-    raw: { code: "reroute", safe_to_retry: true }
+    raw: { code: "reroute", retryable: true, safe_to_retry: true }
   });
   let attempts = 0;
   const refresh = vi.fn(async () => pool.topology);
@@ -1074,7 +1074,7 @@ test("TopologyNativeAdapterPool refreshes only for typed or exact route failures
 
     refresh.mockClear();
     failure = new RerouteError("unsafe reroute", {
-      raw: { code: "reroute", safe_to_retry: false }
+      raw: { code: "reroute", retryable: true, safe_to_retry: false }
     });
     await expect(pool.executeCommand("GET", "key")).rejects.toBe(failure);
     expect(refresh).toHaveBeenCalledOnce();

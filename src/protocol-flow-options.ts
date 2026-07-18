@@ -3,6 +3,7 @@ import { FerricStoreError } from "./errors.js";
 import type { CommandArgument } from "./internal.js";
 import { denseCommandArgumentSlice, hasOwnCommandArgument } from "./protocol-array-validation.js";
 import * as core from "./protocol-core.js";
+import { setFlowOptionValue } from "./protocol-flow-option-value.js";
 
 export const OPTION_FIELDS: Record<string, string> = {
   CONSISTENT_PROJECTION: "consistent_projection",
@@ -200,8 +201,9 @@ export function parseFlowOptions(
       case "TRANSITION_TO":
       case "TO_EVENT":
       case "EXPECT_STATE": {
-        const field = token.toLowerCase();
-        if (!putScalar(payload, field, args, index + 1, end)) return undefined;
+        const field = token === "IDEMPOTENCY" ? "idempotency_key" : token.toLowerCase();
+        if (!hasOwnCommandArgument(args, index + 1, end, "Flow options")) return undefined;
+        setFlowOptionValue(payload, field, args[index + 1], token === "IF_STATE");
         index += 2;
         break;
       }

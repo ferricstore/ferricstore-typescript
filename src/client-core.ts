@@ -308,14 +308,15 @@ export class FerricStoreClientCore extends FerricStoreAdministrationClient {
   async fetchOrComputeResult(
     key: string,
     value: unknown,
-    options: { ttlMs: number; computeToken: Buffer | null }
+    options: { ttlMs: number; computeToken: Buffer }
   ): Promise<boolean> {
     const computeToken = fetchOrComputeCompletionToken(options);
     const encoded = this.codec.encode(value);
     return okResponse(await this.command(
       "FETCH_OR_COMPUTE_RESULT",
       key,
-      ...(computeToken === null ? [encoded] : [computeToken, encoded]),
+      computeToken,
+      encoded,
       options.ttlMs
     ));
   }
@@ -323,13 +324,13 @@ export class FerricStoreClientCore extends FerricStoreAdministrationClient {
   async fetchOrComputeError(
     key: string,
     message: string,
-    options: { computeToken: Buffer | null }
+    options: { computeToken: Buffer }
   ): Promise<boolean> {
     const computeToken = fetchOrComputeCompletionToken(options);
     return okResponse(await this.command(
       "FETCH_OR_COMPUTE_ERROR",
       key,
-      ...(computeToken === null ? [] : [computeToken]),
+      computeToken,
       message
     ));
   }

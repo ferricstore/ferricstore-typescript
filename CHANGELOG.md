@@ -6,6 +6,32 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-18
+
+### Added
+
+- FerricStore 0.8 `max_active_ms` support across Flow creation, create-many, start-and-claim, child spawning, type policies, records, and timeout failure details, including `infinity` inputs.
+- Strict `SET` support for `EXAT`, `PXAT`, and `KEEPTTL`, plus local same-slot validation for atomic `MSET` and `MSETNX`.
+- Exported SDK, minimum-server (`0.8.0`), and native-protocol (`v1`) compatibility constants and package metadata.
+
+### Changed
+
+- Treat FerricStore 0.8 as a breaking beta contract while retaining the v1 native magic, headers, flags, and opcode table.
+- Negotiate compact response opcode support and `max_response_bytes` from each connection's HELLO-shaped startup response; chunked replies are correlated by lane, opcode, and request id and bounded while assembling.
+- Require three-field `FETCH_OR_COMPUTE` compute replies and ownership tokens on both completion commands.
+- Use canonical `parent_flow_id` and `root_flow_id`, the 0.8 `FLOW.SIGNAL` `id`/`signal` schema, explicit Flow effect routing, and the decay-free `TOPK.RESERVE` grammar.
+- Follow server `retryable`, `safe_to_retry`, and `retry_after_ms` metadata; uncertain sent mutations remain non-replayable.
+- Keep unauthenticated outbound frames within 64 KiB until authentication succeeds and avoid constructing reserved Flow storage keys for client routing.
+
+### Fixed
+
+- Preserve unknown compact Flow record extensions, decode `max_active_ms` failures, and require lease plus fencing tokens on fenced mutations (fencing alone for cancel).
+- Reassemble chunked compact `MGET` and `FLOW.VALUE.MGET` responses without intermediate payload copies and enforce negotiated aggregate response limits.
+
+### Removed
+
+- Removed tokenless fetch completion APIs, TopK decay, and `parent_id`/`root_id` compatibility aliases.
+
 ## [0.1.7] - 2026-07-15
 
 ### Added

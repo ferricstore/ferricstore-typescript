@@ -58,6 +58,23 @@ describe("release workflow", () => {
 });
 
 describe("core compatibility CI", () => {
+  it("declares the breaking 0.8 server contract while retaining native wire v1", () => {
+    const metadata = JSON.parse(readFileSync(`${repositoryRoot}/package.json`, "utf8")) as {
+      ferricstore?: { minimumServerVersion?: string; nativeProtocolVersion?: number };
+      version?: string;
+    };
+    const manifest = JSON.parse(
+      readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
+    ) as { magic?: string; requestVersion?: number };
+
+    expect(metadata.version).toBe("0.2.0");
+    expect(metadata.ferricstore).toEqual({
+      minimumServerVersion: "0.8.0",
+      nativeProtocolVersion: 1
+    });
+    expect(manifest).toMatchObject({ magic: "FSNP", requestVersion: 1 });
+  });
+
   it("runs routing and native ABI parity against a pinned core checkout and cannot silently skip", () => {
     const source = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
     const parityJob = workflowJob(source, "core-routing-parity");
@@ -125,6 +142,11 @@ describe("workflow supply-chain security", () => {
 });
 
 describe("source architecture", () => {
+  it("does not construct reserved Flow storage keys for topology routing", () => {
+    const routing = readFileSync(`${repositoryRoot}/src/topology-routing.ts`, "utf8");
+    expect(routing).not.toMatch(/`f:\{(?:f|fa):/u);
+  });
+
   it("keeps hand-maintained modules at or below 450 lines", () => {
     const sourceDirectory = `${repositoryRoot}/src`;
     const oversized = readdirSync(sourceDirectory)

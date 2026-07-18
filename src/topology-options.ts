@@ -1,7 +1,8 @@
 import type { NativeAdapterOptions, TopologyNativeAdapterOptions } from "./adapters.js";
 import { snapshotNativeClientOptions, topologyNativeOptions } from "./client-native-options.js";
-import { ConnectionClosedError, RerouteError } from "./errors.js";
-import { getField, parseFerricUrl } from "./topology-utilities.js";
+import { ConnectionClosedError, FerricStoreError, RerouteError } from "./errors.js";
+import { sleep } from "./internal.js";
+import { parseFerricUrl } from "./topology-utilities.js";
 
 const DEFAULT_TOPOLOGY_CONCURRENCY = 16;
 
@@ -97,5 +98,18 @@ export function isExplicitlySafeReroute(error: unknown): boolean {
   if (error instanceof ConnectionClosedError) {
     return error.requestDisposition === "unsent";
   }
-  return error instanceof RerouteError && getField(error.raw, "safe_to_retry") === true;
+  return error instanceof RerouteError &&
+    error.retryable === true &&
+    error.safeToRetry === true;
+}
+
+export function retryAfterMs(error: unknown): number {
+  return error instanceof FerricStoreError ? error.retryAfterMs ?? 0 : 0;
+}
+
+export async function waitForExplicitlySafeReroute(error: unknown): Promise<boolean> {
+  if (!isExplicitlySafeReroute(error)) return false;
+  const delayMs = retryAfterMs(error);
+  if (delayMs > 0) await sleep(delayMs);
+  return true;
 }

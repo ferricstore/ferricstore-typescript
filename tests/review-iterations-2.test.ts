@@ -14,6 +14,7 @@ import {
   OPCODES,
   STATUS_OK
 } from "../src/protocol.js";
+import { compactResponseHints } from "./compact-response-test-support.js";
 import { TopologyPipelineExecutor } from "../src/topology-pipeline.js";
 import { BackpressureSocket, directNativeAdapter } from "./adapter-test-support.js";
 import { FakeExecutor } from "./fake-executor.js";
@@ -199,6 +200,6 @@ describe("second ten-pass review regressions", () => {
       laneId: 0,
       opcode: OPCODES.pipeline,
       requestId: 1n
-    }, OPCODES.pipeline)).toThrow("compact pipeline item count exceeds response bytes");
+    }, OPCODES.pipeline, compactResponseHints)).toThrow("compact pipeline item count exceeds response bytes");
   });
 });

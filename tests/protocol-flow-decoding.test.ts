@@ -10,6 +10,7 @@ import {
   type ResponseFrame
 } from "../src/protocol.js";
 import { CLAIMED_ITEM_WIRE, claimedItemFromResp } from "../src/types.js";
+import { compactResponseHints } from "./compact-response-test-support.js";
 
 describe("native Flow protocol decoding limits", () => {
   it("rejects compact Flow response kinds on unrelated opcodes", () => {
@@ -28,10 +29,13 @@ describe("native Flow protocol decoding limits", () => {
 
     const recordBody = Buffer.concat([Buffer.from([0, 0, 0x84]), u32(0)]);
     const recordListBody = Buffer.concat([Buffer.from([0, 0, 0x85]), u32(0)]);
-    expect(decodeResponse(responseFrame(OPCODES.flowGet, recordBody), OPCODES.flowGet)).toEqual({});
+    expect(decodeResponse(
+      responseFrame(OPCODES.flowGet, recordBody), OPCODES.flowGet, compactResponseHints
+    )).toEqual({});
     expect(decodeResponse(
       responseFrame(COMMAND_OPCODES["FLOW.LIST"], recordListBody),
-      COMMAND_OPCODES["FLOW.LIST"]
+      COMMAND_OPCODES["FLOW.LIST"],
+      compactResponseHints
     )).toEqual([]);
   });
 
@@ -49,7 +53,9 @@ describe("native Flow protocol decoding limits", () => {
       i64(unsafe)
     ]);
 
-    expect(decodeResponse(responseFrame(OPCODES.flowClaimDue, body), OPCODES.flowClaimDue)).toEqual([
+    expect(decodeResponse(
+      responseFrame(OPCODES.flowClaimDue, body), OPCODES.flowClaimDue, compactResponseHints
+    )).toEqual([
       [id, partition, lease, unsafe]
     ]);
   });
@@ -163,7 +169,9 @@ describe("native Flow protocol decoding limits", () => {
       values
     ]);
 
-    expect(() => decodeResponse(responseFrame(OPCODES.flowGet, body), OPCODES.flowGet)).toThrow(
+    expect(() => decodeResponse(
+      responseFrame(OPCODES.flowGet, body), OPCODES.flowGet, compactResponseHints
+    )).toThrow(
       "total items exceed max items"
     );
   });
@@ -171,7 +179,9 @@ describe("native Flow protocol decoding limits", () => {
   it("rejects compact response counts above the decoder item limit", () => {
     const body = Buffer.concat([Buffer.from([0, 0, 0x81]), u32(100_001)]);
 
-    expect(() => decodeResponse(responseFrame(OPCODES.pipeline, body), OPCODES.pipeline)).toThrow(
+    expect(() => decodeResponse(
+      responseFrame(OPCODES.pipeline, body), OPCODES.pipeline, compactResponseHints
+    )).toThrow(
       "exceeds max items"
     );
   });

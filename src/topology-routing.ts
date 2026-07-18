@@ -24,6 +24,7 @@ import {
 } from "./protocol.js";
 import {
   crc32,
+  crc32Utf8,
   getField,
   isPlainObject,
   routingSlotForKey
@@ -50,7 +51,9 @@ export function routingKeyFromProtocolPayload(
   }
 
   if (isPlainObject(command.payload)) {
-    for (const field of ["key", "partition_key", "id", "owner_flow_id", "parent_id", "root_id", "correlation_id", "scope"]) {
+    for (const field of [
+      "key", "partition_key", "id", "owner_flow_id", "parent_flow_id", "root_flow_id", "correlation_id", "scope"
+    ]) {
       const value = getField(command.payload, field);
       if (typeof value === "string" || Buffer.isBuffer(value)) {
         return value;
@@ -257,7 +260,7 @@ function flowLogicalPartitionRoutingKey(value: unknown): string | undefined {
   if (autoMatch != null) {
     const bucket = Number(autoMatch[1]);
     if (bucket < 256) {
-      return `f:{fa:${bucket}}:route`;
+      return `{fa:${bucket}}`;
     }
   }
   const cacheKey = `${Buffer.isBuffer(value) ? "b" : "s"}:${bytes.toString("base64")}`;
@@ -269,7 +272,7 @@ function flowLogicalPartitionRoutingKey(value: unknown): string | undefined {
   }
 
   const digest = createHash("sha256").update(bytes).digest("base64url");
-  const routeKey = `f:{f:${digest}}:route`;
+  const routeKey = `{f:${digest}}`;
   if (flowPartitionRouteCache.size >= FLOW_PARTITION_ROUTE_CACHE_MAX) {
     const oldest = flowPartitionRouteCache.keys().next().value;
     if (oldest != null) flowPartitionRouteCache.delete(oldest);
@@ -282,16 +285,15 @@ function flowAutoIdRoutingKey(value: unknown): string | undefined {
   if (typeof value !== "string" && !Buffer.isBuffer(value)) {
     return undefined;
   }
-  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
-  const bucket = crc32(bytes) & 0xff;
-  return `f:{fa:${bucket}}:route`;
+  const bucket = (Buffer.isBuffer(value) ? crc32(value) : crc32Utf8(value)) & 0xff;
+  return `{fa:${bucket}}`;
 }
 
 function flowClaimLogicalPartitionRoutingKey(value: unknown): string | undefined {
   if (typeof value !== "string" && !Buffer.isBuffer(value)) return undefined;
   const selector = commandPart(value);
   if (selector === "AUTO" || selector === "ANY") return undefined;
-  if (selector === "GLOBAL") return "f:{f}:route";
+  if (selector === "GLOBAL") return "{f}";
   return flowLogicalPartitionRoutingKey(value);
 }
 

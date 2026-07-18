@@ -1,6 +1,6 @@
 {
   "name": "@ferricstore/ferricstore",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "description": "TypeScript SDK for FerricStore and FerricFlow",
   "type": "module",
   "license": "Apache-2.0",
@@ -31,6 +31,10 @@
   ],
   "engines": {
     "node": ">=22.22"
+  },
+  "ferricstore": {
+    "minimumServerVersion": "0.8.0",
+    "nativeProtocolVersion": 1
   },
   "packageManager": "npm@11.6.2",
   "sideEffects": false,

@@ -14,12 +14,13 @@ import {
 } from "../src/protocol.js";
 import { InvalidCommandError, OverloadedError } from "../src/errors.js";
 import type { CommandArgument } from "../src/internal.js";
+import { compactResponseHints } from "./compact-response-test-support.js";
 
 describe("native Flow protocol codec", () => {
   it("decodes compact GET responses", () => {
     const value = Buffer.from("value");
     const body = Buffer.concat([Buffer.from([0, 0, 0x82, 1]), u32(value.byteLength), value]);
-    const decoded = decodeResponse(responseFrame(OPCODES.get, body), OPCODES.get);
+    const decoded = decodeResponse(responseFrame(OPCODES.get, body), OPCODES.get, compactResponseHints);
 
     expect(Buffer.isBuffer(decoded)).toBe(true);
     expect((decoded as Buffer).toString("utf8")).toBe("value");
@@ -33,7 +34,7 @@ describe("native Flow protocol codec", () => {
       OPCODES.flowFailMany,
       COMMAND_OPCODES["FLOW.CANCEL_MANY"]
     ]) {
-      const decoded = decodeResponse(responseFrame(opcode, body), opcode);
+      const decoded = decodeResponse(responseFrame(opcode, body), opcode, compactResponseHints);
       expect((decoded as Buffer[]).map((item) => item.toString("utf8"))).toEqual(["OK", "OK"]);
     }
   });
@@ -107,7 +108,9 @@ describe("native Flow protocol codec", () => {
       binary(value),
       Buffer.from([0, 0])
     ]);
-    const decoded = decodeResponse(responseFrame(OPCODES.pipeline, body), OPCODES.pipeline);
+    const decoded = decodeResponse(
+      responseFrame(OPCODES.pipeline, body), OPCODES.pipeline, compactResponseHints
+    );
 
     expect(decoded).toEqual([value, null]);
     expect(unwrapPipelineResponse(decoded)).toBe(decoded);
@@ -125,7 +128,9 @@ describe("native Flow protocol codec", () => {
       binary(first),
       binary(second)
     ]);
-    const decoded = decodeResponse(responseFrame(OPCODES.pipeline, body), OPCODES.pipeline);
+    const decoded = decodeResponse(
+      responseFrame(OPCODES.pipeline, body), OPCODES.pipeline, compactResponseHints
+    );
 
     expect(unwrapPipelineResponse(decoded)).toEqual([[first, second]]);
   });
@@ -139,7 +144,9 @@ describe("native Flow protocol codec", () => {
       Buffer.from([1]),
       binary(raw)
     ]);
-    const decoded = decodeResponse(responseFrame(OPCODES.pipeline, body), OPCODES.pipeline);
+    const decoded = decodeResponse(
+      responseFrame(OPCODES.pipeline, body), OPCODES.pipeline, compactResponseHints
+    );
     const collected = unwrapPipelineResponse(decoded, { throwOnItemError: false });
 
     expect(collected).toBe(decoded);
@@ -616,7 +623,7 @@ describe("native Flow protocol codec", () => {
     });
   });
 
-  it("keeps invalid routed COMMAND_EXEC Flow values on the server-validated path", () => {
+  it("validates integer FLOW.SIGNAL options before native dispatch", () => {
     const args: readonly CommandArgument[] = [
       "FLOW.SIGNAL",
       "flow-1",
@@ -628,13 +635,7 @@ describe("native Flow protocol codec", () => {
       "not-a-number"
     ];
 
-    expect(buildProtocolCommand(args)).toEqual({
-      opcode: OPCODES.commandExec,
-      payload: {
-        args: args.slice(1),
-        command: "FLOW.SIGNAL"
-      }
-    });
+    expect(() => buildProtocolCommand(args)).toThrow("integer command argument must be an integer");
   });
 
   it("preserves prototype-shaped attribute names in native command maps", () => {
@@ -1005,7 +1006,9 @@ describe("native Flow protocol codec", () => {
       encodeValue(attrs)
     ]);
 
-    const decoded = decodeResponse(responseFrame(OPCODES.flowClaimDue, body), OPCODES.flowClaimDue);
+    const decoded = decodeResponse(
+      responseFrame(OPCODES.flowClaimDue, body), OPCODES.flowClaimDue, compactResponseHints
+    );
 
     expect(decoded).toEqual([[id, partition, lease, 9, null, attrs]]);
   });
@@ -1025,7 +1028,9 @@ describe("native Flow protocol codec", () => {
       binary(runState)
     ]);
 
-    expect(decodeResponse(responseFrame(OPCODES.flowClaimDue, body), OPCODES.flowClaimDue)).toEqual([
+    expect(decodeResponse(
+      responseFrame(OPCODES.flowClaimDue, body), OPCODES.flowClaimDue, compactResponseHints
+    )).toEqual([
       [id, partition, lease, 9, runState]
     ]);
   });
@@ -1045,16 +1050,16 @@ describe("native Flow protocol codec", () => {
       binary(runState)
     ]);
     const frame = responseFrame(OPCODES.flowClaimDue, body);
-    const decodeWithHints = decodeResponse as unknown as (
-      response: Parameters<typeof decodeResponse>[0],
-      opcode: number,
-      hints: { readonly compactClaimMode: "base" | "state" }
-    ) => unknown;
-
-    expect(() => decodeWithHints(frame, OPCODES.flowClaimDue, { compactClaimMode: "base" })).toThrow(
+    expect(() => decodeResponse(frame, OPCODES.flowClaimDue, {
+      ...compactResponseHints,
+      compactClaimMode: "base"
+    })).toThrow(
       "expected base"
     );
-    expect(decodeWithHints(frame, OPCODES.flowClaimDue, { compactClaimMode: "state" })).toEqual([
+    expect(decodeResponse(frame, OPCODES.flowClaimDue, {
+      ...compactResponseHints,
+      compactClaimMode: "state"
+    })).toEqual([
       [id, partition, lease, 9, runState]
     ]);
   });
@@ -1088,9 +1093,11 @@ describe("native Flow protocol codec", () => {
     const frame = responseFrame(OPCODES.pipeline, body);
 
     expect(() => decodeResponse(frame, OPCODES.pipeline, {
+      ...compactResponseHints,
       pipelineClaimModes: ["base"]
     })).toThrow("trailing compact pipeline bytes");
     expect(decodeResponse(frame, OPCODES.pipeline, {
+      ...compactResponseHints,
       pipelineClaimModes: ["state"]
     })).toEqual([[id, partition, lease, 9, runState]]);
   });

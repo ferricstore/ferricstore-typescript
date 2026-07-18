@@ -17,15 +17,15 @@ export function clientNameResponse(response: unknown): string | null {
 }
 
 export function fetchOrComputeCompletionToken(
-  options: { readonly computeToken: Buffer | null } | undefined
-): Buffer | null {
+  options: { readonly computeToken: Buffer } | undefined
+): Buffer {
   if (options == null || !Object.hasOwn(options, "computeToken") || options.computeToken === undefined) {
     throw new TypeError(
-      "fetch-or-compute completion requires computeToken; pass null only for a legacy tokenless lease"
+      "fetch-or-compute completion requires computeToken"
     );
   }
-  if (options.computeToken !== null && !Buffer.isBuffer(options.computeToken)) {
-    throw new TypeError("fetch-or-compute computeToken must be a Buffer or explicit null for a legacy lease");
+  if (!Buffer.isBuffer(options.computeToken)) {
+    throw new TypeError("fetch-or-compute computeToken must be a Buffer");
   }
   return options.computeToken;
 }

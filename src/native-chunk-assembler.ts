@@ -12,8 +12,12 @@ export class NativeChunkAssembler {
   constructor(
     private readonly maxChunkBytes: number,
     private readonly maxChunkFrames: number,
-    private readonly maxResponseBytes: number
+    private maxResponseBytes: number
   ) {}
+
+  updateMaxResponseBytes(limit: number): void {
+    this.maxResponseBytes = Math.min(this.maxResponseBytes, limit);
+  }
 
   assemble(frame: ResponseFrame): ResponseFrame | undefined {
     const key = `${frame.requestId}:${frame.opcode}:${frame.laneId}`;

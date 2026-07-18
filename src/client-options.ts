@@ -114,6 +114,8 @@ export interface StartAndClaimOptions {
   nowMs?: number;
   priority?: number;
   retentionTtlMs?: number;
+  /** Maximum active lifetime from creation, or "infinity" to disable a type policy timeout. */
+  maxActiveMs?: MaxActiveMs;
   attributes?: Record<string, CommandArgument>;
   stateMeta?: StateMeta;
   values?: Record<string, unknown>;

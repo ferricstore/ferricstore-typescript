@@ -415,7 +415,7 @@ export function flowSpawnChildrenPayload(args: readonly CommandArgument[]): wire
   const options = parseFlowOptions(args, 1, itemsIndex, {
     allowed: new Set([
       "GROUP", "WAIT", "NOW", "PARTITION", "LEASE_TOKEN", "FENCING", "WAIT_STATE", "SUCCESS",
-      "FAILURE", "FROM_STATE", "ON_CHILD_FAILED", "ON_PARENT_CLOSED", "VALUE", "VALUE_REF"
+      "FAILURE", "FROM_STATE", "ON_CHILD_FAILED", "ON_PARENT_CLOSED", "MAX_ACTIVE_MS", "VALUE", "VALUE_REF"
     ])
   });
   if (options == null) return undefined;

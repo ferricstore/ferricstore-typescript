@@ -3,6 +3,7 @@ import { FerricStoreError } from "./errors.js";
 import type { Command, CommandArgument } from "./internal.js";
 
 import * as flow from "./protocol-flow.js";
+import { flowSignalPayload } from "./protocol-flow-signal.js";
 import {
   assertNormalizedCommandDoesNotRequirePinnedConnection,
   commandMutatesConnectionState
@@ -36,6 +37,7 @@ import {
   planValueWithLimit,
   writeValuePlan
 } from "./protocol-value.js";
+import { assertKeyValueCommandSharesSlot } from "./key-slot-validation.js";
 export { decodeValue, encodeValue } from "./protocol-value.js";
 export { decodeResponse, unwrapPipelineResponse } from "./protocol-response.js";
 
@@ -112,6 +114,9 @@ export function buildProtocolCommand(
   }
   const command = asText(args[0]).toUpperCase();
   assertNormalizedCommandDoesNotRequirePinnedConnection(args, command);
+  if (command === "MSET" || command === "MSETNX") {
+    assertKeyValueCommandSharesSlot(args, command);
+  }
   const commandArgs = args.slice(1);
 
   if (command === "COMMAND_EXEC" && commandArgs.length >= 1) {
@@ -246,10 +251,7 @@ export function buildProtocolCommand(
     ])) ?? commandExec(args);
   }
   if (command === "FLOW.SIGNAL") {
-    return flow.flowCommandExecWithRouting(command, commandArgs, 1, new Set([
-      "SIGNAL", "PARTITION", "IDEMPOTENCY", "IF_STATE", "TRANSITION_TO", "RUN_AT", "NOW", "PRIORITY",
-      "VALUE", "VALUE_REF", "DROP_VALUE", "OVERRIDE_VALUE"
-    ]));
+    return flowSignalPayload(commandArgs) ?? commandExec(args);
   }
   if (command === "FLOW.CANCEL") {
     return flow.flowCommandExecWithRouting(command, commandArgs, 1, new Set([

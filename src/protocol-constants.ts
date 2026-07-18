@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { FerricStoreError } from "./errors.js";
+import type { CompactResponseOpcodes } from "./native-negotiation.js";
 import nativeProtocol from "./native-protocol-manifest.json" with { type: "json" };
 
 export const MAGIC = nativeProtocol.magic;
@@ -231,6 +232,7 @@ export const OPCODES = {
   flowFail: COMMAND_OPCODES["FLOW.FAIL"],
   flowValuePut: COMMAND_OPCODES["FLOW.VALUE.PUT"],
   flowValueMGet: COMMAND_OPCODES["FLOW.VALUE.MGET"],
+  flowSignal: COMMAND_OPCODES["FLOW.SIGNAL"],
   flowCreateMany: COMMAND_OPCODES["FLOW.CREATE_MANY"],
   flowCompleteMany: COMMAND_OPCODES["FLOW.COMPLETE_MANY"],
   flowTransitionMany: COMMAND_OPCODES["FLOW.TRANSITION_MANY"],
@@ -243,68 +245,6 @@ export const OPCODES = {
   flowRunStepsMany: COMMAND_OPCODES["FLOW.RUN_STEPS_MANY"],
   flowSearch: COMMAND_OPCODES["FLOW.SEARCH"]
 } as const;
-
-/** Direct compact response kinds advertised by the FerricStore native protocol. */
-export const COMPACT_RESPONSE_OPCODES = {
-  flow_claim_jobs_v1: [COMMAND_OPCODES["FLOW.CLAIM_DUE"]],
-  flow_record_list_v1: [
-    COMMAND_OPCODES["FLOW.LIST"],
-    COMMAND_OPCODES["FLOW.TERMINALS"],
-    COMMAND_OPCODES["FLOW.FAILURES"],
-    COMMAND_OPCODES["FLOW.BY_PARENT"],
-    COMMAND_OPCODES["FLOW.BY_ROOT"],
-    COMMAND_OPCODES["FLOW.BY_CORRELATION"],
-    COMMAND_OPCODES["FLOW.STUCK"]
-  ],
-  flow_record_v1: [COMMAND_OPCODES["FLOW.GET"]],
-  kv_get_v1: [COMMAND_OPCODES.GET],
-  kv_mget_v1: [COMMAND_OPCODES.MGET, COMMAND_OPCODES["FLOW.VALUE.MGET"]],
-  ok_list_v1: [
-    COMMAND_OPCODES.SET,
-    COMMAND_OPCODES.MSET,
-    COMMAND_OPCODES["FLOW.CREATE_MANY"],
-    COMMAND_OPCODES["FLOW.COMPLETE_MANY"],
-    COMMAND_OPCODES["FLOW.RETRY_MANY"],
-    COMMAND_OPCODES["FLOW.FAIL_MANY"],
-    COMMAND_OPCODES["FLOW.CANCEL_MANY"]
-  ],
-  pipeline_v1: [COMMAND_OPCODES.PIPELINE]
-} as const;
-
-export const COMPACT_KIND_FLOW_CLAIM_JOBS = 1 << 0;
-export const COMPACT_KIND_FLOW_RECORD = 1 << 1;
-export const COMPACT_KIND_FLOW_RECORD_LIST = 1 << 2;
-export const COMPACT_KIND_KV_GET = 1 << 3;
-export const COMPACT_KIND_KV_MGET = 1 << 4;
-export const COMPACT_KIND_OK_LIST = 1 << 5;
-export const COMPACT_KIND_PIPELINE = 1 << 6;
-export const compactResponseOpcodeKinds = new Uint8Array(
-  Math.max(...Object.values(COMPACT_RESPONSE_OPCODES).flat()) + 1
-);
-
-registerCompactResponseOpcodes(COMPACT_KIND_FLOW_CLAIM_JOBS, COMPACT_RESPONSE_OPCODES.flow_claim_jobs_v1);
-registerCompactResponseOpcodes(COMPACT_KIND_FLOW_RECORD, COMPACT_RESPONSE_OPCODES.flow_record_v1);
-registerCompactResponseOpcodes(COMPACT_KIND_FLOW_RECORD_LIST, COMPACT_RESPONSE_OPCODES.flow_record_list_v1);
-registerCompactResponseOpcodes(COMPACT_KIND_KV_GET, COMPACT_RESPONSE_OPCODES.kv_get_v1);
-registerCompactResponseOpcodes(COMPACT_KIND_KV_MGET, [
-  ...COMPACT_RESPONSE_OPCODES.kv_mget_v1,
-  COMMAND_OPCODES.PIPELINE
-]);
-registerCompactResponseOpcodes(COMPACT_KIND_OK_LIST, [
-  ...COMPACT_RESPONSE_OPCODES.ok_list_v1,
-  COMMAND_OPCODES.PIPELINE
-]);
-registerCompactResponseOpcodes(COMPACT_KIND_PIPELINE, COMPACT_RESPONSE_OPCODES.pipeline_v1);
-
-export function registerCompactResponseOpcodes(kind: number, opcodes: readonly number[]): void {
-  for (const opcode of opcodes) {
-    compactResponseOpcodeKinds[opcode] = (compactResponseOpcodeKinds[opcode] ?? 0) | kind;
-  }
-}
-
-export function compactResponseOpcodeSupports(opcode: number, kind: number): boolean {
-  return ((compactResponseOpcodeKinds[opcode] ?? 0) & kind) !== 0;
-}
 
 export const COMPACT_FLOW_CLAIM_JOBS = 0x80;
 export const COMPACT_OK_LIST = 0x81;
@@ -403,6 +343,7 @@ export type CompactClaimMode = "base" | "attrs" | "state" | "stateAttrs";
 
 export interface ResponseDecodeHints {
   readonly compactClaimMode?: CompactClaimMode;
+  readonly compactResponseOpcodes?: CompactResponseOpcodes;
   readonly pipelineClaimModes?: readonly (CompactClaimMode | undefined)[];
 }
 

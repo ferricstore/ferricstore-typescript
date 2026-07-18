@@ -577,7 +577,7 @@ test("NativeAdapter gives finite blocking claims their server wait plus transpor
     if (request.opcode === OPCODES.flowClaimDue) {
       setTimeout(() => {
         socket.write(responseFrame(request.opcode, request.laneId, request.requestId, []));
-      }, 25);
+      }, 50);
       return NO_RESPONSE;
     }
     return undefined;
@@ -585,7 +585,7 @@ test("NativeAdapter gives finite blocking claims their server wait plus transpor
   const address = server.address() as AddressInfo;
   const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
     connectTimeoutMs: 1_000,
-    timeoutMs: 10
+    timeoutMs: 20
   });
 
   try {
@@ -599,7 +599,7 @@ test("NativeAdapter gives finite blocking claims their server wait plus transpor
       "LIMIT",
       1,
       "BLOCK",
-      30,
+      200,
       "RETURN",
       "JOBS_COMPACT"
     )).resolves.toEqual([]);

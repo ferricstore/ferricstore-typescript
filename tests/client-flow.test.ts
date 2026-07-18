@@ -8,10 +8,22 @@ import {
   StaleLeaseError
 } from "../src/index.js";
 import type { CommandExecutor } from "../src/adapters.js";
-import { autoPartitionKeyForId } from "../src/internal.js";
 import { FakeExecutor } from "./fake-executor.js";
 
 describe("FerricStoreClient Flow and administration", () => {
+  it("rejects TTLs on named Flow values before dispatch", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
+
+    await expect(client.valuePut({ stored: true }, {
+      name: "handler",
+      ownerFlowId: "flow-1",
+      partitionKey: "tenant-a",
+      ttlMs: 60_000
+    })).rejects.toThrow(/named Flow values cannot have a TTL/u);
+    expect(executor.calls).toHaveLength(0);
+  });
+
   it("builds FLOW.CREATE with explicit state-machine data", async () => {
     const executor = new FakeExecutor();
     const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
@@ -1143,8 +1155,7 @@ describe("FerricStoreClient Flow and administration", () => {
       "FLOW.GOVERNANCE.LEDGER"
     ]);
     expect(calls[4]).toEqual([
-      "FLOW.EFFECT.GET", "flow-1", "EFFECT_KEY", "charge", "PARTITION",
-      autoPartitionKeyForId("flow-1")
+      "FLOW.EFFECT.GET", "flow-1", "EFFECT_KEY", "charge"
     ]);
     expect(calls[21]).toEqual([
       "FLOW.LIMIT.RELEASE", "payments", "SHARD_ID", 1, "AMOUNT", 1,
@@ -1156,18 +1167,13 @@ describe("FerricStoreClient Flow and administration", () => {
     ]);
   });
 
-  it("defaults governance ledger reads to the flow id's auto partition", async () => {
+  it("routes governance ledger reads by Flow id when no partition is explicit", async () => {
     const executor = new FakeExecutor([[]]);
     const client = new FerricStoreClient(executor);
 
     await expect(client.governanceLedger("flow-auto")).resolves.toEqual([]);
 
-    expect(executor.calls[0]).toEqual([
-      "FLOW.GOVERNANCE.LEDGER",
-      "flow-auto",
-      "PARTITION",
-      autoPartitionKeyForId("flow-auto")
-    ]);
+    expect(executor.calls[0]).toEqual(["FLOW.GOVERNANCE.LEDGER", "flow-auto"]);
   });
 
   it("rejects unidentified or inconsistent limit releases before dispatch", async () => {
@@ -1190,5 +1196,4 @@ describe("FerricStoreClient Flow and administration", () => {
 
     expect(executor.calls).toEqual([]);
   });
-
 });

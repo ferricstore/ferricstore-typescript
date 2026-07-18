@@ -14,8 +14,7 @@ import {
   flowControlLimits,
   normalizeHeartbeatInterval,
   normalizeNonNegativeInteger,
-  normalizePositiveLimit,
-  startupLimits
+  normalizePositiveLimit
 } from "./native-connection.js";
 import { NativeFlowControl } from "./native-flow-control.js";
 import { NativeHeartbeat } from "./native-heartbeat.js";
@@ -44,6 +43,7 @@ import { NativeChunkAssembler } from "./native-chunk-assembler.js";
 import { NativeResponseHandler } from "./native-response-handler.js";
 import { NativeRequestScheduler } from "./native-request-scheduler.js";
 import { NativeWriteQueue } from "./native-write-queue.js";
+import { NativeConnectionCapabilities } from "./native-connection-capabilities.js";
 export class NativeAdapter implements CommandExecutor {
   private readonly socket: net.Socket | tls.TLSSocket;
   private readonly pending = new Map<bigint, PendingRequest>();
@@ -51,9 +51,9 @@ export class NativeAdapter implements CommandExecutor {
   private readonly closedWaiters = new Set<() => void>();
   private readonly chunkAssembler: NativeChunkAssembler;
   private closed = false;
+  private readonly capabilities: NativeConnectionCapabilities;
   private protocolLanes: number;
   private maxPipelineCommands = Number.MAX_SAFE_INTEGER;
-  private maxRequestFrameBytes: number;
   private pendingControlRequests = 0;
   private readonly maxPendingControlRequests: number;
   private readonly heartbeat: NativeHeartbeat;
@@ -82,7 +82,7 @@ export class NativeAdapter implements CommandExecutor {
     const normalizedMaxChunkBytes = normalizePositiveLimit(maxChunkBytes, DEFAULT_MAX_CHUNK_BYTES);
     const normalizedMaxChunkFrames = normalizePositiveLimit(maxChunkFrames, DEFAULT_MAX_CHUNK_FRAMES);
     const normalizedMaxFrameBytes = normalizePositiveLimit(maxFrameBytes, DEFAULT_MAX_FRAME_BYTES);
-    this.maxRequestFrameBytes = normalizedMaxFrameBytes;
+    this.capabilities = new NativeConnectionCapabilities(normalizedMaxFrameBytes);
     const normalizedMaxResponseBytes = normalizePositiveLimit(maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES);
     this.chunkAssembler = new NativeChunkAssembler(
       normalizedMaxChunkBytes,
@@ -108,7 +108,7 @@ export class NativeAdapter implements CommandExecutor {
     this.heartbeatIntervalMs = normalizeHeartbeatInterval(heartbeatIntervalMs);
     this.heartbeat = new NativeHeartbeat(
       this.heartbeatIntervalMs,
-      async () => { await this.request(buildProtocolCommand(["PING"], this.maxRequestFrameBytes), true); },
+      async () => { await this.request(buildProtocolCommand(["PING"], this.capabilities.requestFrameBytes), true); },
       (error) => {
         this.failAll(new FerricStoreError("FerricStore protocol heartbeat failed", { cause: error }), true);
         this.socket.destroy();
@@ -118,6 +118,7 @@ export class NativeAdapter implements CommandExecutor {
       applyFlowControlLimits: (value) => this.applyFlowControlLimits(value),
       beginDraining: () => this.beginDraining(),
       chunkAssembler: this.chunkAssembler,
+      compactResponseOpcodes: () => this.capabilities.compactResponseOpcodes,
       destroy: (error) => this.socket.destroy(error),
       failAll: (reason, connectionClosed, message) => this.failAll(reason, connectionClosed, message),
       heartbeat: this.heartbeat,
@@ -144,6 +145,7 @@ export class NativeAdapter implements CommandExecutor {
         adapter,
         auth: async (username, password) => {
           await adapter.request({ laneId: 0, opcode: OPCODES.auth, payload: { password, username } });
+          adapter.capabilities.activateAuthenticated();
         },
         close: async () => { await adapter.close(); },
         startHeartbeat: () => adapter.heartbeat.start(),
@@ -162,7 +164,7 @@ export class NativeAdapter implements CommandExecutor {
   }
 
   async executeCommandArgs(args: readonly CommandArgument[]): Promise<unknown> {
-    const command = buildProtocolCommand(args, this.maxRequestFrameBytes);
+    const command = buildProtocolCommand(args, this.capabilities.requestFrameBytes);
     return await this.request(command);
   }
 
@@ -172,7 +174,7 @@ export class NativeAdapter implements CommandExecutor {
     laneId: number
   ): Promise<unknown> {
     return await this.executeProtocolCommand(
-      buildProtocolCommand(args, this.maxRequestFrameBytes),
+      buildProtocolCommand(args, this.capabilities.requestFrameBytes),
       laneId
     );
   }
@@ -200,7 +202,7 @@ export class NativeAdapter implements CommandExecutor {
     options: ExecutePipelineOptions = {}
   ): Promise<unknown[] | undefined> {
     return await executeNativeFusedPipeline(
-      this, commands, laneId, options, this.maxPipelineCommands, this.maxRequestFrameBytes
+      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes
     );
   }
 
@@ -211,14 +213,12 @@ export class NativeAdapter implements CommandExecutor {
     options: ExecutePipelineOptions = {}
   ): Promise<unknown[]> {
     return await executeNativePipeline(
-      this, commands, laneId, options, this.maxPipelineCommands, this.maxRequestFrameBytes
+      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes
     );
   }
 
   async close(): Promise<void> {
-    if (this.closed) {
-      return;
-    }
+    if (this.closed) return;
     this.failAll(new FerricStoreError("FerricStore connection closed"), true);
     this.socket.destroy();
   }
@@ -237,7 +237,9 @@ export class NativeAdapter implements CommandExecutor {
     });
     this.applyStartupLimits(response);
     const authRequired = field(response, "auth_required");
-    return authRequired == null ? false : booleanResponse(authRequired);
+    const required = authRequired == null ? false : booleanResponse(authRequired);
+    if (authRequired != null && !required) this.capabilities.activateAuthenticated();
+    return required;
   }
 
   private request(command: ProtocolCommand, allowWhileDraining = false): Promise<unknown> {
@@ -295,7 +297,7 @@ export class NativeAdapter implements CommandExecutor {
     let frame: Buffer;
     try {
       requestId = this.requestScheduler.nextRequestId();
-      frame = encodeRequest(command, requestId, this.maxRequestFrameBytes);
+      frame = encodeRequest(command, requestId, this.capabilities.requestFrameBytes);
     } catch (error) {
       if (hasFlowControlCredit) this.flowControl.release(laneId);
       return Promise.reject(error instanceof Error ? error : new FerricStoreError(String(error), { raw: error }));
@@ -355,9 +357,7 @@ export class NativeAdapter implements CommandExecutor {
   }
 
   private failAll(reason: unknown, connectionClosed = false, dispatchedMessage?: string): void {
-    if (this.closed) {
-      return;
-    }
+    if (this.closed) return;
     this.closed = true;
     this.responseHandler.stop();
     this.resolveClosedWaiters();
@@ -432,18 +432,18 @@ export class NativeAdapter implements CommandExecutor {
 
   private applyStartupLimits(value: unknown): void {
     this.applyFlowControlLimits(value);
-    const limits = startupLimits(value);
-    if (limits.laneQueue != null) {
-      this.flowControl.updateLaneQueueLimit(limits.laneQueue);
+    const capabilities = this.capabilities.apply(value);
+    if (capabilities.maxResponseBytes != null) {
+      this.responseHandler.updateMaxResponseBytes(capabilities.maxResponseBytes);
     }
-    if (limits.lanes != null) {
-      this.protocolLanes = Math.min(this.protocolLanes, limits.lanes);
+    if (capabilities.laneQueue != null) {
+      this.flowControl.updateLaneQueueLimit(capabilities.laneQueue);
     }
-    if (limits.pipelineCommands != null) {
-      this.maxPipelineCommands = limits.pipelineCommands;
+    if (capabilities.lanes != null) {
+      this.protocolLanes = Math.min(this.protocolLanes, capabilities.lanes);
     }
-    if (limits.frameBytes != null) {
-      this.maxRequestFrameBytes = Math.min(this.maxRequestFrameBytes, limits.frameBytes);
+    if (capabilities.pipelineCommands != null) {
+      this.maxPipelineCommands = capabilities.pipelineCommands;
     }
   }
 }

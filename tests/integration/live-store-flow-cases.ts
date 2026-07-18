@@ -225,7 +225,7 @@ export function registerStoreFlowIntegrationTests(): void {
   it("covers native probabilistic helpers", async () => {
     const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
     const runId = suffix();
-    const prefix = `ts-sdk:prob:${runId}:`;
+    const prefix = `ts-sdk:prob:{${runId}}:`;
 
     try {
       const bloom = `${prefix}bf`;

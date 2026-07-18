@@ -6,6 +6,7 @@ export const DEFAULT_MAX_PENDING_CONTROL_REQUESTS = 4_096;
 export const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 export const DEFAULT_MAX_QUEUED_REQUESTS = 65_536;
 export const DEFAULT_MAX_QUEUED_WRITE_BYTES = 64 * 1024 * 1024;
+export const UNAUTHENTICATED_MAX_FRAME_BYTES = 64 * 1024;
 
 export function assertNativeAdapterOptions(options: NativeAdapterOptions): void {
   const supplied = options as unknown as Record<string, unknown>;

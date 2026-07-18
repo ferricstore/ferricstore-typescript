@@ -4,6 +4,10 @@ import type { NativeProtocolEvent } from "./adapter-types.js";
 import { NativeChunkAssembler } from "./native-chunk-assembler.js";
 import { NativeHeartbeat } from "./native-heartbeat.js";
 import type { PendingRequest } from "./native-pending-request.js";
+import {
+  EMPTY_COMPACT_RESPONSE_OPCODES,
+  type CompactResponseOpcodes
+} from "./native-negotiation.js";
 import { NativeReceiveBuffer } from "./native-receive-buffer.js";
 import {
   FLAG_MORE_CHUNKS,
@@ -17,6 +21,7 @@ interface NativeResponseHandlerOptions {
   readonly applyFlowControlLimits: (value: unknown) => void;
   readonly beginDraining: () => void;
   readonly chunkAssembler: NativeChunkAssembler;
+  readonly compactResponseOpcodes?: () => CompactResponseOpcodes;
   readonly destroy: (error?: Error) => void;
   readonly failAll: (reason: unknown, connectionClosed: boolean, message?: string) => void;
   readonly heartbeat: NativeHeartbeat;
@@ -37,8 +42,16 @@ export class NativeResponseHandler {
   private drainScheduled = false;
   private paused = false;
   private stopped = false;
+  private maxResponseBytes: number;
 
-  constructor(private readonly options: NativeResponseHandlerOptions) {}
+  constructor(private readonly options: NativeResponseHandlerOptions) {
+    this.maxResponseBytes = options.maxResponseBytes;
+  }
+
+  updateMaxResponseBytes(limit: number): void {
+    this.maxResponseBytes = Math.min(this.maxResponseBytes, limit);
+    this.options.chunkAssembler.updateMaxResponseBytes(this.maxResponseBytes);
+  }
 
   onData(chunk: Buffer): void {
     if (this.stopped) return;
@@ -131,16 +144,19 @@ export class NativeResponseHandler {
     }
     const completeFrame = this.options.chunkAssembler.assemble(frame);
     if (completeFrame == null) return;
-    if (completeFrame.body.byteLength > this.options.maxResponseBytes) {
+    if (completeFrame.body.byteLength > this.maxResponseBytes) {
       throw new FerricStoreError(
-        `native protocol response exceeded ${this.options.maxResponseBytes} bytes`
+        `native protocol response exceeded ${this.maxResponseBytes} bytes`
       );
     }
 
     let value: unknown;
     let responseError: unknown;
     try {
-      value = decodeResponse(completeFrame, pending.opcode, pending);
+      value = decodeResponse(completeFrame, pending.opcode, {
+        ...pending,
+        compactResponseOpcodes: this.options.compactResponseOpcodes?.() ?? EMPTY_COMPACT_RESPONSE_OPCODES
+      });
       if (pending.opcode === OPCODES.windowUpdate) this.options.applyFlowControlLimits(value);
     } catch (error) {
       responseError = error;
@@ -158,7 +174,7 @@ export class NativeResponseHandler {
     pending.discardedResponseFrames = discardedResponseFrames;
     const chunked = discardedResponseFrames > 1 || (frame.flags & FLAG_MORE_CHUNKS) !== 0;
     if (
-      discardedResponseBytes > this.options.maxResponseBytes ||
+      discardedResponseBytes > this.maxResponseBytes ||
       (chunked && discardedResponseBytes > this.options.maxChunkBytes)
     ) {
       throw new FerricStoreError("native protocol discarded response exceeded configured byte limits");
@@ -170,12 +186,14 @@ export class NativeResponseHandler {
   }
 
   private handleManagementFrame(frame: ResponseFrame): void {
-    if (frame.body.byteLength > this.options.maxResponseBytes) {
+    if (frame.body.byteLength > this.maxResponseBytes) {
       throw new FerricStoreError(
-        `native protocol response exceeded ${this.options.maxResponseBytes} bytes`
+        `native protocol response exceeded ${this.maxResponseBytes} bytes`
       );
     }
-    const value = decodeResponse(frame, frame.opcode);
+    const value = decodeResponse(frame, frame.opcode, {
+      compactResponseOpcodes: this.options.compactResponseOpcodes?.() ?? EMPTY_COMPACT_RESPONSE_OPCODES
+    });
     if (frame.opcode === OPCODES.windowUpdate) this.options.applyFlowControlLimits(value);
     const event: NativeProtocolEvent = {
       flags: frame.flags,

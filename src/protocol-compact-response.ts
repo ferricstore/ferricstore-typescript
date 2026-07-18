@@ -1,5 +1,14 @@
 import { Buffer } from "node:buffer";
 import { FerricStoreError, classifyServerError } from "./errors.js";
+import { compactResponseOpcodeSupports } from "./native-negotiation.js";
+import {
+  decodeCompactBinaryListList,
+  decodeCompactBinaryMapList,
+  decodeCompactIntegerList,
+  markCompactPipelineDecoded,
+  readCompactBinaryList,
+  readCompactBinaryMap
+} from "./protocol-compact-collections.js";
 import * as wire from "./protocol-constants.js";
 import { setOwnValue } from "./protocol-core.js";
 import {
@@ -17,50 +26,74 @@ export function tryDecodeCompactResponse(
   if (body.byteLength === 0) return { found: false, value: undefined };
   const budget: wire.DecodeValueBudget = { remainingItems: wire.DEFAULT_MAX_VALUE_ITEMS };
   const tag = body.readUInt8(0);
-  if (tag === wire.COMPACT_OK_LIST && isOkListOpcode(opcode)) {
+  const pipelineValues = opcode === wire.OPCODES.pipeline && supports(hints, "pipeline_v1", opcode);
+  if (tag === wire.COMPACT_OK_LIST && (supports(hints, "ok_list_v1", opcode) || pipelineValues)) {
     const values = decodeCompactOkList(body, budget);
-    return { found: true, value: opcode === wire.OPCODES.pipeline ? values : values.length === 1 ? "OK" : values };
+    return {
+      found: true,
+      value: opcode === wire.OPCODES.pipeline
+        ? markCompactPipelineDecoded(values)
+        : values.length === 1 ? "OK" : values
+    };
   }
-  if (tag === wire.COMPACT_KV_GET && wire.compactResponseOpcodeSupports(opcode, wire.COMPACT_KIND_KV_GET)) {
+  if (tag === wire.COMPACT_KV_GET && supports(hints, "kv_get_v1", opcode)) {
     return { found: true, value: decodeCompactKvGet(body) };
   }
   if (
     (tag === wire.COMPACT_KV_MGET || tag === wire.COMPACT_KV_MGET_FIXED) &&
-    wire.compactResponseOpcodeSupports(opcode, wire.COMPACT_KIND_KV_MGET)
+    (supports(hints, "kv_mget_v1", opcode) || pipelineValues)
   ) {
+    const values = tag === wire.COMPACT_KV_MGET
+      ? decodeCompactMget(body, budget)
+      : decodeCompactMgetFixed(body, budget);
     return {
       found: true,
-      value: tag === wire.COMPACT_KV_MGET ? decodeCompactMget(body, budget) : decodeCompactMgetFixed(body, budget)
+      value: opcode === wire.OPCODES.pipeline ? markCompactPipelineDecoded(values) : values
     };
   }
-  if (tag === wire.COMPACT_PIPELINE_RESPONSE && wire.compactResponseOpcodeSupports(opcode, wire.COMPACT_KIND_PIPELINE)) {
+  if (tag === wire.COMPACT_INTEGER_LIST && pipelineValues) {
+    return { found: true, value: markCompactPipelineDecoded(decodeCompactIntegerList(body, budget)) };
+  }
+  if (tag === wire.COMPACT_BINARY_LIST_LIST && pipelineValues) {
+    return { found: true, value: markCompactPipelineDecoded(decodeCompactBinaryListList(body, budget)) };
+  }
+  if (tag === wire.COMPACT_BINARY_MAP_LIST && pipelineValues) {
+    return { found: true, value: markCompactPipelineDecoded(decodeCompactBinaryMapList(body, budget)) };
+  }
+  if (tag === wire.COMPACT_PIPELINE_RESPONSE && pipelineValues) {
     return { found: true, value: decodeCompactPipeline(body, budget, hints.pipelineClaimModes) };
   }
   if (
     tag === wire.COMPACT_FLOW_CLAIM_JOBS &&
-    wire.compactResponseOpcodeSupports(opcode, wire.COMPACT_KIND_FLOW_CLAIM_JOBS)
+    (supports(hints, "flow_claim_jobs_v1", opcode) || pipelineValues)
   ) {
-    return { found: true, value: decodeCompactClaimJobs(body, budget, hints.compactClaimMode) };
+    const values = decodeCompactClaimJobs(body, budget, hints.compactClaimMode);
+    return {
+      found: true,
+      value: opcode === wire.OPCODES.pipeline ? markCompactPipelineDecoded(values) : values
+    };
   }
-  if (tag === wire.COMPACT_FLOW_RECORD && wire.compactResponseOpcodeSupports(opcode, wire.COMPACT_KIND_FLOW_RECORD)) {
+  if (tag === wire.COMPACT_FLOW_RECORD && supports(hints, "flow_record_v1", opcode)) {
     const read = readCompactFlowRecord(body, 0, budget);
     if (read.offset !== body.byteLength) throw new FerricStoreError("trailing compact Flow record bytes");
     return { found: true, value: read.value };
   }
-  if (tag === wire.COMPACT_FLOW_RECORD_LIST && isFlowRecordListOpcode(opcode)) {
+  if (
+    tag === wire.COMPACT_FLOW_RECORD_LIST &&
+    (supports(hints, "flow_record_list_v1", opcode) || pipelineValues)
+  ) {
     const read = readCompactFlowRecordList(body, 0, budget);
     if (read.offset !== body.byteLength) throw new FerricStoreError("trailing compact Flow record list bytes");
-    return { found: true, value: read.value };
+    return {
+      found: true,
+      value: opcode === wire.OPCODES.pipeline ? markCompactPipelineDecoded(read.value) : read.value
+    };
   }
   return { found: false, value: undefined };
 }
 
-function isOkListOpcode(opcode: number): boolean {
-  return wire.compactResponseOpcodeSupports(opcode, wire.COMPACT_KIND_OK_LIST);
-}
-
-function isFlowRecordListOpcode(opcode: number): boolean {
-  return wire.compactResponseOpcodeSupports(opcode, wire.COMPACT_KIND_FLOW_RECORD_LIST);
+function supports(hints: wire.ResponseDecodeHints, codec: string, opcode: number): boolean {
+  return compactResponseOpcodeSupports(hints.compactResponseOpcodes, codec, opcode);
 }
 
 function decodeCompactOkList(data: Buffer, budget: wire.DecodeValueBudget): Buffer[] {
@@ -194,8 +227,7 @@ function decodeCompactPipeline(
     }
   }
   if (offset !== data.byteLength) throw new FerricStoreError("trailing compact pipeline bytes");
-  Object.defineProperty(values, wire.COMPACT_PIPELINE_DECODED, { value: true });
-  return values;
+  return markCompactPipelineDecoded(values);
 }
 
 function decodeCompactClaimJobs(
@@ -356,43 +388,6 @@ function readCompactFlowRecordList(
     offset = read.offset;
   }
   return { value: records, offset };
-}
-
-function readCompactBinaryList(
-  data: Buffer,
-  offset: number,
-  budget: wire.DecodeValueBudget
-): { readonly value: Buffer[]; readonly offset: number } {
-  requireAvailable(data, offset, 4);
-  const count = data.readUInt32BE(offset);
-  requireCompactContainer(count, budget);
-  offset += 4;
-  const values: Buffer[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const read = readBinary(data, offset);
-    values.push(read.value);
-    offset = read.offset;
-  }
-  return { value: values, offset };
-}
-
-function readCompactBinaryMap(
-  data: Buffer,
-  offset: number,
-  budget: wire.DecodeValueBudget
-): { readonly value: Record<string, Buffer>; readonly offset: number } {
-  requireAvailable(data, offset, 4);
-  const count = data.readUInt32BE(offset);
-  requireCompactContainer(count, budget);
-  offset += 4;
-  const values: Record<string, Buffer> = {};
-  for (let index = 0; index < count; index += 1) {
-    const key = readBinary(data, offset);
-    const value = readBinary(data, key.offset);
-    setOwnValue(values, key.value.toString("utf8"), value.value);
-    offset = value.offset;
-  }
-  return { value: values, offset };
 }
 
 function readOptionalBinary(data: Buffer, offset: number): { readonly value: Buffer | null; readonly offset: number } {

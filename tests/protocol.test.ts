@@ -17,6 +17,7 @@ import {
   type ResponseFrame
 } from "../src/protocol.js";
 import { OverloadedError } from "../src/errors.js";
+import { compactResponseHints } from "./compact-response-test-support.js";
 import type { Command, CommandArgument } from "../src/internal.js";
 
 describe("native protocol codec", () => {
@@ -245,10 +246,7 @@ describe("native protocol codec", () => {
       ["CAS", "key", expected, value, "PX", 1],
       ["LOCK", "key", "owner", 0],
       ["RATELIMIT.ADD", "key", 0, 10],
-      ["FETCH_OR_COMPUTE", "key", 0],
-      ["FETCH_OR_COMPUTE_RESULT", "key", value, 30_000],
-      ["FETCH_OR_COMPUTE_RESULT", "key", token, value, 0],
-      ["FETCH_OR_COMPUTE_ERROR", "key", "failed"]
+      ["FETCH_OR_COMPUTE", "key", 0]
     ];
 
     for (const command of commands) {
@@ -257,6 +255,13 @@ describe("native protocol codec", () => {
         payload: { args: command.slice(1), command: command[0] }
       });
     }
+
+    expect(() => buildProtocolCommand(["FETCH_OR_COMPUTE_RESULT", "key", value, 30_000]))
+      .toThrow(/ownership token/u);
+    expect(() => buildProtocolCommand(["FETCH_OR_COMPUTE_RESULT", "key", token, value, 0]))
+      .toThrow(/ttl_ms must be positive/u);
+    expect(() => buildProtocolCommand(["FETCH_OR_COMPUTE_ERROR", "key", "failed"]))
+      .toThrow(/ownership token/u);
   });
 
   it("preserves every SET expiry option in the direct native payload", () => {
@@ -678,7 +683,7 @@ describe("native protocol codec", () => {
   });
 
   it("writes direct compact MGET and MSET strings without allocating a Buffer per item", () => {
-    const values = ["key:a", "key:b", "value:a", "value:b"];
+    const values = ["{keys}:a", "{keys}:b", "value:a", "value:b"];
     const from = vi.spyOn(Buffer, "from");
 
     try {
@@ -969,7 +974,8 @@ describe("native protocol codec", () => {
 
     expect(decodeResponse(
       responseFrame(COMMAND_OPCODES["FLOW.VALUE.MGET"], body),
-      COMMAND_OPCODES["FLOW.VALUE.MGET"]
+      COMMAND_OPCODES["FLOW.VALUE.MGET"],
+      compactResponseHints
     )).toEqual([storedNull, null]);
   });
 
@@ -980,7 +986,9 @@ describe("native protocol codec", () => {
       u32(0)
     ]);
 
-    expect(decodeResponse(responseFrame(OPCODES.mget, body), OPCODES.mget)).toEqual([
+    expect(decodeResponse(
+      responseFrame(OPCODES.mget, body), OPCODES.mget, compactResponseHints
+    )).toEqual([
       Buffer.alloc(0),
       Buffer.alloc(0),
       Buffer.alloc(0)

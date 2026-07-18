@@ -19,8 +19,8 @@ import {
 import type { IntegerReply, StoreCommandClient } from "./store.js";
 
 export type TopKReserveOptions =
-  | { width?: never; depth?: never; decay?: never }
-  | { width: number; depth: number; decay: number };
+  | { width?: never; depth?: never }
+  | { width: number; depth: number };
 
 export interface CountMinMergeOptions {
   weights?: readonly (number | bigint)[];
@@ -195,15 +195,18 @@ export class TopKStore {
     const args: CommandArgument[] = ["TOPK.RESERVE", key, k];
     const width = ownOption(options, "width");
     const depth = ownOption(options, "depth");
-    const decay = ownOption(options, "decay");
-    const tuningCount = [width, depth, decay]
+    const decay = ownOption(options as TopKReserveOptions & { decay?: unknown }, "decay");
+    if (decay != null || Object.hasOwn(options, "decay")) {
+      throw new TypeError("TOPK.RESERVE decay is not supported by FerricStore 0.8");
+    }
+    const tuningCount = [width, depth]
       .filter((value) => value != null)
       .length;
-    if (tuningCount !== 0 && tuningCount !== 3) {
-      throw new TypeError("TOPK.RESERVE width, depth, and decay must be provided together");
+    if (tuningCount !== 0 && tuningCount !== 2) {
+      throw new TypeError("TOPK.RESERVE width and depth must be provided together");
     }
-    if (tuningCount === 3) {
-      args.push(width, depth, decay);
+    if (tuningCount === 2) {
+      args.push(width, depth);
     }
     return okResponse(await commandArgs(this.client, args));
   }

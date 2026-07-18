@@ -108,18 +108,7 @@ export interface FetchOrComputeHitResult<T = unknown> {
   readonly value: T | null;
 }
 
-export interface FetchOrComputeLegacyResult {
-  /** Opaque application hint echoed for the process elected to compute. */
-  readonly computeHint: Buffer;
-  readonly computeMode: "legacy";
-  /** Explicit null distinguishes a legacy tokenless lease from an omitted token. */
-  readonly computeToken: null;
-  readonly hit: false;
-  readonly shouldCompute: true;
-  readonly status: "compute";
-}
-
-export interface FetchOrComputeFencedResult {
+export interface FetchOrComputeComputeResult {
   /** Opaque application hint echoed for the process elected to compute. */
   readonly computeHint: Buffer;
   readonly computeMode: "fenced";
@@ -130,8 +119,13 @@ export interface FetchOrComputeFencedResult {
   readonly status: "compute";
 }
 
-export type FetchOrComputeComputeResult = FetchOrComputeLegacyResult | FetchOrComputeFencedResult;
+export type FetchOrComputeFencedResult = FetchOrComputeComputeResult;
 export type FetchOrComputeResult<T = unknown> = FetchOrComputeHitResult<T> | FetchOrComputeComputeResult;
+
+export interface FlowMaxActiveFailure {
+  readonly maxActiveMs: number;
+  readonly reason: "max_active_ms";
+}
 
 export interface FlowRecord<TPayload = unknown> {
   id: string;
@@ -147,6 +141,8 @@ export interface FlowRecord<TPayload = unknown> {
   rootFlowId?: string;
   correlationId?: string;
   maxActiveMs?: number;
+  error?: unknown;
+  failureReason?: string;
   valueRefs?: Record<string, unknown>;
   values?: Record<string, unknown>;
   valueSizes?: Record<string, unknown>;
@@ -233,6 +229,9 @@ export function flowRecordFromResp<TPayload = unknown>(
     field(value, "max_active_ms"),
     "FLOW record max_active_ms"
   );
+  const rawError = field(value, "error");
+  const error = flowError(rawError, codec);
+  const failureReason = optionalResponseString(field(rawError, "reason"), "FLOW record error reason");
 
   return {
     id: requiredTextField(value, "id", "FLOW record"),
@@ -248,6 +247,8 @@ export function flowRecordFromResp<TPayload = unknown>(
     rootFlowId: optionalResponseString(field(value, "root_flow_id"), "FLOW record root_flow_id"),
     correlationId: optionalResponseString(field(value, "correlation_id"), "FLOW record correlation_id"),
     ...(maxActiveMs == null ? {} : { maxActiveMs }),
+    ...(error == null ? {} : { error }),
+    ...(failureReason == null ? {} : { failureReason }),
     valueRefs: optionalMapField(value, "value_refs", "FLOW record"),
     values,
     valueSizes: optionalMapField(value, "value_sizes", "FLOW record"),
@@ -258,6 +259,22 @@ export function flowRecordFromResp<TPayload = unknown>(
     indexedStateMeta: optionalResponseString(field(value, "indexed_state_meta"), "FLOW record indexed_state_meta"),
     raw: value
   };
+}
+
+function flowError(value: unknown, codec: Codec | undefined): unknown {
+  if (value == null) return undefined;
+  const reason = optionalResponseString(field(value, "reason"), "FLOW record error reason");
+  if (reason === "max_active_ms") {
+    const maxActiveMs = optionalPositiveResponseInteger(
+      field(value, "max_active_ms"),
+      "FLOW record error max_active_ms"
+    );
+    if (maxActiveMs == null) {
+      throw new TypeError("FLOW record error max_active_ms returned an unexpected response");
+    }
+    return { maxActiveMs, reason } satisfies FlowMaxActiveFailure;
+  }
+  return decodePayload(codec, value);
 }
 
 function decodePayload(codec: Codec | undefined, value: unknown): unknown {

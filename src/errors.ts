@@ -1,11 +1,23 @@
 export class FerricStoreError extends Error {
   readonly code: string = "ferricstore_error";
   readonly raw: unknown;
+  readonly retryable: boolean | undefined;
+  readonly safeToRetry: boolean | undefined;
+  readonly retryAfterMs: number | undefined;
 
-  constructor(message: string, options: { raw?: unknown; cause?: unknown } = {}) {
+  constructor(message: string, options: {
+    raw?: unknown;
+    cause?: unknown;
+    retryable?: boolean;
+    safeToRetry?: boolean;
+    retryAfterMs?: number;
+  } = {}) {
     super(message, { cause: options.cause });
     this.name = new.target.name;
     this.raw = options.raw;
+    this.retryable = options.retryable ?? structuredBooleanField(options.raw, "retryable");
+    this.safeToRetry = options.safeToRetry ?? structuredBooleanField(options.raw, "safe_to_retry");
+    this.retryAfterMs = options.retryAfterMs ?? structuredIntegerField(options.raw, "retry_after_ms");
   }
 }
 
@@ -79,15 +91,25 @@ export class InvalidCommandError extends FerricStoreError {
 
 export class OverloadedError extends FerricStoreError {
   override readonly code = "overloaded";
-  readonly retryAfterMs: number | undefined;
   readonly reason: string | undefined;
 
   constructor(
     message: string,
-    options: { raw?: unknown; cause?: unknown; retryAfterMs?: number; reason?: string } = {}
+    options: {
+      raw?: unknown;
+      cause?: unknown;
+      retryAfterMs?: number;
+      reason?: string;
+      retryable?: boolean;
+      safeToRetry?: boolean;
+    } = {}
   ) {
-    super(message, options);
-    this.retryAfterMs = options.retryAfterMs;
+    const local = options.raw == null;
+    super(message, {
+      ...options,
+      retryable: options.retryable ?? (local ? true : undefined),
+      safeToRetry: options.safeToRetry ?? (local ? true : undefined)
+    });
     this.reason = options.reason;
   }
 }
@@ -114,16 +136,22 @@ export function classifyServerError(
   const lower = message.toLowerCase();
   const structuredCode = structuredStringField(raw, "code");
   const code = structuredCode?.toLowerCase();
+  const retry = {
+    retryable: structuredBooleanField(raw, "retryable"),
+    safeToRetry: structuredBooleanField(raw, "safe_to_retry"),
+    retryAfterMs: structuredIntegerField(raw, "retry_after_ms") ?? intField(lower, "retry_after_ms")
+  };
 
   if (isRerouteStatus(status) || code === "reroute") {
-    return new RerouteError(message, { cause, raw });
+    return new RerouteError(message, { cause, raw, ...definedRetryMetadata(retry) });
   }
   if (isBusyStatus(status) || isOverloadCode(structuredCode) || overloadMessage(lower)) {
     return new OverloadedError(message, {
       cause,
       raw,
+      ...definedRetryMetadata(retry),
       reason: structuredStringField(raw, "reason") ?? structuredCode ?? stringField(lower, "reason"),
-      retryAfterMs: structuredIntegerField(raw, "retry_after_ms") ?? intField(lower, "retry_after_ms")
+      retryAfterMs: retry.retryAfterMs
     });
   }
   if (code === "flow_already_exists" || (lower.includes("flow") && lower.includes("already exists"))) {
@@ -157,7 +185,7 @@ export function classifyServerError(
     return new InvalidCommandError(message, { cause, raw });
   }
 
-  return new FerricStoreError(message, { cause, raw });
+  return new FerricStoreError(message, { cause, raw, ...definedRetryMetadata(retry) });
 }
 
 export function mapException(error: unknown): unknown {
@@ -214,6 +242,27 @@ function structuredIntegerField(raw: unknown, name: string): number | undefined 
   }
   const text = binaryText(value);
   return text == null ? undefined : nonNegativeSafeIntegerText(text);
+}
+
+function structuredBooleanField(raw: unknown, name: string): boolean | undefined {
+  const value = structuredField(raw, name);
+  if (typeof value === "boolean") return value;
+  const text = binaryText(value)?.toLowerCase();
+  if (text === "true" || text === "1") return true;
+  if (text === "false" || text === "0") return false;
+  return undefined;
+}
+
+function definedRetryMetadata(metadata: {
+  readonly retryable?: boolean;
+  readonly safeToRetry?: boolean;
+  readonly retryAfterMs?: number;
+}): { retryable?: boolean; safeToRetry?: boolean; retryAfterMs?: number } {
+  return {
+    ...(metadata.retryable == null ? {} : { retryable: metadata.retryable }),
+    ...(metadata.safeToRetry == null ? {} : { safeToRetry: metadata.safeToRetry }),
+    ...(metadata.retryAfterMs == null ? {} : { retryAfterMs: metadata.retryAfterMs })
+  };
 }
 
 function nonNegativeSafeIntegerText(value: string): number | undefined {

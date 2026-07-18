@@ -20,6 +20,7 @@ import type { Command, CommandArgument } from "./internal.js";
 import type { RoutingRoute, RoutingTopology } from "./topology.js";
 import type { BackpressurePolicy } from "./types.js";
 import { FerricStoreError } from "./errors.js";
+import { assertAtomicKeyValueCommandSharesSlot } from "./key-slot-validation.js";
 
 const DEFAULT_FLOW_MANY_BATCH_LIMIT = 1_000;
 const DEFAULT_LEGACY_CLAIM_HYDRATION_CONCURRENCY = 16;
@@ -50,16 +51,19 @@ export class FerricStoreClientBase {
   }
 
   async command(...args: CommandArgument[]): Promise<unknown> {
+    assertAtomicKeyValueCommandSharesSlot(args);
     return await executeCommandArgs(this.executor, args);
   }
 
   /** Execute an already-built command without a JavaScript variadic-call limit. */
   async commandArgs(args: readonly CommandArgument[]): Promise<unknown> {
+    assertAtomicKeyValueCommandSharesSlot(args);
     return await executeCommandArgs(this.executor, args);
   }
 
   async pipeline(commands: readonly Command[], options?: ExecutePipelineOptions): Promise<unknown[]> {
     const snapshot = snapshotPipelineCommands(commands);
+    for (const command of snapshot) assertAtomicKeyValueCommandSharesSlot(command);
     const snapshotOptions = snapshotPipelineOptions(options);
     const results = this.executor.executePipeline != null
       ? await this.executor.executePipeline(snapshot, snapshotOptions)

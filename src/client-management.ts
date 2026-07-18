@@ -1,7 +1,6 @@
 import {
   append,
   appendBool,
-  autoPartitionKeyForId,
   integer,
   type CommandArgument
 } from "./internal.js";
@@ -195,7 +194,7 @@ export class FerricStoreManagementClient extends FerricStoreClientCore {
     options: { partitionKey?: string } = {}
   ): Promise<FlowAdminRecord | null> {
     const args: CommandArgument[] = ["FLOW.EFFECT.GET", id, "EFFECT_KEY", effectKey];
-    append(args, "PARTITION", options.partitionKey ?? autoPartitionKeyForId(id));
+    append(args, "PARTITION", options.partitionKey);
     return optionalAdminRecord(await this.commandArgs(args), "FLOW.EFFECT.GET");
   }
 
@@ -410,7 +409,7 @@ export class FerricStoreManagementClient extends FerricStoreClientCore {
 
   async governanceLedger(id: string, options: GovernanceLedgerOptions = {}): Promise<FlowAdminRecord[]> {
     const args: CommandArgument[] = ["FLOW.GOVERNANCE.LEDGER", id];
-    append(args, "PARTITION", options.partitionKey ?? autoPartitionKeyForId(id));
+    append(args, "PARTITION", options.partitionKey);
     append(args, "LIMIT", options.limit);
     append(args, "FROM_MS", options.fromMs);
     append(args, "TO_MS", options.toMs);
