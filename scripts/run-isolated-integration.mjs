@@ -3,17 +3,52 @@ import { spawn } from "node:child_process";
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const groups = [
   ["core SDK", "tests/integration/live.test.ts"],
-  ["store and Flow", "tests/integration/live-store-flow.test.ts"],
-  ["governance and workflow", "tests/integration/live-governance-workflow.test.ts"]
+  [
+    "typed stores",
+    "tests/integration/live-store-flow.test.ts",
+    "covers typed native store families"
+  ],
+  [
+    "probabilistic stores",
+    "tests/integration/live-store-flow.test.ts",
+    "covers native probabilistic helpers"
+  ],
+  [
+    "Flow repair and indexes",
+    "tests/integration/live-store-flow.test.ts",
+    "covers Flow state-machine repair and index commands"
+  ],
+  [
+    "Flow governance",
+    "tests/integration/live-governance-workflow.test.ts",
+    "covers fused Flow, schedule, query, and governance helpers"
+  ],
+  [
+    "queue and workflow",
+    "tests/integration/live-governance-workflow.test.ts",
+    "covers queue and workflow wrappers against the live server"
+  ],
+  [
+    "automatic batching",
+    "tests/integration/live-governance-workflow.test.ts",
+    "auto-batches concurrent safe API calls over the native protocol"
+  ]
 ];
 
 await run(npm, ["run", "integration:down"], true);
 try {
-  for (const [name, file] of groups) {
+  for (const [name, file, testName] of groups) {
     process.stdout.write(`\nRunning ${name} integration against a fresh FerricStore volume\n`);
     await run(npm, ["run", "integration:up"]);
     try {
-      await run(npm, ["exec", "--", "vitest", "run", file]);
+      await run(npm, [
+        "exec",
+        "--",
+        "vitest",
+        "run",
+        file,
+        ...(testName == null ? [] : ["-t", testName])
+      ]);
     } catch (error) {
       await run("docker", ["compose", "logs", "--no-color", "ferricstore"], true);
       throw error;
