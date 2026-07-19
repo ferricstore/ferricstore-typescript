@@ -18,7 +18,7 @@ Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is te
 
 ## Compatibility
 
-SDK `0.2.x` requires FerricStore server `0.8.0` or newer. FerricStore 0.8 is a
+SDK `0.3.x` requires FerricStore server `0.9.1` or newer. FerricStore 0.9.1 is a
 breaking beta API contract update, while the native wire protocol remains v1
 (`FSNP` framing and existing opcode numbers are unchanged). Capabilities and
 response-size limits are negotiated per connection from the HELLO-shaped
@@ -42,7 +42,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.8.0
+  ghcr.io/ferricstore/ferricstore:0.9.1
 ```
 
 ## Cluster-aware client
@@ -387,10 +387,23 @@ await flow.scheduleCreate("orders-every-five-minutes", {
 FIFO Flow state policy is opt-in per state:
 
 ```ts
-await flow.installPolicy("email", {
+const policy = await flow.installPolicy("email", {
   states: {
     queued: { mode: "fifo" }
   }
+});
+
+// Direct writes deep-patch by default. Fence concurrent editors with generation CAS.
+const updated = await flow.installPolicy("email", {
+  expectedGeneration: policy.generation,
+  maxActiveMs: 300_000
+});
+
+// Full replacement is explicit on the client API.
+await flow.installPolicy("email", {
+  expectedGeneration: updated.generation,
+  replace: true,
+  states: { queued: { mode: "fifo" } }
 });
 
 await flow.create("email-3", {
@@ -402,6 +415,10 @@ await flow.create("email-3", {
 ```
 
 FIFO states require a `partitionKey`; priority is for parallel states.
+`Workflow.installPolicy()` defaults to full replacement because workflow declarations
+describe a complete policy. Pass `replace: false` when a workflow install should patch.
+FIFO ordering is enforced by the server per `(type, state, partitionKey)`; worker
+concurrency remains available across different partitions.
 
 ## FerricStore KV And Data Structures
 

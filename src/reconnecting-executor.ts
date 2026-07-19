@@ -16,6 +16,7 @@ import {
 } from "./pipeline-execution.js";
 import { assertCommandHasStableConnectionState } from "./protocol.js";
 import type { RoutingRoute, RoutingTopology } from "./topology.js";
+import { isCasMutation } from "./command-retry-policy.js";
 
 export class ReconnectingExecutor implements CommandExecutor {
   private readonly baseDelayMs: number;
@@ -51,7 +52,12 @@ export class ReconnectingExecutor implements CommandExecutor {
   async executeCommandArgs(args: readonly CommandArgument[]): Promise<unknown> {
     const snapshot = snapshotCommandArguments(args);
     assertCommandHasStableConnectionState(snapshot);
-    return await this.withReconnect((executor) => executeCommandArgs(executor, snapshot));
+    const casMutation = isCasMutation(snapshot);
+    return await this.withReconnect(
+      (executor) => executeCommandArgs(executor, snapshot),
+      casMutation ? isClosedConnectionError : isReconnectableClosedConnectionError,
+      !casMutation
+    );
   }
 
   async ready(): Promise<void> {
@@ -152,7 +158,8 @@ export class ReconnectingExecutor implements CommandExecutor {
 
   private async withReconnect<T>(
     operation: (executor: CommandExecutor) => Promise<T>,
-    reconnectable: (error: unknown) => boolean = isReconnectableClosedConnectionError
+    reconnectable: (error: unknown) => boolean = isReconnectableClosedConnectionError,
+    replayAllowed = true
   ): Promise<T> {
     let executor = await this.executorPromise;
     let retries = 0;
@@ -162,6 +169,10 @@ export class ReconnectingExecutor implements CommandExecutor {
         return await operation(executor);
       } catch (error) {
         if (this.closed || retries >= this.maxRetries || !reconnectable(error)) throw error;
+        if (!replayAllowed) {
+          await this.reconnect(executor).catch(() => undefined);
+          throw error;
+        }
         for (;;) {
           retries += 1;
           try {
@@ -216,6 +227,10 @@ export class ReconnectingExecutor implements CommandExecutor {
 
 export function isReconnectableClosedConnectionError(error: unknown): boolean {
   return error instanceof ConnectionClosedError && error.requestDisposition === "unsent";
+}
+
+function isClosedConnectionError(error: unknown): boolean {
+  return error instanceof ConnectionClosedError;
 }
 
 function isReadOnlyReconnectableClosedConnectionError(error: unknown): boolean {

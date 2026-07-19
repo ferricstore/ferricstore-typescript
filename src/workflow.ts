@@ -193,7 +193,7 @@ export class Workflow {
     return new WorkflowWorker(this, options);
   }
 
-  async installPolicy(options: Omit<FlowPolicyOptions, "mode" | "state" | "states"> = {}): Promise<unknown> {
+  async installPolicy(options: Omit<FlowPolicyOptions, "mode" | "state" | "states"> = {}) {
     const states: Record<string, FlowStatePolicyLike> = {};
     for (const registration of this.states.values()) {
       if (registration.mode != null || registration.retryPolicy != null) {
@@ -205,6 +205,7 @@ export class Workflow {
     }
     return await this.client.installPolicy(this.type, {
       ...options,
+      replace: Object.hasOwn(options, "replace") ? options.replace ?? true : true,
       states
     });
   }

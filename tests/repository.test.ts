@@ -70,7 +70,7 @@ describe("release workflow", () => {
 });
 
 describe("core compatibility CI", () => {
-  it("declares the breaking 0.8 server contract while retaining native wire v1", () => {
+  it("declares the 0.9.1 server contract while retaining native wire v1", () => {
     const metadata = JSON.parse(readFileSync(`${repositoryRoot}/package.json`, "utf8")) as {
       ferricstore?: { minimumServerVersion?: string; nativeProtocolVersion?: number };
       version?: string;
@@ -79,9 +79,9 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.2.0");
+    expect(metadata.version).toBe("0.3.0");
     expect(metadata.ferricstore).toEqual({
-      minimumServerVersion: "0.8.0",
+      minimumServerVersion: "0.9.1",
       nativeProtocolVersion: 1
     });
     expect(manifest).toMatchObject({ magic: "FSNP", requestVersion: 1 });

@@ -5,6 +5,7 @@ import {
   JsonCodec,
   NativeAdapter,
   RawCodec,
+  StalePolicyGenerationError,
   type CommandArgument
 } from "../../src/index.js";
 import {
@@ -317,6 +318,25 @@ describe("FerricStore integration", () => {
     }
   });
 
+  it("receives policy replacement and generation fields in HELLO capabilities", async () => {
+    const adapter = await NativeAdapter.fromUrl(url());
+
+    try {
+      const hello = await adapter.executeCommand("HELLO", "client_name", "typescript-contract-test");
+      const capabilities = field(hello, "capabilities");
+      const schemas = field(capabilities, "schemas");
+      const policySchema = field(schemas, "FLOW.POLICY.SET");
+      const fields = field(policySchema, "fields");
+      expect(isReadonlyArray(fields)).toBe(true);
+      expect((fields as readonly unknown[]).map(text)).toEqual(expect.arrayContaining([
+        "expected_generation",
+        "replace"
+      ]));
+    } finally {
+      await adapter.close();
+    }
+  });
+
   it("uses KV helpers and a full Flow claim/complete cycle", async () => {
     const flow = await FerricStoreClient.fromUrl(url(), {
       codec: new JsonCodec()
@@ -453,7 +473,7 @@ describe("FerricStore integration", () => {
     try {
       await expect(flow.installPolicy(type, { indexedStateMeta: "version" })).resolves.toBeDefined();
       const policy = await flow.policyGet(type);
-      expect(text(field(policy, "indexed_state_meta"))).toBe("version");
+      expect(policy.indexedStateMeta).toBe("version");
 
       await expect(flow.create(id, {
         idempotent: true,
@@ -500,6 +520,50 @@ describe("FerricStore integration", () => {
     }
   });
 
+  it("patches, replaces, and generation-fences policies atomically", async () => {
+    const flow = await FerricStoreClient.fromUrl(url());
+    const type = `ts-sdk-policy-cas-${suffix()}`;
+
+    try {
+      const initial = await flow.installPolicy(type, {
+        maxActiveMs: 1_000,
+        retentionTtlMs: 86_400_123,
+        states: { queued: { mode: "fifo" } }
+      });
+      expect(initial.retention.ttlMs).toBe(86_400_123);
+      expect(initial.states?.queued?.retention.ttlMs).toBe(86_400_123);
+      const patched = await flow.installPolicy(type, {
+        expectedGeneration: initial.generation,
+        maxActiveMs: 2_000
+      });
+      expect(patched).toMatchObject({
+        generation: initial.generation + 1,
+        maxActiveMs: 2_000,
+        states: { queued: { mode: "fifo" } }
+      });
+
+      await expect(flow.installPolicy(type, {
+        expectedGeneration: initial.generation,
+        maxActiveMs: 3_000
+      })).rejects.toBeInstanceOf(StalePolicyGenerationError);
+      await expect(flow.policyGet(type)).resolves.toMatchObject({
+        generation: patched.generation,
+        maxActiveMs: 2_000,
+        states: { queued: { mode: "fifo" } }
+      });
+
+      const replaced = await flow.installPolicy(type, {
+        expectedGeneration: patched.generation,
+        replace: true
+      });
+      expect(replaced.generation).toBe(patched.generation + 1);
+      expect(replaced.maxActiveMs).toBeUndefined();
+      expect(replaced.states).toEqual({});
+    } finally {
+      await flow.close();
+    }
+  });
+
   it("enforces FIFO state policy edges on the real server", async () => {
     const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
     const runId = suffix();
@@ -536,8 +600,56 @@ describe("FerricStore integration", () => {
           start: { mode: "parallel" }
         }
       })).resolves.toBeDefined();
-      expect(text(field(await flow.policyGet(fifoType, { state: "queued" }), "mode")).toLowerCase()).toBe("fifo");
-      expect(text(field(await flow.policyGet(fifoType, { state: "start" }), "mode")).toLowerCase()).toBe("parallel");
+      expect((await flow.policyGet(fifoType, { state: "queued" })).mode).toBe("fifo");
+      expect((await flow.policyGet(fifoType, { state: "start" })).mode).toBe("parallel");
+
+      const fifoPartitions = [`${partition}:a`, `${partition}:b`];
+      const firstIds = fifoPartitions.map((_key, index) => `ts-sdk:fifo:${runId}:${index}:first`);
+      const secondIds = fifoPartitions.map((_key, index) => `ts-sdk:fifo:${runId}:${index}:second`);
+      for (let index = 0; index < fifoPartitions.length; index += 1) {
+        const partitionKey = fifoPartitions[index];
+        const firstId = firstIds[index];
+        const secondId = secondIds[index];
+        if (partitionKey == null || firstId == null || secondId == null) throw new Error("missing FIFO fixture");
+        await flow.create(firstId, {
+          nowMs: now + 2,
+          partitionKey,
+          runAtMs: now + 2,
+          state: "queued",
+          type: fifoType
+        });
+        await flow.create(secondId, {
+          nowMs: now + 3,
+          partitionKey,
+          runAtMs: now + 3,
+          state: "queued",
+          type: fifoType
+        });
+      }
+      const firstWave = await flow.claimJobs(fifoType, {
+        limit: 4,
+        nowMs: now + 4,
+        partitionKeys: fifoPartitions,
+        state: "queued",
+        worker: "ts-sdk-fifo-wave-one"
+      });
+      expect(firstWave.map((job) => job.id).sort()).toEqual([...firstIds].sort());
+      for (const job of firstWave) {
+        await flow.complete(job.id, {
+          fencingToken: job.fencingToken,
+          leaseToken: job.leaseToken,
+          nowMs: now + 5,
+          partitionKey: job.partitionKey
+        });
+      }
+      const secondWave = await flow.claimJobs(fifoType, {
+        limit: 4,
+        nowMs: now + 6,
+        partitionKeys: fifoPartitions,
+        state: "queued",
+        worker: "ts-sdk-fifo-wave-two"
+      });
+      expect(secondWave.map((job) => job.id).sort()).toEqual([...secondIds].sort());
 
       await expect(flow.create(`ts-sdk:fifo-no-partition:${runId}`, {
         nowMs: now + 10,

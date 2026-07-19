@@ -32,6 +32,11 @@ import {
 import { FlowBatchError, confirmedFlowBatchItems } from "./client-errors.js";
 import { FerricStoreManagementClient } from "./client-management.js";
 import { executeProducerWriteWithBackpressure } from "./producer-backpressure.js";
+import {
+  assertFlowPolicyGeneration,
+  flowPolicySnapshotFromResp,
+  type FlowPolicySnapshot
+} from "./flow-policy.js";
 
 /** @internal Read, policy, and shared Flow helpers kept off the primary implementation module. */
 export class FerricStoreFlowSupportClient extends FerricStoreManagementClient {
@@ -220,30 +225,41 @@ export class FerricStoreFlowSupportClient extends FerricStoreManagementClient {
     return await this.commandArgs(args);
   }
 
-  async installPolicy(type: string, options: FlowPolicyOptions = {}): Promise<unknown> {
+  async installPolicy(type: string, options: FlowPolicyOptions = {}): Promise<FlowPolicySnapshot> {
     const args: CommandArgument[] = ["FLOW.POLICY.SET", type];
+    const expectedGeneration = Object.hasOwn(options, "expectedGeneration")
+      ? options.expectedGeneration
+      : undefined;
+    const replace = Object.hasOwn(options, "replace") ? options.replace : undefined;
+    if (expectedGeneration != null) assertFlowPolicyGeneration(expectedGeneration);
+    if (replace != null && typeof replace !== "boolean") {
+      throw new TypeError("replace must be a boolean");
+    }
+    append(args, "EXPECTED_GENERATION", expectedGeneration);
+    appendBool(args, "REPLACE", replace);
     if (options.indexedAttributes != null) {
       args.push("INDEXED_ATTRIBUTES", JSON.stringify(options.indexedAttributes));
     }
     append(args, "INDEXED_STATE_META", options.indexedStateMeta);
     append(args, "MAX_ACTIVE_MS", options.maxActiveMs);
+    if (options.state == null) append(args, "RETENTION_TTL_MS", options.retentionTtlMs);
     append(args, "STATE", options.state);
     appendPolicyMode(args, options.state, options.mode);
     if (options.retry != null) {
       appendRetryPolicy(args, options.retry);
     }
+    if (options.state != null) append(args, "RETENTION_TTL_MS", options.retentionTtlMs);
     for (const [state, policy] of Object.entries(options.states ?? {})) {
       args.push("STATE", state);
       appendFlowStatePolicy(args, policy);
     }
-    append(args, "RETENTION_TTL_MS", options.retentionTtlMs);
-    return await this.commandArgs(args);
+    return flowPolicySnapshotFromResp(await this.commandArgs(args));
   }
 
-  async policyGet(type: string, options: { state?: string } = {}): Promise<Record<string, unknown>> {
+  async policyGet(type: string, options: { state?: string } = {}): Promise<FlowPolicySnapshot> {
     const args: CommandArgument[] = ["FLOW.POLICY.GET", type];
     append(args, "STATE", options.state);
-    return parseKvResponse(await this.commandArgs(args));
+    return flowPolicySnapshotFromResp(await this.commandArgs(args));
   }
 
   async retentionCleanup(): Promise<Record<string, unknown>> {

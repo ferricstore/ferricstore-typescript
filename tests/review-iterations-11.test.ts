@@ -10,7 +10,7 @@ import {
   type ExecutePipelineOptions
 } from "../src/index.js";
 import { flowRecordFromResp } from "../src/types.js";
-import { FakeExecutor } from "./fake-executor.js";
+import { FakeExecutor, fakeFlowPolicySnapshot } from "./fake-executor.js";
 import { maybeAutoBatchExecutor } from "../src/auto-batch.js";
 import {
   routingKeyArguments,
@@ -554,7 +554,7 @@ describe("review iterations 11", () => {
   });
 
   it("does not classify inherited Flow policy fields as state-policy options", async () => {
-    const executor = new FakeExecutor([Buffer.from("OK")]);
+    const executor = new FakeExecutor([fakeFlowPolicySnapshot("order")]);
     const client = new FerricStoreClient(executor);
     const retryPolicy = inheritedObject({ mode: "fifo" }, { maxRetries: 3 });
 

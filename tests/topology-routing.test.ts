@@ -997,6 +997,43 @@ test("TopologyNativeAdapterPool retries one explicitly safe reroute on the refre
   }
 });
 
+test("TopologyNativeAdapterPool refreshes but never replays a CAS mutation", async () => {
+  const PoolConstructor = TopologyNativeAdapterPool as unknown as new (
+    urls: readonly string[],
+    options: { endpointPolicy: "any" }
+  ) => TopologyNativeAdapterPool;
+  const pool = new PoolConstructor(["ferric://seed.local:6388"], { endpointPolicy: "any" });
+  (pool as unknown as { topologyValue: RoutingTopology }).topologyValue = RoutingTopology.build(
+    validTopologyPayload({
+      endpoint: { host: "leader.local", native_port: 6388, node: "leader@local" }
+    })
+  );
+  const reroute = new RerouteError("try another node", {
+    raw: { code: "reroute", retryable: true, safe_to_retry: true }
+  });
+  let attempts = 0;
+  const internals = pool as unknown as {
+    adapterForEndpoint(endpoint: { host: string }): Promise<NativeAdapter>;
+    refreshTopology(): Promise<RoutingTopology>;
+  };
+  internals.adapterForEndpoint = async () => ({
+    async executeCommandOnLane(): Promise<never> {
+      attempts += 1;
+      throw reroute;
+    }
+  }) as unknown as NativeAdapter;
+  const refresh = vi.fn(async () => pool.topology);
+  internals.refreshTopology = refresh;
+
+  try {
+    await expect(pool.executeCommand("CAS", "order", "old", "new")).rejects.toBe(reroute);
+    expect(attempts).toBe(1);
+    expect(refresh).toHaveBeenCalledOnce();
+  } finally {
+    await pool.close();
+  }
+});
+
 test("TopologyNativeAdapterPool retries one explicitly safe fused request on the refreshed route", async () => {
   const PoolConstructor = TopologyNativeAdapterPool as unknown as new (
     urls: readonly string[],

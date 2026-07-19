@@ -6,6 +6,21 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-19
+
+### Added
+
+- FerricStore 0.9.1 Flow policy generation CAS through `expectedGeneration`, explicit full replacement through `replace`, and typed `FlowPolicySnapshot` results from policy reads and writes.
+- Dedicated `StalePolicyGenerationError` mapping and strict nonnegative safe-integer generation validation across the full `0..9_007_199_254_740_991` range.
+- Live conformance coverage for HELLO policy fields, deep patch, replacement, successful and stale CAS, and FIFO concurrency across partitions.
+
+### Changed
+
+- Require FerricStore server 0.9.1 while retaining the native v1 magic, framing, headers, and opcode numbers.
+- Send representable Flow policy reads and writes through their existing structured native opcodes instead of the generic command fallback.
+- Keep direct policy updates as deep patches by default; workflow policy installation now defaults to full replacement.
+- Never automatically replay CAS mutations after reconnect or reroute failures, including outcomes known to be unsent.
+
 ## [0.2.0] - 2026-07-18
 
 ### Added

@@ -457,10 +457,10 @@ describe("native Flow protocol codec", () => {
       }
     });
     expect(policy).toMatchObject({
-      opcode: OPCODES.commandExec,
+      opcode: OPCODES.flowPolicySet,
       payload: {
-        args: ["email", "INDEXED_STATE_META", "version"],
-        command: "FLOW.POLICY.SET"
+        indexed_state_meta: "version",
+        type: "email"
       }
     });
   });

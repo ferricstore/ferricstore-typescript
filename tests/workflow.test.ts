@@ -8,7 +8,7 @@ import {
   workerIdleSleepMs,
   workerMaxIdleSleepMs
 } from "../src/worker-internal.js";
-import { FakeExecutor } from "./fake-executor.js";
+import { FakeExecutor, fakeFlowPolicySnapshot } from "./fake-executor.js";
 
 describe("Workflow", () => {
   it("fails fast when a worker has no effective states", async () => {
@@ -638,7 +638,7 @@ describe("Workflow", () => {
   it("installs FIFO state policy and rejects priority transitions into FIFO states", async () => {
     const lease = Buffer.from("lease");
     const executor = new FakeExecutor([
-      Buffer.from("OK"),
+      fakeFlowPolicySnapshot("order"),
       [
         new Map<unknown, unknown>([
           ["id", "order-4"],
@@ -664,6 +664,8 @@ describe("Workflow", () => {
     expect(executor.calls[0]).toEqual([
       "FLOW.POLICY.SET",
       "order",
+      "REPLACE",
+      "true",
       "STATE",
       "ready",
       "MODE",
@@ -677,7 +679,7 @@ describe("Workflow", () => {
   });
 
   it("installs policies for prototype-shaped workflow state names", async () => {
-    const executor = new FakeExecutor([Buffer.from("OK")]);
+    const executor = new FakeExecutor([fakeFlowPolicySnapshot("order")]);
     const workflow = new WorkflowClient(new FerricStoreClient(executor)).workflow({ type: "order" });
     workflow.state("__proto__", () => complete(), { mode: "fifo" });
 
@@ -686,6 +688,8 @@ describe("Workflow", () => {
     expect(executor.calls[0]).toEqual([
       "FLOW.POLICY.SET",
       "order",
+      "REPLACE",
+      "true",
       "STATE",
       "__proto__",
       "MODE",

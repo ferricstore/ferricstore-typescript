@@ -27,7 +27,6 @@ import {
   seedAuthIdentity,
   seedConnectionOptions,
   snapshotTopologyNativeAdapterOptions,
-  waitForExplicitlySafeReroute,
   withSeedAuthDefaults
 } from "./topology-options.js";
 import {
@@ -50,7 +49,8 @@ import { TopologyAdapterRegistry } from "./topology-adapter-registry.js";
 import { MAX_TOPOLOGY_PLANNING_ATTEMPTS, StaleTopologyRouteError, topologyRouteIsCurrent } from "./topology-route-snapshot.js";
 import { topologyRouteData } from "./topology-route-planner.js";
 import { TopologyScatterExecutor } from "./topology-scatter.js";
-
+import { isCasMutation } from "./command-retry-policy.js";
+import { canRetrySafeReroute } from "./topology-reroute-retry.js";
 export class TopologyNativeAdapterPool implements CommandExecutor {
   private readonly adapterOptions: NativeAdapterOptions;
   private readonly seedAdapterOptions: NativeAdapterOptions;
@@ -73,7 +73,6 @@ export class TopologyNativeAdapterPool implements CommandExecutor {
   private refreshPromise?: Promise<RoutingTopology>;
   private refreshRequested = false;
   private topologyValue = RoutingTopology.empty();
-
   private constructor(urls: readonly string[], options: TopologyNativeAdapterOptions = {}) {
     if (urls.length === 0) {
       throw new FerricStoreError("TopologyNativeAdapterPool requires at least one seed URL");
@@ -250,6 +249,7 @@ export class TopologyNativeAdapterPool implements CommandExecutor {
     this.assertOpen();
     const snapshot = snapshotCommandArguments(args);
     assertCommandHasStableConnectionState(snapshot);
+    const casMutation = isCasMutation(snapshot);
     let rerouteAttempt = 0;
     for (let planningAttempt = 0; planningAttempt < MAX_TOPOLOGY_PLANNING_ATTEMPTS; planningAttempt += 1) {
       const routed = this.routeData(snapshot);
@@ -268,7 +268,7 @@ export class TopologyNativeAdapterPool implements CommandExecutor {
           ? await adapter.executeCommandOnLane(snapshot, routed.route.laneId)
           : await adapter.executeProtocolCommand(routed.command, routed.route.laneId);
       } catch (error) {
-        if (await this.refreshAndCanRetrySafeReroute(error, rerouteAttempt)) {
+        if (await this.refreshAndCanRetrySafeReroute(error, rerouteAttempt, !casMutation)) {
           rerouteAttempt += 1;
           continue;
         }
@@ -316,6 +316,7 @@ export class TopologyNativeAdapterPool implements CommandExecutor {
       assertCommandHasStableConnectionState(command);
     }
     let rerouteAttempt = 0;
+    const containsCasMutation = snapshot.some(isCasMutation);
     for (let planningAttempt = 0; planningAttempt < MAX_TOPOLOGY_PLANNING_ATTEMPTS; planningAttempt += 1) {
       const route = singleRouteForCommands(snapshot, (command) => this.routeData(command));
       if (route == null) return undefined;
@@ -324,7 +325,7 @@ export class TopologyNativeAdapterPool implements CommandExecutor {
       try {
         return await adapter.executeFusedPipelineOnLane(snapshot, route.laneId, snapshotOptions);
       } catch (error) {
-        if (await this.refreshAndCanRetrySafeReroute(error, rerouteAttempt)) {
+        if (await this.refreshAndCanRetrySafeReroute(error, rerouteAttempt, !containsCasMutation)) {
           rerouteAttempt += 1;
           continue;
         }
@@ -334,15 +335,14 @@ export class TopologyNativeAdapterPool implements CommandExecutor {
     throw new StaleTopologyRouteError();
   }
 
-  private async refreshAndCanRetrySafeReroute(error: unknown, attempt: number): Promise<boolean> {
-    if (attempt !== 0 || !isRetryableRouteError(error)) return false;
-    const refreshed = await this.refreshTopology().then(
-      () => true,
-      () => false
+  private async refreshAndCanRetrySafeReroute(
+    error: unknown,
+    attempt: number,
+    retryAllowed = true
+  ): Promise<boolean> {
+    return await canRetrySafeReroute(
+      error, attempt, retryAllowed, async () => await this.refreshTopology(), () => this.assertOpen()
     );
-    if (!refreshed || !(await waitForExplicitlySafeReroute(error))) return false;
-    this.assertOpen();
-    return true;
   }
 
   private async executePipelineOnRoute(

@@ -4,6 +4,7 @@ import type { Command, CommandArgument } from "./internal.js";
 
 import * as flow from "./protocol-flow.js";
 import { flowSignalPayload } from "./protocol-flow-signal.js";
+import { flowPolicyGetPayload, flowPolicySetPayload } from "./protocol-flow-policy.js";
 import {
   assertNormalizedCommandDoesNotRequirePinnedConnection,
   commandMutatesConnectionState
@@ -206,6 +207,12 @@ export function buildProtocolCommand(
     return (allowCustomPayload
       ? flow.compactFlowListPayload(commandArgs, maxBodyBytes)
       : undefined) ?? commandExec(args);
+  }
+  if (command === "FLOW.POLICY.SET") {
+    return flowPolicySetPayload(commandArgs) ?? commandExec(args);
+  }
+  if (command === "FLOW.POLICY.GET") {
+    return flowPolicyGetPayload(commandArgs) ?? commandExec(args);
   }
   const flowAdmin = flow.FLOW_ADMIN_COMMANDS[command];
   if (flowAdmin != null) {

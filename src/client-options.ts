@@ -188,6 +188,10 @@ export interface FlowStatePolicy {
 export type FlowStatePolicyLike = FlowStatePolicy | RetryPolicy;
 
 export interface FlowPolicyOptions {
+  /** Replace the complete stored policy instead of applying the default deep patch. */
+  replace?: boolean;
+  /** Compare-and-swap generation. Must be a nonnegative JavaScript safe integer. */
+  expectedGeneration?: number;
   state?: string;
   mode?: FlowStateMode;
   retry?: RetryPolicy;

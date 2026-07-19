@@ -73,6 +73,11 @@ export class StaleLeaseError extends FerricStoreError {
   override readonly code = "stale_lease";
 }
 
+/** FLOW.POLICY.SET expected_generation did not match the stored generation. */
+export class StalePolicyGenerationError extends FerricStoreError {
+  override readonly code = "stale_policy_generation";
+}
+
 export class FlowAlreadyExistsError extends FerricStoreError {
   override readonly code = "flow_already_exists";
 }
@@ -168,6 +173,15 @@ export function classifyServerError(
     || lower.includes("stale token")
   ) {
     return new StaleLeaseError(message, { cause, raw });
+  }
+  if (
+    code === "stale_generation"
+    || code === "stale_policy_generation"
+    || code === "stale_flow_policy_generation"
+    || lower.includes("stale flow policy generation")
+    || lower.includes("stale policy generation")
+  ) {
+    return new StalePolicyGenerationError(message, { cause, raw });
   }
   if (
     code === "flow_not_found"

@@ -1,6 +1,6 @@
 services:
   ferricstore:
-    image: ${FERRICSTORE_IMAGE:-ghcr.io/ferricstore/ferricstore:0.8.0@sha256:abc16a208a8b2dd4077245ea77992b99883e2753b45acde93eef0088a8996783}
+    image: ${FERRICSTORE_IMAGE:-ghcr.io/ferricstore/ferricstore:0.9.1@sha256:b0e1c7cadf787800fe15f5eb7c77449e2d52e65df54257e0df8cd5df975b508f}
     environment:
       FERRICSTORE_PROTECTED_MODE: "false"
       FERRICSTORE_NATIVE_ENABLED: "true"

@@ -8,7 +8,7 @@ import {
   StaleLeaseError
 } from "../src/index.js";
 import type { CommandExecutor } from "../src/adapters.js";
-import { FakeExecutor } from "./fake-executor.js";
+import { FakeExecutor, fakeFlowPolicySnapshot } from "./fake-executor.js";
 
 describe("FerricStoreClient Flow and administration", () => {
   it("rejects TTLs on named Flow values before dispatch", async () => {
@@ -722,7 +722,7 @@ describe("FerricStoreClient Flow and administration", () => {
 
   it("builds policy indexing and decodes state metadata fields", async () => {
     const executor = new FakeExecutor([
-      Buffer.from("OK"),
+      fakeFlowPolicySnapshot("order"),
       new Map<unknown, unknown>([
         ["id", "flow-1"],
         ["type", "order"],

@@ -83,6 +83,15 @@ export {
 } from "./client.js";
 export { JsonCodec, RawCodec, type Codec } from "./codecs.js";
 export {
+  MAX_FLOW_POLICY_GENERATION,
+  type FlowPolicyBackoffKind,
+  type FlowPolicyBackoffSnapshot,
+  type FlowPolicyRetrySnapshot,
+  type FlowPolicyRetentionSnapshot,
+  type FlowPolicySnapshot,
+  type FlowPolicyStateSnapshot
+} from "./flow-policy.js";
+export {
   ConnectionClosedError,
   FerricStoreError,
   FlowAlreadyExistsError,
@@ -95,6 +104,7 @@ export {
   RequestTimeoutError,
   RerouteError,
   StaleLeaseError,
+  StalePolicyGenerationError,
   classifyServerError,
   mapException
 } from "./errors.js";
