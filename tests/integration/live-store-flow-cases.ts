@@ -617,7 +617,6 @@ export function registerStoreFlowIntegrationTests(): void {
 
       await expect(flow.list(type, { count: 100 })).resolves.toBeInstanceOf(Array);
       await expect(flow.info(type)).resolves.toBeTypeOf("object");
-      await expect(flow.retentionCleanup()).resolves.toBeTypeOf("object");
     } finally {
       await flow.close();
     }

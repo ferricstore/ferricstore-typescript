@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const groups = [
   ["core SDK", "tests/integration/live.test.ts"],
+  ["Flow retention cleanup", "tests/integration/live-retention.test.ts"],
   [
     "typed stores",
     "tests/integration/live-store-flow.test.ts",
