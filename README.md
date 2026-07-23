@@ -42,7 +42,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.10.1
+  ghcr.io/ferricstore/ferricstore:0.10.2
 ```
 
 ## Query durable runs

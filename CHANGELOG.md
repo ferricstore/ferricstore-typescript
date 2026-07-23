@@ -20,7 +20,7 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 - Require FerricStore 0.10.0 and negotiate the complete FQL request, result,
   explain, index-status, capability, shape, and schema contracts during HELLO.
-- Pin live integration to the immutable FerricStore 0.10.1 release and exact
+- Pin live integration to the immutable FerricStore 0.10.2 release and exact
   OSS core parity commit while retaining 0.10.0 as the minimum server contract.
 - Compile collection convenience methods to bounded, partition-scoped FQL and
   remove the superseded collection opcodes from the native command surface.

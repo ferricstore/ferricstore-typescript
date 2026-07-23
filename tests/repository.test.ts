@@ -115,12 +115,17 @@ describe("core compatibility CI", () => {
     const compose = readFileSync(`${repositoryRoot}/docker-compose.yml`, "utf8");
     const coreRevision = /ref:\s*([0-9a-f]{40})/u.exec(parityJob)?.[1];
     const immutableImage = /ghcr\.io\/ferricstore\/ferricstore:[^\s}"']+@sha256:[0-9a-f]{64}/gu;
+    const releaseImage = /ghcr\.io\/ferricstore\/ferricstore:0\.10\.2@sha256:[0-9a-f]{64}/u
+      .exec(compose)?.[0];
 
-    expect(coreRevision).toBeDefined();
+    expect(coreRevision).toBe("13c32657042558e2b88a9a8ae3c713d92b6b71cd");
+    expect(releaseImage).toBeDefined();
     expect(compose).toMatch(immutableImage);
     expect(integrationJob).toMatch(immutableImage);
+    expect(integrationJob).toContain(releaseImage ?? "missing-release-image");
     expect(integrationJob).toContain(`ci-${coreRevision ?? "missing"}@sha256:`);
     expect(releaseIntegrationJob).toMatch(immutableImage);
+    expect(releaseIntegrationJob).toContain(releaseImage ?? "missing-release-image");
     expect(releaseIntegrationJob).toContain(`ci-${coreRevision ?? "missing"}@sha256:`);
   });
 
@@ -132,6 +137,16 @@ describe("core compatibility CI", () => {
     expect(readiness).toContain('from "../src/native-protocol-manifest.json"');
   });
 
+  it("grants native bootstrap controls to the scoped query integration user", () => {
+    const deployment = readFileSync(
+      `${repositoryRoot}/tests/integration/deployment.test.ts`,
+      "utf8"
+    );
+
+    for (const command of ["shards", "subscribe_events", "flow.query", "flow.query.explain"]) {
+      expect(deployment).toContain(`"+${command}"`);
+    }
+  });
 });
 
 describe("workflow supply-chain security", () => {

@@ -166,6 +166,8 @@ describe.skipIf(authUrl == null)("live authenticated deployment", () => {
         `~${prefix}*`,
         "-@all",
         "+ping",
+        "+shards",
+        "+subscribe_events",
         "+flow.query",
         "+flow.query.explain"
       ]);
