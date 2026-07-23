@@ -135,6 +135,20 @@ describe("core compatibility CI", () => {
 });
 
 describe("workflow supply-chain security", () => {
+  it("rejects high-severity dependency advisories in the package job", () => {
+    const testWorkflow = readFileSync(
+      `${repositoryRoot}/.github/workflows/test.yml`,
+      "utf8"
+    );
+    const releaseWorkflow = readFileSync(
+      `${repositoryRoot}/.github/workflows/release.yml`,
+      "utf8"
+    );
+
+    expect(workflowJob(testWorkflow, "package")).toContain("npm audit --audit-level=high");
+    expect(workflowJob(releaseWorkflow, "npm")).toContain("npm audit --audit-level=high");
+  });
+
   it("pins every third-party action in every workflow", () => {
     const workflowDirectory = `${repositoryRoot}/.github/workflows`;
     const mutableActions = readdirSync(workflowDirectory)

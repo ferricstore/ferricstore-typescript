@@ -30,6 +30,8 @@ The format is based on Keep a Changelog, and this project follows semver once it
   index identifiers before transport, with locale-independent metadata order.
 - Reject malformed Unicode query response text while retaining the existing
   64-byte quality-label response bound.
+- Update vulnerable transitive development dependencies and enforce a
+  high-severity `npm audit` gate in test and release workflows.
 
 ## [0.3.0] - 2026-07-19
 
