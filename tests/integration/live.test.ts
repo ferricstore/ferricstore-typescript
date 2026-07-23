@@ -14,6 +14,7 @@ import {
   createAndClaim,
   createManyAndClaim,
   deletePrefixedKeys,
+  eventually,
   expectStateMeta,
   expectSupportedOrKnownServerError,
   fenced,
@@ -492,13 +493,15 @@ describe("FerricStore integration", () => {
         }
       });
 
-      const searchMatches = await flow.search(type, {
-        consistentProjection: true,
-        partitionKey,
-        state: "accept",
-        stateMeta: { version: "1" }
-      });
-      expect(searchMatches.some((record) => record.id === id)).toBe(true);
+      await eventually(
+        () => flow.search(type, {
+          partitionKey,
+          state: "accept",
+          stateMeta: { version: "1" }
+        }),
+        (records) => records.some((record) => record.id === id),
+        "FLOW.QUERY state metadata projection did not become ready"
+      );
 
       const job = await claimOne(flow, type, "accept", partitionKey, { nowMs: now + 1 });
       await expect(flow.complete(id, {

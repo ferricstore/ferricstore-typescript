@@ -145,8 +145,9 @@ describe("workflow supply-chain security", () => {
       "utf8"
     );
 
-    expect(workflowJob(testWorkflow, "package")).toContain("npm audit --audit-level=high");
-    expect(workflowJob(releaseWorkflow, "npm")).toContain("npm audit --audit-level=high");
+    const pinnedAudit = "npx --yes npm@11.6.2 audit --audit-level=high";
+    expect(workflowJob(testWorkflow, "package")).toContain(pinnedAudit);
+    expect(workflowJob(releaseWorkflow, "npm")).toContain(pinnedAudit);
   });
 
   it("pins every third-party action in every workflow", () => {

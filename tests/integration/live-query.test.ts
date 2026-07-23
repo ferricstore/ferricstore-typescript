@@ -2,10 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   FerricStoreClient,
   FlowQueryError,
-  JsonCodec,
-  type FlowQueryResult
+  JsonCodec
 } from "../../src/index.js";
-import { field, suffix, text, url } from "./live-support.js";
+import { eventually, field, suffix, text, url } from "./live-support.js";
 
 const PAGE_QUERY =
   "FROM runs WHERE partition_key = @partition AND type = @type AND state = @state " +
@@ -43,8 +42,11 @@ describe("FerricStore 0.10 query planner integration", () => {
         });
       }
 
-      const first = await waitForQuery(client, PAGE_QUERY, params, (result) =>
-        result.kind === "records" && result.records.length === 2 && result.page.hasMore
+      const first = await eventually(
+        () => client.query(PAGE_QUERY, params),
+        (result) =>
+          result.kind === "records" && result.records.length === 2 && result.page.hasMore,
+        "FLOW.QUERY projection did not become ready"
       );
       expect(first.kind).toBe("records");
       if (first.kind !== "records" || first.page.cursor == null) {
@@ -68,8 +70,10 @@ describe("FerricStore 0.10 query planner integration", () => {
       expect(new Set(pagedIds).size).toBe(pagedIds.length);
       expect(new Set(pagedIds)).toEqual(new Set(ids));
 
-      const counted = await waitForQuery(client, COUNT_QUERY, params, (result) =>
-        result.kind === "count" && result.count === ids.length
+      const counted = await eventually(
+        () => client.query(COUNT_QUERY, params),
+        (result) => result.kind === "count" && result.count === ids.length,
+        "FLOW.QUERY count projection did not become ready"
       );
       expect(counted).toMatchObject({ kind: "count", count: ids.length });
       expect(counted.usage.resultRecords).toBe(1);
@@ -96,11 +100,10 @@ describe("FerricStore 0.10 query planner integration", () => {
       expect((error as FlowQueryError).position).toBeDefined();
       expect((error as FlowQueryError).hint).not.toBe("");
 
-      const listed = await waitForQuery(
-        client,
-        PAGE_QUERY.replace("LIMIT 2", "LIMIT 3"),
-        params,
-        (result) => result.kind === "records" && result.records.length === ids.length
+      const listed = await eventually(
+        () => client.query(PAGE_QUERY.replace("LIMIT 2", "LIMIT 3"), params),
+        (result) => result.kind === "records" && result.records.length === ids.length,
+        "FLOW.QUERY list projection did not become ready"
       );
       if (listed.kind !== "records") throw new Error("expected a records result");
       await expect(client.list(type, {
@@ -113,30 +116,6 @@ describe("FerricStore 0.10 query planner integration", () => {
     }
   }, 40_000);
 });
-
-async function waitForQuery(
-  client: FerricStoreClient,
-  query: string,
-  params: Readonly<Record<string, string>>,
-  ready: (result: FlowQueryResult) => boolean
-): Promise<FlowQueryResult> {
-  const deadline = Date.now() + 30_000;
-  let lastResult: FlowQueryResult | undefined;
-  let lastError: unknown;
-  while (Date.now() < deadline) {
-    try {
-      lastResult = await client.query(query, params);
-      lastError = undefined;
-      if (ready(lastResult)) return lastResult;
-    } catch (error) {
-      lastError = error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error("FLOW.QUERY projection did not become ready", {
-    cause: lastError ?? lastResult
-  });
-}
 
 function greaterThanZero(value: number | bigint): boolean {
   return typeof value === "bigint" ? value > 0n : value > 0;

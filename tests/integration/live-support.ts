@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { expect } from "vitest";
 import {
   FerricStoreClient,
@@ -13,6 +14,31 @@ export function url(): string {
 
 export function suffix(): string {
   return randomUUID();
+}
+
+export async function eventually<T>(
+  operation: () => Promise<T>,
+  ready: (value: T) => boolean,
+  message: string,
+  options: { readonly intervalMs?: number; readonly timeoutMs?: number } = {}
+): Promise<T> {
+  const deadline = performance.now() + (options.timeoutMs ?? 30_000);
+  const intervalMs = options.intervalMs ?? 50;
+  let lastValue: T | undefined;
+  let lastError: unknown;
+
+  while (performance.now() < deadline) {
+    try {
+      lastValue = await operation();
+      lastError = undefined;
+      if (ready(lastValue)) return lastValue;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(message, { cause: lastError ?? lastValue });
 }
 
 export function text(value: unknown): string {
