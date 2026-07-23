@@ -381,20 +381,15 @@ export const typeScopedFlowCommands = new Set([
   "FLOW.ATTRIBUTE_VALUES",
   "FLOW.ATTRIBUTES",
   "FLOW.BUDGET.LIST",
-  "FLOW.FAILURES",
   "FLOW.GOVERNANCE.OVERVIEW",
   "FLOW.INFO",
   "FLOW.LIMIT.LIST",
-  "FLOW.LIST",
   "FLOW.POLICY.GET",
   "FLOW.POLICY.SET",
   "FLOW.RETENTION_CLEANUP",
   "FLOW.SCHEDULE.FIRE_DUE",
   "FLOW.SCHEDULE.LIST",
-  "FLOW.SEARCH",
-  "FLOW.STATS",
-  "FLOW.STUCK",
-  "FLOW.TERMINALS"
+  "FLOW.STATS"
 ]);
 
 export const flowScheduleCommands = new Set([

@@ -20,6 +20,7 @@ import {
   responseFrameFromBody,
   servers,
   startCountingServer,
+  v010Startup,
   waitFor
 } from "./adapter-test-support.js";
 
@@ -54,7 +55,7 @@ test("NativeAdapter starts heartbeats only after STARTUP and AUTH complete", asy
           request.opcode,
           request.laneId,
           request.requestId,
-          { auth_required: true }
+          v010Startup({ auth_required: true })
         ));
       }, 25);
       return NO_RESPONSE;

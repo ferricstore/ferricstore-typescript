@@ -15,10 +15,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - server: release-0.9.1
-            image: ghcr.io/ferricstore/ferricstore:0.9.1@sha256:b0e1c7cadf787800fe15f5eb7c77449e2d52e65df54257e0df8cd5df975b508f
+          - server: release-0.10.1
+            image: ghcr.io/ferricstore/ferricstore:0.10.1@sha256:198cffba8e2df2f5f66db9e6bbef83131f4841d4b90c65ee8091ac463ec6715d
           - server: pinned-core
-            image: ghcr.io/ferricstore/ferricstore:ci-11456cc0e5f099b72aac56ffe6acd8b6f3fd1624@sha256:a44941a07f62e35da5814c5183c6e8e1657833d54beb6d6a16bc3d5004bc7ce7
+            image: ghcr.io/ferricstore/ferricstore:ci-b6f02a57b88311614048f93018b0bdfe67dce20f@sha256:868aaa31941bbfa589284985c1437f1c37ce8beaf8008f881ed7474fd76bc8b7
     env:
       FERRICSTORE_IMAGE: ${{ matrix.image }}
     steps:

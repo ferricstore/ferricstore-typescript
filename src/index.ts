@@ -83,6 +83,24 @@ export {
 } from "./client.js";
 export { JsonCodec, RawCodec, type Codec } from "./codecs.js";
 export {
+  FlowQueryError,
+  type FlowExplainResult,
+  type FlowQueryCountResult,
+  type FlowQueryErrorPosition,
+  type FlowQueryIndex,
+  type FlowQueryInteger,
+  type FlowQueryIndexRegistry,
+  type FlowQueryIndexStatus,
+  type FlowQueryPage,
+  type FlowQueryParameter,
+  type FlowQueryParameters,
+  type FlowQueryQuality,
+  type FlowQueryRecord,
+  type FlowQueryRecordsResult,
+  type FlowQueryResult,
+  type FlowQueryUsage
+} from "./flow-query-types.js";
+export {
   MAX_FLOW_POLICY_GENERATION,
   type FlowPolicyBackoffKind,
   type FlowPolicyBackoffSnapshot,

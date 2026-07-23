@@ -107,6 +107,9 @@ export function flowRoutingData(name: string, args: readonly CommandArgument[]):
     return undefined;
   }
 
+  // FLOW.QUERY routing and ACL keys come from the server-prepared FQL plan.
+  if (name === "FLOW.QUERY") return undefined;
+
   if (flowApprovalIdCommands.has(name)) {
     const id = flowArgs[0];
     return flowRoutingResult(flowLogicalPartitionRoutingKey(id));

@@ -27,6 +27,7 @@ import {
   startCountingServer,
   startFragmentingServer,
   validTopologyPayload,
+  v010Startup,
   waitFor,
   writeIncrementalFragments
 } from "./adapter-test-support.js";
@@ -225,7 +226,12 @@ test("FerricStoreClient.fromUrl waits for initial startup with reconnect enabled
       if (request.opcode !== OPCODES.startup) return undefined;
       startupSeen = true;
       void startupGate.then(() => {
-        socket.write(responseFrame(request.opcode, request.laneId, request.requestId, "OK"));
+        socket.write(responseFrame(
+          request.opcode,
+          request.laneId,
+          request.requestId,
+          v010Startup()
+        ));
       });
       return NO_RESPONSE;
     },

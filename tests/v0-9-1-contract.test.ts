@@ -61,9 +61,9 @@ function policyResponse(overrides: Record<string, unknown> = {}): Map<unknown, u
 }
 
 describe("FerricStore 0.9.1 TypeScript contract", () => {
-  it("exports the 0.3 package contract while retaining native protocol v1", () => {
-    expect(FERRICSTORE_SDK_VERSION).toBe("0.3.0");
-    expect(FERRICSTORE_MINIMUM_SERVER_VERSION).toBe("0.9.1");
+  it("retains the policy contract under the current package and native protocol v1", () => {
+    expect(FERRICSTORE_SDK_VERSION).toBe("0.4.0");
+    expect(FERRICSTORE_MINIMUM_SERVER_VERSION).toBe("0.10.0");
     expect(FERRICSTORE_NATIVE_PROTOCOL_VERSION).toBe(1);
   });
 

@@ -26,8 +26,8 @@ import { FakeExecutor } from "./fake-executor.js";
 
 describe("FerricStore 0.8 TypeScript contract", () => {
   it("retains the v0.8 features under the current package contract and wire version", () => {
-    expect(FERRICSTORE_SDK_VERSION).toBe("0.3.0");
-    expect(FERRICSTORE_MINIMUM_SERVER_VERSION).toBe("0.9.1");
+    expect(FERRICSTORE_SDK_VERSION).toBe("0.4.0");
+    expect(FERRICSTORE_MINIMUM_SERVER_VERSION).toBe("0.10.0");
     expect(FERRICSTORE_NATIVE_PROTOCOL_VERSION).toBe(1);
   });
 

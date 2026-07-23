@@ -129,11 +129,15 @@ function planScalarValue(value: unknown, budget: wire.EncodeValueBudget): wire.E
     return { byteLength: 9, tag: 3, value: BigInt(value) };
   }
   if (typeof value === "bigint") {
-    if (value < wire.MIN_I64 || value > wire.MAX_I64) {
-      throw new FerricStoreError("integer exceeds the signed 64-bit native range");
+    if (value >= wire.MIN_I64 && value <= wire.MAX_I64) {
+      consumeEncodeBytes(budget, 9);
+      return { byteLength: 9, tag: 3, value };
     }
-    consumeEncodeBytes(budget, 9);
-    return { byteLength: 9, tag: 3, value };
+    if (value > wire.MAX_I64 && value <= wire.MAX_U64) {
+      consumeEncodeBytes(budget, 9);
+      return { byteLength: 9, tag: 8, value };
+    }
+    throw new FerricStoreError("integer exceeds the signed or unsigned 64-bit native range");
   }
   if (typeof value === "number") {
     consumeEncodeBytes(budget, 9);
@@ -188,6 +192,9 @@ export function writeValuePlan(output: Buffer, start: number, plan: wire.EncodeV
       return offset;
     case 7:
       output.writeDoubleBE(plan.value, offset);
+      return offset + 8;
+    case 8:
+      output.writeBigUInt64BE(plan.value, offset);
       return offset + 8;
   }
 }
@@ -270,6 +277,14 @@ function decodeValueAt(
   if (tag === 7) {
     requireAvailable(data, offset, 8);
     return { value: data.readDoubleBE(offset), offset: offset + 8 };
+  }
+  if (tag === 8) {
+    requireAvailable(data, offset, 8);
+    const integer = data.readBigUInt64BE(offset);
+    return {
+      value: integer <= wire.MAX_SAFE_INTEGER_BIGINT ? Number(integer) : integer,
+      offset: offset + 8
+    };
   }
   throw new FerricStoreError(`unknown protocol value tag ${tag}`);
 }

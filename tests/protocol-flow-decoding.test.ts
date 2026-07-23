@@ -1,7 +1,6 @@
 import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import {
-  COMMAND_OPCODES,
   OPCODES,
   buildProtocolCommand,
   decodeResponse,
@@ -33,8 +32,8 @@ describe("native Flow protocol decoding limits", () => {
       responseFrame(OPCODES.flowGet, recordBody), OPCODES.flowGet, compactResponseHints
     )).toEqual({});
     expect(decodeResponse(
-      responseFrame(COMMAND_OPCODES["FLOW.LIST"], recordListBody),
-      COMMAND_OPCODES["FLOW.LIST"],
+      responseFrame(OPCODES.pipeline, recordListBody),
+      OPCODES.pipeline,
       compactResponseHints
     )).toEqual([]);
   });
@@ -90,6 +89,14 @@ describe("native Flow protocol decoding limits", () => {
     expect(decodeValue(encodeValue(positive)).value).toBe(positive);
     expect(decodeValue(encodeValue(negative)).value).toBe(negative);
     expect(decodeValue(encodeValue(Number.MAX_SAFE_INTEGER)).value).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it("preserves the full unsigned 64-bit native integer domain", () => {
+    const maximum = 18_446_744_073_709_551_615n;
+    const encoded = encodeValue(maximum);
+
+    expect(encoded.readUInt8(0)).toBe(8);
+    expect(decodeValue(encoded).value).toBe(maximum);
   });
 
   it("rejects unsafe integer numbers and accepts bigint instead", () => {

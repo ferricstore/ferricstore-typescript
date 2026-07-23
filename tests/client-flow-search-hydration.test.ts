@@ -4,51 +4,77 @@ import type { CommandExecutor } from "../src/adapters.js";
 import { FakeExecutor } from "./fake-executor.js";
 
 describe("FerricStoreClient Flow search and claim hydration", () => {
-  it("builds FLOW.SEARCH with attributes and state metadata", async () => {
+  it("builds FLOW.QUERY with attributes and state metadata", async () => {
     const executor = new FakeExecutor([
-      [
-        new Map<unknown, unknown>([
+      {
+        version: "ferric.flow.query.result/v1",
+        records: [new Map<unknown, unknown>([
           ["id", "flow-1"],
           ["type", "order"],
           ["state", "queued"],
           ["partition_key", "tenant-a"],
+          ["lease_token", Buffer.alloc(0)],
+          ["fencing_token", 0],
           ["version", 1]
-        ])
-      ]
+        ])],
+        page: { has_more: false, cursor: null },
+        quality: {
+          exactness: "projected_exact",
+          freshness: "projection_watermark",
+          coverage: "complete",
+          pagination: "live_seek"
+        },
+        usage: {
+          range_seeks: 1,
+          range_pages: 1,
+          scanned_entries: 1,
+          scanned_bytes: 1,
+          hydrated_records: 1,
+          residual_checks: 0,
+          duplicate_entries: 0,
+          result_records: 1,
+          response_bytes: 1,
+          memory_high_water_bytes: 1,
+          wall_time_us: 1
+        }
+      }
     ]);
     const client = new FerricStoreClient(executor);
 
     const records = await client.search("order", {
       attributes: { tenant: "acme" },
-      consistentProjection: true,
       count: 10,
+      partitionKey: "tenant-a",
       state: "queued",
       stateMeta: { version: 1 },
-      terminalOnly: true
+      terminalOnly: false
     });
 
     expect(records[0]).toMatchObject({ id: "flow-1", partitionKey: "tenant-a" });
     expect(executor.calls[0]).toEqual([
-      "FLOW.SEARCH",
-      "order",
-      "COUNT",
-      10,
-      "STATE",
-      "queued",
-      "TERMINAL_ONLY",
-      "true",
-      "CONSISTENT_PROJECTION",
-      "true",
-      "ATTRIBUTE",
-      "tenant",
+      "FLOW.QUERY",
+      "FQL1",
+      "FROM runs WHERE partition_key = @partition_key AND type = @type " +
+        "AND state = @state AND attribute['tenant'] = @attribute_0 " +
+        "AND state_meta['queued']['version'] = @state_meta_0 " +
+        "ORDER BY updated_at_ms ASC LIMIT 10 RETURN RECORDS",
+      "attribute_0",
       "acme",
-      "STATE_META",
+      "partition_key",
+      "tenant-a",
+      "state",
       "queued",
-      { version: 1 }
+      "state_meta_0",
+      1,
+      "type",
+      "order"
     ]);
 
-    await expect(client.search("order", { stateMeta: { version: 1 } })).rejects.toThrow(
-      "search stateMeta filters require state"
+    await expect(client.search("order", {
+      partitionKey: "tenant-a",
+      stateMeta: { version: 1 }
+    })).rejects.toThrow(
+      "stateMeta filters require state"
     );
   });
 

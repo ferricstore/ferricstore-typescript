@@ -13,6 +13,7 @@ import {
   responseFrameFromBody,
   startCountingServer,
   startFragmentingServer,
+  v010Startup,
   waitFor
 } from "./adapter-test-support.js";
 
@@ -133,11 +134,22 @@ test("NativeAdapter applies the response cap while chunks are still arriving", a
   const server = await startCountingServer(
     (request, socket) => {
       if (request.opcode === OPCODES.startup) {
-        socket.write(responseFrame(request.opcode, request.laneId, request.requestId, null));
+        socket.write(responseFrame(
+          request.opcode,
+          request.laneId,
+          request.requestId,
+          v010Startup()
+        ));
         return NO_RESPONSE;
       }
       if (request.opcode === OPCODES.ping) {
-        socket.write(responseFrame(request.opcode, request.laneId, request.requestId, "partial-response", 0x20));
+        socket.write(responseFrame(
+          request.opcode,
+          request.laneId,
+          request.requestId,
+          Buffer.alloc(8 * 1_024, 0x61),
+          0x20
+        ));
         return NO_RESPONSE;
       }
       return undefined;
@@ -146,13 +158,13 @@ test("NativeAdapter applies the response cap while chunks are still arriving", a
   );
   const address = server.address() as AddressInfo;
   const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
-    maxChunkBytes: 1_024,
-    maxResponseBytes: 4,
+    maxChunkBytes: 16 * 1_024,
+    maxResponseBytes: 4 * 1_024,
     timeoutMs: 100
   });
 
   try {
-    await expect(adapter.executeCommand("PING")).rejects.toThrow("response exceeded 4 bytes");
+    await expect(adapter.executeCommand("PING")).rejects.toThrow("response exceeded 4096 bytes");
   } finally {
     await adapter.close();
   }
@@ -242,11 +254,11 @@ test("NativeAdapter retains final-chunk accounting through contiguous assembly",
 
 test("NativeAdapter bounds unchunked response bodies", async () => {
   const server = await startCountingServer((request) =>
-    request.opcode === OPCODES.ping ? Buffer.alloc(128, 0x61) : undefined
+    request.opcode === OPCODES.ping ? Buffer.alloc(8 * 1_024, 0x61) : undefined
   );
   const address = server.address() as AddressInfo;
   const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
-    maxResponseBytes: 32
+    maxResponseBytes: 4 * 1_024
   });
 
   try {

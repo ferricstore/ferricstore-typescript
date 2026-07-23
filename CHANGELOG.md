@@ -6,6 +6,31 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-23
+
+### Added
+
+- Typed `query`, `explain`, `explainAnalyze`, and `queryIndexes` APIs for the
+  OSS FQL1 planner, including opaque pagination cursors, count results,
+  actionable diagnostics, and exact unsigned 64-bit index metadata.
+- Live pagination, count, explain/analyze, index-status, eventual-projection,
+  convenience, and scoped query ACL integration coverage.
+
+### Changed
+
+- Require FerricStore 0.10.0 and negotiate the complete FQL request, result,
+  explain, index-status, capability, shape, and schema contracts during HELLO.
+- Pin live integration to the immutable FerricStore 0.10.1 release and exact
+  OSS core parity commit while retaining 0.10.0 as the minimum server contract.
+- Compile collection convenience methods to bounded, partition-scoped FQL and
+  remove the superseded collection opcodes from the native command surface.
+- Reject incompatible index-status contracts during HELLO and preserve the
+  server's 64-byte metadata and normalized-state domains before query I/O.
+- Reject collection shapes without a bounded server index and explicit empty
+  index identifiers before transport, with locale-independent metadata order.
+- Reject malformed Unicode query response text while retaining the existing
+  64-byte quality-label response bound.
+
 ## [0.3.0] - 2026-07-19
 
 ### Added

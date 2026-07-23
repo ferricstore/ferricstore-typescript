@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { FerricStoreError } from "./errors.js";
 import type { Command, CommandArgument } from "./internal.js";
+import { flowQueryPayload } from "./flow-query-request.js";
 
 import * as flow from "./protocol-flow.js";
 import { flowSignalPayload } from "./protocol-flow-signal.js";
@@ -203,10 +204,8 @@ export function buildProtocolCommand(
   if (command === "FLOW.HISTORY") {
     return flow.flowHistoryPayload(commandArgs) ?? commandExec(args);
   }
-  if (command === "FLOW.LIST") {
-    return (allowCustomPayload
-      ? flow.compactFlowListPayload(commandArgs, maxBodyBytes)
-      : undefined) ?? commandExec(args);
+  if (command === "FLOW.QUERY") {
+    return { opcode: wire.OPCODES.flowQuery, payload: flowQueryPayload(commandArgs) };
   }
   if (command === "FLOW.POLICY.SET") {
     return flowPolicySetPayload(commandArgs) ?? commandExec(args);
@@ -327,21 +326,6 @@ export function buildProtocolCommand(
   if (command === "FLOW.RUN_STEPS_MANY") {
     return flow.flowAdminPayload(wire.OPCODES.flowRunStepsMany, commandArgs) ?? commandExec(args);
   }
-  if (command === "FLOW.SEARCH") {
-    if (flow.hasFlowCommandOnlyOption(command, commandArgs)) {
-      const fallback = commandExec(args);
-      try {
-        const parsed = flow.flowSearchPayload(commandArgs);
-        return parsed == null
-          ? fallback
-          : flow.withFlowPartitionRouting(fallback, parsed.payload);
-      } catch {
-        return fallback;
-      }
-    }
-    return flow.flowSearchPayload(commandArgs) ?? commandExec(args);
-  }
-
   return commandExec(args);
 }
 

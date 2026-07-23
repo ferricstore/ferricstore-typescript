@@ -13,24 +13,18 @@ import {
 import { flowRecordFromResp, type ChildSpec, type FencingToken, type FlowRecord, type MaxActiveMs } from "./types.js";
 import type {
   FlowPolicyOptions,
-  HistoryOptions,
-  ReadOptions,
-  SearchOptions
+  HistoryOptions
 } from "./client-options.js";
 import {
-  appendAttributes,
   appendFlowStatePolicy,
   appendNamedCounts,
   appendPayloadRead,
   appendPolicyMode,
-  appendReadOptions,
   appendRetryPolicy,
-  appendSearchStateMeta,
-  isRecordLike,
-  requiredArrayResponse
+  isRecordLike
 } from "./client-helpers.js";
 import { FlowBatchError, confirmedFlowBatchItems } from "./client-errors.js";
-import { FerricStoreManagementClient } from "./client-management.js";
+import { FerricStoreFlowQueryClient } from "./client-flow-query.js";
 import { executeProducerWriteWithBackpressure } from "./producer-backpressure.js";
 import {
   assertFlowPolicyGeneration,
@@ -39,7 +33,7 @@ import {
 } from "./flow-policy.js";
 
 /** @internal Read, policy, and shared Flow helpers kept off the primary implementation module. */
-export class FerricStoreFlowSupportClient extends FerricStoreManagementClient {
+export class FerricStoreFlowSupportClient extends FerricStoreFlowQueryClient {
   async rewind(id: string, options: {
     partitionKey?: string;
     toEvent?: string;
@@ -80,55 +74,8 @@ export class FerricStoreFlowSupportClient extends FerricStoreManagementClient {
     return flowRecordFromResp<TPayload>(response, this.codec);
   }
 
-  async list(type: string, options: ReadOptions = {}): Promise<FlowRecord[]> {
-    return await this.indexQuery("FLOW.LIST", type, options);
-  }
-
-  async search(type: string, options: SearchOptions = {}): Promise<FlowRecord[]> {
-    const args: CommandArgument[] = ["FLOW.SEARCH", type];
-    appendReadOptions(args, options);
-    appendAttributes(args, options.attributes);
-    appendSearchStateMeta(args, options.state, options.stateMeta);
-    const response = await this.commandArgs(args);
-    return this.records(requiredArrayResponse(response, "FLOW.SEARCH"));
-  }
-
-  async terminals(type: string, options: ReadOptions = {}): Promise<FlowRecord[]> {
-    return await this.indexQuery("FLOW.TERMINALS", type, options);
-  }
-
-  async failures(type: string, options: ReadOptions = {}): Promise<FlowRecord[]> {
-    return await this.indexQuery("FLOW.FAILURES", type, options);
-  }
-
-  async byParent(parentFlowId: string, options: ReadOptions = {}): Promise<FlowRecord[]> {
-    return await this.indexQuery("FLOW.BY_PARENT", parentFlowId, options);
-  }
-
-  async byRoot(rootFlowId: string, options: ReadOptions = {}): Promise<FlowRecord[]> {
-    return await this.indexQuery("FLOW.BY_ROOT", rootFlowId, options);
-  }
-
-  async byCorrelation(correlationId: string, options: ReadOptions = {}): Promise<FlowRecord[]> {
-    return await this.indexQuery("FLOW.BY_CORRELATION", correlationId, options);
-  }
-
   async info(type: string): Promise<Record<string, unknown>> {
     return parseKvResponse(await this.command("FLOW.INFO", type));
-  }
-
-  async stuck(type: string, options: {
-    partitionKey?: string;
-    count?: number;
-    olderThanMs?: number;
-    nowMs?: number;
-  } = {}): Promise<FlowRecord[]> {
-    const args: CommandArgument[] = ["FLOW.STUCK", type];
-    append(args, "PARTITION", options.partitionKey);
-    append(args, "COUNT", options.count);
-    append(args, "OLDER_THAN", options.olderThanMs);
-    append(args, "NOW", options.nowMs);
-    return this.records(arrayResponse(await this.commandArgs(args)));
   }
 
   async history(id: string, options: HistoryOptions = {}): Promise<unknown[]> {
@@ -285,17 +232,6 @@ export class FerricStoreFlowSupportClient extends FerricStoreManagementClient {
     return record;
   }
 
-  protected records(values: unknown[]): FlowRecord[] {
-    const records = new Array<FlowRecord>(values.length);
-    for (let index = 0; index < values.length; index += 1) {
-      if (!Object.hasOwn(values, index)) {
-        throw new TypeError(`Flow record response item ${index} is missing`);
-      }
-      records[index] = flowRecordFromResp(values[index], this.codec);
-    }
-    return records;
-  }
-
   protected recordsOrResponse(value: unknown): unknown[] | unknown {
     if (Array.isArray(value) && value.every(isRecordLike)) {
       return this.records(value);
@@ -331,13 +267,6 @@ export class FerricStoreFlowSupportClient extends FerricStoreManagementClient {
       }
     }
     return results;
-  }
-
-  private async indexQuery(command: string, key: string, options: ReadOptions): Promise<FlowRecord[]> {
-    const args: CommandArgument[] = [command, key];
-    appendReadOptions(args, options);
-    const response = await this.commandArgs(args);
-    return this.records(requiredArrayResponse(response, command));
   }
 
   protected appendPartitionOptions(

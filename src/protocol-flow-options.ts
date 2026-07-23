@@ -75,22 +75,6 @@ export function ensureObjectField(payload: Record<string, unknown>, field: strin
   return next;
 }
 
-export function normalizeFlowSearchStateMeta(payload: Record<string, unknown>): void {
-  const stateMeta = payload.state_meta;
-  if (!isPlainObject(stateMeta) || Object.keys(stateMeta).length === 0) {
-    return;
-  }
-  if (Object.values(stateMeta).every(isPlainObject)) {
-    return;
-  }
-
-  const state = payload.state;
-  if (state == null) {
-    throw new FerricStoreError("FLOW.SEARCH STATE_META filters require STATE or nested state metadata");
-  }
-  payload.state_meta = { [core.asText(state)]: stateMeta };
-}
-
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value != null && !Array.isArray(value) && !Buffer.isBuffer(value) && !(value instanceof Uint8Array);
 }

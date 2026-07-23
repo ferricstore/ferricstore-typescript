@@ -30,9 +30,9 @@ describe("native protocol codec", () => {
 
   it("exports the latest native command opcode table", () => {
     expect(COMMAND_OPCODES.OPTIONS).toBe(0x000b);
-    expect(COMMAND_OPCODES["FLOW.SEARCH"]).toBe(0x0230);
+    expect(COMMAND_OPCODES["FLOW.QUERY"]).toBe(0x0231);
     expect(COMMAND_OPCODES["FLOW.BUDGET.RELEASE"]).toBe(0x0258);
-    expect(OPCODES.flowSearch).toBe(COMMAND_OPCODES["FLOW.SEARCH"]);
+    expect(OPCODES.flowQuery).toBe(COMMAND_OPCODES["FLOW.QUERY"]);
   });
 
   it("encodes request frames with FerricStore native header", () => {
@@ -584,42 +584,26 @@ describe("native protocol codec", () => {
     });
   });
 
-  it("builds compact FLOW.LIST requests for the server-supported filter subset", () => {
+  it("builds typed FLOW.QUERY requests for the bounded FQL contract", () => {
     const command = buildProtocolCommand([
-      "FLOW.LIST",
-      "email",
-      "STATE",
-      "queued",
-      "COUNT",
-      500,
-      "RETURN",
-      "META"
+      "FLOW.QUERY",
+      "FQL1",
+      "FROM runs WHERE partition_key = @partition RETURN COUNT",
+      "partition",
+      "tenant-a"
     ]);
 
-    expect(command).toMatchObject({
-      flags: FLAG_CUSTOM_PAYLOAD,
-      opcode: COMMAND_OPCODES["FLOW.LIST"]
+    expect(command).toEqual({
+      opcode: COMMAND_OPCODES["FLOW.QUERY"],
+      payload: {
+        version: "FQL1",
+        query: "FROM runs WHERE partition_key = @partition RETURN COUNT",
+        params: { partition: "tenant-a" }
+      }
     });
-    expect(command.payload).toEqual(Buffer.concat([
-      Buffer.from([0x9f]),
-      binary(Buffer.from("email")),
-      binary(Buffer.from("queued")),
-      i64(500n),
-      Buffer.from([1])
-    ]));
-
-    const defaults = buildProtocolCommand(["FLOW.LIST", "email"]);
-    expect(defaults.payload).toEqual(Buffer.concat([
-      Buffer.from([0x9f]),
-      binary(Buffer.from("email")),
-      u32(0xffff_ffff),
-      i64(100n),
-      Buffer.from([0])
-    ]));
   });
 
   it("keeps unsupported compact Flow request shapes on their generic paths", () => {
-    const list = buildProtocolCommand(["FLOW.LIST", "email", "PARTITION", "tenant-a"]);
     const cancel = buildProtocolCommand([
       "FLOW.CANCEL_MANY",
       "tenant-a",
@@ -646,13 +630,11 @@ describe("native protocol codec", () => {
       Buffer.from("lease")
     ]);
 
-    expect(list).toMatchObject({ opcode: OPCODES.commandExec });
     expect(cancel).toMatchObject({ opcode: OPCODES.commandExec });
     expect(transition).toMatchObject({
       opcode: COMMAND_OPCODES["FLOW.TRANSITION_MANY"],
       payload: { payload: Buffer.from("payload") }
     });
-    expect(list.flags).toBeUndefined();
     expect(cancel.flags).toBeUndefined();
     expect(transition.flags).toBeUndefined();
   });

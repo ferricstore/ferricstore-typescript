@@ -394,7 +394,10 @@ export function registerStoreFlowIntegrationTests(): void {
         partitionKey: failedJob.partitionKey
       })).resolves.toBeDefined();
       await expect(flow.get(failedJob.id, { partitionKey: failedJob.partitionKey })).resolves.toMatchObject({ state: "failed" });
-      await expect(flow.failures(type, { count: 20 })).resolves.toBeDefined();
+      await expect(flow.failures(type, {
+        count: 20,
+        partitionKey: failedJob.partitionKey
+      })).resolves.toBeDefined();
 
       const cancelJob = await createAndClaim(flow, type, runId, "cancel");
       await expect(flow.cancel(cancelJob.id, {
@@ -404,7 +407,10 @@ export function registerStoreFlowIntegrationTests(): void {
         reason: { cancelled: true }
       })).resolves.toBeDefined();
       await expect(flow.get(cancelJob.id, { partitionKey: cancelJob.partitionKey })).resolves.toMatchObject({ state: "cancelled" });
-      await expect(flow.terminals(type, { count: 50 })).resolves.toBeDefined();
+      await expect(flow.terminals(type, {
+        count: 50,
+        partitionKey: cancelJob.partitionKey
+      })).resolves.toBeDefined();
 
       const manyPartition = `ts-sdk:many:${runId}:partition`;
       await flow.createMany(manyPartition, [
@@ -595,9 +601,15 @@ export function registerStoreFlowIntegrationTests(): void {
         values: { childMarker: { child: "a" }, shared: { shared: true } }
       });
       if (lineageSupported) {
-        await expect(flow.byParent(parentId)).resolves.toBeDefined();
-        await expect(flow.byRoot(rootId)).resolves.toBeDefined();
-        await expect(flow.byCorrelation(`corr:${runId}`)).resolves.toBeDefined();
+        await expect(flow.byParent(parentId, {
+          partitionKey: parentPartition
+        })).resolves.toBeDefined();
+        await expect(flow.byRoot(rootId, {
+          partitionKey: parentPartition
+        })).resolves.toBeDefined();
+        await expect(flow.byCorrelation(`corr:${runId}`, {
+          partitionKey: parentPartition
+        })).resolves.toBeDefined();
       }
 
       const rewindJob = await createAndClaim(flow, type, runId, "rewind");
@@ -615,7 +627,10 @@ export function registerStoreFlowIntegrationTests(): void {
         toEvent: createdEventId
       })).resolves.toMatchObject({ state: "queued" });
 
-      await expect(flow.list(type, { count: 100 })).resolves.toBeInstanceOf(Array);
+      await expect(flow.list(type, {
+        count: 100,
+        partitionKey: parentPartition
+      })).resolves.toBeInstanceOf(Array);
       await expect(flow.info(type)).resolves.toBeTypeOf("object");
     } finally {
       await flow.close();

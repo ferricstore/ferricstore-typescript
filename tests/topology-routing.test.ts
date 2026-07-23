@@ -396,7 +396,7 @@ test("TopologyNativeAdapterPool refreshes again when a topology event overlaps a
   }
 });
 
-test("TopologyNativeAdapterPool keeps unpartitioned Flow queries on the control path", async () => {
+test("TopologyNativeAdapterPool keeps prepared Flow queries on the control path", async () => {
   const leaderRequests: TestRequest[] = [];
   const leader = await startCountingServer((request) => {
     leaderRequests.push(request);
@@ -427,11 +427,12 @@ test("TopologyNativeAdapterPool keeps unpartitioned Flow queries on the control 
   });
 
   try {
-    await pool.executeCommand("FLOW.SEARCH", "order");
-    await pool.executeCommand("FLOW.SEARCH", "order", "PARTITION", "tenant-a");
+    const query = "FROM runs WHERE partition_key = @partition RETURN COUNT";
+    await pool.executeCommand("FLOW.QUERY", "FQL1", query, "partition", "tenant-a");
+    await pool.executeCommand("FLOW.QUERY", "FQL1", query, "partition", "tenant-b");
 
-    expect(seedRequests.some((request) => request.opcode === OPCODES.flowSearch)).toBe(true);
-    expect(leaderRequests.some((request) => request.opcode === OPCODES.flowSearch && request.laneId === 4)).toBe(true);
+    expect(seedRequests.filter((request) => request.opcode === OPCODES.flowQuery)).toHaveLength(2);
+    expect(leaderRequests.some((request) => request.opcode === OPCODES.flowQuery)).toBe(false);
   } finally {
     await pool.close();
   }
@@ -482,10 +483,13 @@ test("TopologyNativeAdapterPool routes Flow commands by core storage tags", () =
     shard: 1,
     slot: 914
   });
-  expect(routeData(["FLOW.SEARCH", "order", "PARTITION", "tenant-a"])?.route).toMatchObject({
-    shard: 1,
-    slot: 914
-  });
+  expect(routeData([
+    "FLOW.QUERY",
+    "FQL1",
+    "FROM runs WHERE partition_key = @partition RETURN COUNT",
+    "partition",
+    "tenant-a"
+  ])).toBeUndefined();
 
   expect(RoutingTopology.slotForKey("flow-0")).toBe(107);
   expect(RoutingTopology.slotForKey("f:{fa:107}:s:flow-0")).toBe(903);

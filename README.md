@@ -18,7 +18,7 @@ Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is te
 
 ## Compatibility
 
-SDK `0.3.x` requires FerricStore server `0.9.1` or newer. FerricStore 0.9.1 is a
+SDK `0.4.x` requires FerricStore server `0.10.0` or newer. FerricStore 0.10 is a
 breaking beta API contract update, while the native wire protocol remains v1
 (`FSNP` framing and existing opcode numbers are unchanged). Capabilities and
 response-size limits are negotiated per connection from the HELLO-shaped
@@ -42,7 +42,24 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.9.1
+  ghcr.io/ferricstore/ferricstore:0.10.1
+```
+
+## Query durable runs
+
+Use parameterized FQL for bounded, partition-scoped reads. Cursors are opaque
+and must be reused with the same query and parameters.
+
+```ts
+const client = await FerricStoreClient.fromUrl("ferric://127.0.0.1:6388");
+const query = `FROM runs
+WHERE partition_key = @partition AND type = @type AND state = @state
+ORDER BY updated_at_ms ASC LIMIT 25 RETURN RECORDS`;
+const params = { partition: "partition-a", type: "invoice", state: "queued" };
+
+const result = await client.query(query, params);
+const plan = await client.explain(query, params);
+const indexes = await client.queryIndexes();
 ```
 
 ## Cluster-aware client

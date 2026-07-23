@@ -199,7 +199,7 @@ export interface FlowPolicyOptions {
   retentionTtlMs?: number;
   /** Type-level maximum active lifetime for newly created Flows. */
   maxActiveMs?: MaxActiveMs;
-  /** Type-level attribute names projected for FLOW.SEARCH. An empty array clears the index list. */
+  /** Type-level attribute names projected for Flow queries. An empty array clears the index list. */
   indexedAttributes?: readonly string[];
   indexedStateMeta?: string;
 }
@@ -305,7 +305,7 @@ export interface CancelOptions extends Omit<MutateOptions, "payload"> {
 }
 
 export interface ReadOptions {
-  partitionKey?: string;
+  partitionKey: string;
   count?: number;
   fromMs?: number;
   toMs?: number;
@@ -314,6 +314,7 @@ export interface ReadOptions {
   terminalOnly?: boolean;
   includeCold?: boolean;
   consistentProjection?: boolean;
+  attributes?: Record<string, CommandArgument>;
 }
 
 export interface HistoryOptions {
