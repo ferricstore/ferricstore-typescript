@@ -645,7 +645,8 @@ export function registerStoreFlowIntegrationTests(): void {
       await eventually(
         () => flow.list(type, {
           count: 100,
-          partitionKey: parentPartition
+          partitionKey: parentPartition,
+          state: "waiting_children"
         }),
         (records) => records.some((record) => record.id === parentId),
         "FLOW.QUERY list projection did not become ready"
