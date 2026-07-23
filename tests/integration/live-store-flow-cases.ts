@@ -8,6 +8,7 @@ import {
   claimOne,
   createAndClaim,
   deletePrefixedKeys,
+  eventually,
   eventId,
   expectSupportedOrKnownServerError,
   fenced,
@@ -394,10 +395,14 @@ export function registerStoreFlowIntegrationTests(): void {
         partitionKey: failedJob.partitionKey
       })).resolves.toBeDefined();
       await expect(flow.get(failedJob.id, { partitionKey: failedJob.partitionKey })).resolves.toMatchObject({ state: "failed" });
-      await expect(flow.failures(type, {
-        count: 20,
-        partitionKey: failedJob.partitionKey
-      })).resolves.toBeDefined();
+      await eventually(
+        () => flow.failures(type, {
+          count: 20,
+          partitionKey: failedJob.partitionKey
+        }),
+        (records) => records.some((record) => record.id === failedJob.id),
+        "FLOW.QUERY failure projection did not become ready"
+      );
 
       const cancelJob = await createAndClaim(flow, type, runId, "cancel");
       await expect(flow.cancel(cancelJob.id, {
@@ -407,10 +412,14 @@ export function registerStoreFlowIntegrationTests(): void {
         reason: { cancelled: true }
       })).resolves.toBeDefined();
       await expect(flow.get(cancelJob.id, { partitionKey: cancelJob.partitionKey })).resolves.toMatchObject({ state: "cancelled" });
-      await expect(flow.terminals(type, {
-        count: 50,
-        partitionKey: cancelJob.partitionKey
-      })).resolves.toBeDefined();
+      await eventually(
+        () => flow.terminals(type, {
+          count: 50,
+          partitionKey: cancelJob.partitionKey
+        }),
+        (records) => records.some((record) => record.id === cancelJob.id),
+        "FLOW.QUERY terminal projection did not become ready"
+      );
 
       const manyPartition = `ts-sdk:many:${runId}:partition`;
       await flow.createMany(manyPartition, [
@@ -515,16 +524,16 @@ export function registerStoreFlowIntegrationTests(): void {
         type
       });
       const stuckJob = await claimOne(flow, type, "stuck", stuckPartition, { leaseMs: 60_000, nowMs: 1_000 });
-      expect(
-        (
-          await flow.stuck(type, {
-            count: 10,
-            nowMs: 120_000,
-            olderThanMs: 1,
-            partitionKey: stuckPartition
-          })
-        ).some((record) => record.id === stuckId)
-      ).toBe(true);
+      await eventually(
+        () => flow.stuck(type, {
+          count: 10,
+          nowMs: 120_000,
+          olderThanMs: 1,
+          partitionKey: stuckPartition
+        }),
+        (records) => records.some((record) => record.id === stuckId),
+        "FLOW.QUERY stuck projection did not become ready"
+      );
       await expect(flow.complete(stuckJob.id, {
         fencingToken: stuckJob.fencingToken,
         leaseToken: stuckJob.leaseToken,
@@ -601,15 +610,21 @@ export function registerStoreFlowIntegrationTests(): void {
         values: { childMarker: { child: "a" }, shared: { shared: true } }
       });
       if (lineageSupported) {
-        await expect(flow.byParent(parentId, {
-          partitionKey: parentPartition
-        })).resolves.toBeDefined();
-        await expect(flow.byRoot(rootId, {
-          partitionKey: parentPartition
-        })).resolves.toBeDefined();
-        await expect(flow.byCorrelation(`corr:${runId}`, {
-          partitionKey: parentPartition
-        })).resolves.toBeDefined();
+        await eventually(
+          () => flow.byParent(parentId, { partitionKey: parentPartition }),
+          (records) => records.some((record) => record.id === `ts-sdk:child:${runId}:a`),
+          "FLOW.QUERY parent projection did not become ready"
+        );
+        await eventually(
+          () => flow.byRoot(rootId, { partitionKey: parentPartition }),
+          (records) => records.some((record) => record.id === parentId),
+          "FLOW.QUERY root projection did not become ready"
+        );
+        await eventually(
+          () => flow.byCorrelation(`corr:${runId}`, { partitionKey: parentPartition }),
+          (records) => records.some((record) => record.id === parentId),
+          "FLOW.QUERY correlation projection did not become ready"
+        );
       }
 
       const rewindJob = await createAndClaim(flow, type, runId, "rewind");
@@ -627,10 +642,14 @@ export function registerStoreFlowIntegrationTests(): void {
         toEvent: createdEventId
       })).resolves.toMatchObject({ state: "queued" });
 
-      await expect(flow.list(type, {
-        count: 100,
-        partitionKey: parentPartition
-      })).resolves.toBeInstanceOf(Array);
+      await eventually(
+        () => flow.list(type, {
+          count: 100,
+          partitionKey: parentPartition
+        }),
+        (records) => records.some((record) => record.id === parentId),
+        "FLOW.QUERY list projection did not become ready"
+      );
       await expect(flow.info(type)).resolves.toBeTypeOf("object");
     } finally {
       await flow.close();
