@@ -5,6 +5,7 @@ import {
   COMPACT_PIPELINE_RESPONSE,
   DEFAULT_MAX_VALUE_ITEMS,
   COMPACT_KV_GET,
+  FLAG_CUSTOM_PAYLOAD,
   NULL_U32,
   OPCODES,
   decodeResponse,
@@ -17,7 +18,7 @@ function responseFrame(opcode: number, payload: Buffer): ResponseFrame {
   return {
     body,
     bodyLength: body.byteLength,
-    flags: 0,
+    flags: FLAG_CUSTOM_PAYLOAD,
     laneId: 1,
     opcode,
     requestId: 1n

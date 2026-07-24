@@ -267,6 +267,7 @@ export const COMPACT_FLOW_TRANSITION_MANY_REQUEST = 0x9b;
 export const COMPACT_FLOW_TRANSITION_MANY_OK_REQUEST = 0x9c;
 export const COMPACT_FLOW_VALUE_MGET_REQUEST = 0x9d;
 export const COMPACT_FLOW_CREATE_MANY_MIXED_REQUEST = 0x9e;
+export const COMPACT_FLOW_QUERY_RESULT = 0xa0;
 export const COMPACT_PIPELINE_DECODED = Symbol("ferricstore.compactPipelineDecoded");
 export const NULL_U32 = 0xffff_ffff;
 export const MIN_I64 = -9_223_372_036_854_775_808n;
@@ -327,6 +328,8 @@ export interface ProtocolCommand {
   readonly laneId?: number;
   /** @internal Correlated compact claim shape used to decode a direct response without guessing. */
   readonly compactClaimMode?: CompactClaimMode;
+  /** @internal Exact top-level item count expected from a compact collection response. */
+  readonly compactResponseItems?: number;
   /** @internal Correlated compact claim shapes for native pipeline response items. */
   readonly pipelineClaimModes?: readonly (CompactClaimMode | undefined)[];
   /** @internal Parsed routing metadata retained when a command uses COMMAND_EXEC. */
@@ -339,6 +342,7 @@ export type CompactClaimMode = "base" | "attrs" | "state" | "stateAttrs";
 
 export interface ResponseDecodeHints {
   readonly compactClaimMode?: CompactClaimMode;
+  readonly compactResponseItems?: number;
   readonly compactResponseOpcodes?: CompactResponseOpcodes;
   readonly pipelineClaimModes?: readonly (CompactClaimMode | undefined)[];
 }

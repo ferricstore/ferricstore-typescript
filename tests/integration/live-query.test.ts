@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   FerricStoreClient,
   FlowQueryError,
-  JsonCodec
+  FlowProjection,
+  JsonCodec,
+  projectFlowQuery
 } from "../../src/index.js";
+import { registerFlowQueryConvenienceIntegrationTests } from "./live-query-convenience-cases.js";
 import { eventually, field, suffix, text, url } from "./live-support.js";
 
 const PAGE_QUERY =
@@ -15,6 +18,16 @@ const CURSOR_QUERY =
 const COUNT_QUERY =
   "FROM runs WHERE partition_key = @partition AND type = @type AND state = @state " +
   "RETURN COUNT";
+const PROJECTION_QUERY = projectFlowQuery(
+  "FROM runs WHERE partition_key = @partition AND run_id = @run",
+  "record",
+  FlowProjection.run.id,
+  FlowProjection.run.state,
+  FlowProjection.run.attribute("customer")
+);
+const INVALID_QUERY =
+  "FROM runs WHERE partition_key = @partition AND unsupported = 1 " +
+  "ORDER BY updated_at_ms ASC LIMIT 2 RETURN RECORDS";
 
 describe("FerricStore 0.10 query planner integration", () => {
   it("covers pagination, count, explain, index status, diagnostics, and conveniences", async () => {
@@ -36,6 +49,7 @@ describe("FerricStore 0.10 query planner integration", () => {
           nowMs: now + index,
           partitionKey: partition,
           payload: { secret: `payload-${index}` },
+          attributes: { customer: `customer-${index}`, hidden: "hidden" },
           runAtMs: now + index,
           state,
           type
@@ -70,6 +84,21 @@ describe("FerricStore 0.10 query planner integration", () => {
       expect(new Set(pagedIds).size).toBe(pagedIds.length);
       expect(new Set(pagedIds)).toEqual(new Set(ids));
 
+      const projected = await client.query(PROJECTION_QUERY, {
+        partition,
+        run: ids[0] ?? "",
+      });
+      if (projected.kind !== "records") throw new Error("expected a projected record");
+      expect(projected.records).toHaveLength(1);
+      expect(Object.keys(projected.records[0] ?? {}).sort()).toEqual([
+        "attributes",
+        "id",
+        "state",
+      ]);
+      expect(text(field(field(projected.records[0], "attributes"), "customer"))).toBe(
+        "customer-0"
+      );
+
       const counted = await eventually(
         () => client.query(COUNT_QUERY, params),
         (result) => result.kind === "count" && result.count === ids.length,
@@ -90,13 +119,14 @@ describe("FerricStore 0.10 query planner integration", () => {
       expect(greaterThanZero(indexes.registry.catalogVersion)).toBe(true);
       expect(indexes.indexes.length).toBeGreaterThan(0);
 
-      const error = await client.query(
-        "FROM runs WHERE partition_key = @partition AND unsupported = 1 " +
-          "ORDER BY updated_at_ms ASC LIMIT 2 RETURN RECORDS",
-        { partition }
-      ).catch((reason: unknown) => reason);
+      const error = await client.query(INVALID_QUERY, { partition })
+        .catch((reason: unknown) => reason);
       expect(error).toBeInstanceOf(FlowQueryError);
-      expect(error).toMatchObject({ code: "unsupported_field" });
+      expect(error).toMatchObject({
+        code: "unsupported_field",
+        retryable: false,
+        safeToRetry: false
+      });
       expect((error as FlowQueryError).position).toBeDefined();
       expect((error as FlowQueryError).hint).not.toBe("");
 
@@ -115,6 +145,8 @@ describe("FerricStore 0.10 query planner integration", () => {
       await client.close();
     }
   }, 40_000);
+
+  registerFlowQueryConvenienceIntegrationTests();
 });
 
 function greaterThanZero(value: number | bigint): boolean {

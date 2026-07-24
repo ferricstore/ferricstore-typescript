@@ -309,6 +309,7 @@ export interface ReadOptions {
   count?: number;
   fromMs?: number;
   toMs?: number;
+  /** Newest-first when true. Flow query conveniences default to true. */
   rev?: boolean;
   state?: string;
   terminalOnly?: boolean;

@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { FerricStoreError } from "./errors.js";
 import { field } from "./internal.js";
+import * as wire from "./protocol-constants.js";
 import type { FlowQueryInteger } from "./flow-query-types.js";
 
 export function requiredMap(
@@ -37,6 +38,127 @@ export function freezeMap(
     output[key] = item;
   }
   return Object.freeze(output);
+}
+
+/** Materialize contract-defined metadata as immutable JavaScript values. */
+export function freezeMetadataMap(
+  value: Map<unknown, unknown> | Record<string, unknown>,
+  context: string,
+): Readonly<Record<string, unknown>> {
+  return normalizeMetadataMap(
+    value,
+    context,
+    { remaining: wire.DEFAULT_MAX_VALUE_ITEMS },
+    new Set<object>(),
+    0,
+  );
+}
+
+function normalizeMetadataMap(
+  value: Map<unknown, unknown> | Record<string, unknown>,
+  context: string,
+  budget: { remaining: number },
+  ancestors: Set<object>,
+  depth: number,
+): Readonly<Record<string, unknown>> {
+  enterMetadataContainer(value, context, budget, ancestors, depth);
+  try {
+    const output = Object.create(null) as Record<string, unknown>;
+    const entries = value instanceof Map ? value.entries() : Object.entries(value);
+    for (const [rawKey, item] of entries) {
+      const key = strictText(rawKey);
+      if (key == null || Object.hasOwn(output, key)) {
+        throw decodeError(`${context} contains an invalid or duplicate key`, value);
+      }
+      output[key] = normalizeMetadataValue(
+        item,
+        `${context}.${key}`,
+        budget,
+        ancestors,
+        depth + 1,
+      );
+    }
+    return Object.freeze(output);
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function normalizeMetadataValue(
+  value: unknown,
+  context: string,
+  budget: { remaining: number },
+  ancestors: Set<object>,
+  depth: number,
+): unknown {
+  if (typeof value === "string") {
+    if (!value.isWellFormed()) throw decodeError(`${context} contains invalid text`, value);
+    return value;
+  }
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    const decoded = strictText(value);
+    if (decoded == null) throw decodeError(`${context} contains invalid UTF-8`, value);
+    return decoded;
+  }
+  if (value == null || typeof value === "boolean" || typeof value === "number" || typeof value === "bigint") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    enterMetadataContainer(value, context, budget, ancestors, depth);
+    try {
+      const output = new Array<unknown>(value.length);
+      for (let index = 0; index < value.length; index += 1) {
+        if (!Object.hasOwn(value, index)) {
+          throw decodeError(`${context} must be a dense array`, value);
+        }
+        output[index] = normalizeMetadataValue(
+          value[index],
+          `${context}[${index}]`,
+          budget,
+          ancestors,
+          depth + 1,
+        );
+      }
+      return Object.freeze(output);
+    } finally {
+      ancestors.delete(value);
+    }
+  }
+  if (value instanceof Map) {
+    return normalizeMetadataMap(value, context, budget, ancestors, depth);
+  }
+  if (isPlainObject(value)) {
+    return normalizeMetadataMap(value, context, budget, ancestors, depth);
+  }
+  throw decodeError(`${context} contains an unsupported value`, value);
+}
+
+function enterMetadataContainer(
+  value: object,
+  context: string,
+  budget: { remaining: number },
+  ancestors: Set<object>,
+  depth: number,
+): void {
+  if (depth >= wire.DEFAULT_MAX_VALUE_DEPTH) {
+    throw decodeError(`${context} exceeds the maximum metadata depth`, value);
+  }
+  if (ancestors.has(value)) throw decodeError(`${context} contains a cycle`, value);
+  const size = Array.isArray(value)
+    ? value.length
+    : value instanceof Map
+      ? value.size
+      : Object.keys(value).length;
+  if (size > budget.remaining) {
+    throw decodeError(`${context} exceeds the maximum metadata items`, value);
+  }
+  budget.remaining -= size;
+  ancestors.add(value);
+}
+
+function isPlainObject(value: object): value is Record<string, unknown> {
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  return prototype === Object.prototype || prototype === null;
 }
 
 export function requireContract(

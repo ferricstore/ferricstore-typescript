@@ -3,6 +3,7 @@ import type { CompactClaimMode } from "./protocol.js";
 
 export interface PendingRequest {
   readonly compactClaimMode?: CompactClaimMode;
+  readonly compactResponseItems?: number;
   discardedResponseBytes?: number;
   discardedResponseFrames?: number;
   readonly hasFlowControlCredit: boolean;

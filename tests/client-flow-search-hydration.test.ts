@@ -57,7 +57,7 @@ describe("FerricStoreClient Flow search and claim hydration", () => {
       "FROM runs WHERE partition_key = @partition_key AND type = @type " +
         "AND state = @state AND attribute['tenant'] = @attribute_0 " +
         "AND state_meta['queued']['version'] = @state_meta_0 " +
-        "ORDER BY updated_at_ms ASC LIMIT 10 RETURN RECORDS",
+        "ORDER BY updated_at_ms DESC LIMIT 10 RETURN RECORDS",
       "attribute_0",
       "acme",
       "partition_key",

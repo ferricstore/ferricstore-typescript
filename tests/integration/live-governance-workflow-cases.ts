@@ -389,6 +389,7 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
     const type = `ts-sdk-autobatch-${runId}`;
     const flowA = `${prefix}:flow:a`;
     const flowB = `${prefix}:flow:b`;
+    const now = Date.now();
 
     try {
       await Promise.all([
@@ -406,13 +407,26 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
       expect(Number(await flow.zset.zscore(zsetKey, Buffer.from("member")))).toBe(1);
 
       await Promise.all([
-        flow.create(flowA, { partitionKey: flowA, state: "queued", type }),
-        flow.create(flowB, { partitionKey: flowB, state: "queued", type })
+        flow.create(flowA, {
+          nowMs: now,
+          partitionKey: flowA,
+          runAtMs: now,
+          state: "queued",
+          type
+        }),
+        flow.create(flowB, {
+          nowMs: now,
+          partitionKey: flowB,
+          runAtMs: now,
+          state: "queued",
+          type
+        })
       ]);
 
       const jobs = await flow.claimJobs(type, {
         leaseMs: 30_000,
         limit: 2,
+        nowMs: now + 1,
         partitionKeys: [flowA, flowB],
         state: "queued",
         worker: `ts-sdk-autobatch-${runId}`
@@ -422,6 +436,7 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
       await Promise.all(jobs.map((job) => flow.complete(job.id, {
         fencingToken: job.fencingToken,
         leaseToken: job.leaseToken,
+        nowMs: now + 2,
         partitionKey: job.partitionKey
       })));
 

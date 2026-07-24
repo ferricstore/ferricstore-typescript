@@ -2,10 +2,10 @@ import { Buffer } from "node:buffer";
 import { FerricStoreError } from "./errors.js";
 import {
   binaryValueByteLength,
-  requestFrameTooLarge,
-  setOwnValue
+  requestFrameTooLarge
 } from "./protocol-core.js";
 import * as wire from "./protocol-constants.js";
+import { setProtocolMapEntry } from "./protocol-map-key.js";
 
 export function encodeValue(value: unknown): Buffer {
   return encodeValueWithLimit(value, Number.MAX_SAFE_INTEGER);
@@ -269,7 +269,7 @@ function decodeValueAt(
       const key = readBinary(data, offset);
       offset = key.offset;
       const item = decodeValueAt(data, offset, limits, budget, depth + 1);
-      setOwnValue(value, key.value.toString("utf8"), item.value);
+      setProtocolMapEntry(value, key.value, item.value);
       offset = item.offset;
     }
     return { value, offset };

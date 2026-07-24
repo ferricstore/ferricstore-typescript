@@ -347,6 +347,7 @@ describe("FerricStore integration", () => {
     const key = `ts-sdk:kv:${runId}`;
     const id = `ts-sdk:flow:${runId}`;
     const type = "ts-sdk-integration";
+    const now = Date.now();
 
     try {
       await flow.kv.set(key, { ok: true }, { px: 60_000 });
@@ -354,8 +355,10 @@ describe("FerricStore integration", () => {
 
       await flow.create(id, {
         idempotent: true,
+        nowMs: now,
         partitionKey: id,
         payload: { hello: "world" },
+        runAtMs: now,
         state: "queued",
         type
       });
@@ -363,6 +366,7 @@ describe("FerricStore integration", () => {
       const jobs = await flow.claimDue(type, {
         leaseMs: 30_000,
         limit: 1,
+        nowMs: now + 1,
         partitionKey: id,
         payload: true,
         state: "queued",

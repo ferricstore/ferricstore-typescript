@@ -17,6 +17,7 @@ import {
   COMPACT_FLOW_RECORD,
   decodeResponse,
   encodeValue,
+  FLAG_CUSTOM_PAYLOAD,
   OPCODES
 } from "../src/protocol.js";
 import { routingSlotForKey } from "../src/topology-utilities.js";
@@ -26,8 +27,8 @@ import { FakeExecutor } from "./fake-executor.js";
 
 describe("FerricStore 0.8 TypeScript contract", () => {
   it("retains the v0.8 features under the current package contract and wire version", () => {
-    expect(FERRICSTORE_SDK_VERSION).toBe("0.4.0");
-    expect(FERRICSTORE_MINIMUM_SERVER_VERSION).toBe("0.10.0");
+    expect(FERRICSTORE_SDK_VERSION).toBe("0.4.1");
+    expect(FERRICSTORE_MINIMUM_SERVER_VERSION).toBe("0.10.3");
     expect(FERRICSTORE_NATIVE_PROTOCOL_VERSION).toBe(1);
   });
 
@@ -154,7 +155,7 @@ describe("FerricStore 0.8 TypeScript contract", () => {
     expect(decodeResponse({
       body,
       bodyLength: body.byteLength,
-      flags: 0,
+      flags: FLAG_CUSTOM_PAYLOAD,
       laneId: 1,
       opcode: OPCODES.flowGet,
       requestId: 1n

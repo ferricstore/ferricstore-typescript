@@ -5,6 +5,7 @@ import {
   boundedInteger,
   decodeError,
   freezeMap,
+  freezeMetadataMap,
   hasKey,
   nonNegativeInteger,
   optionalText,
@@ -20,11 +21,11 @@ import {
   FlowQueryError,
   type FlowExplainResult,
   type FlowQueryErrorPosition,
+  type FlowQueryInteger,
   type FlowQueryIndex,
   type FlowQueryIndexStatus,
   type FlowQueryPage,
   type FlowQueryQuality,
-  type FlowQueryRecord,
   type FlowQueryResult,
   type FlowQueryUsage
 } from "./flow-query-types.js";
@@ -50,7 +51,71 @@ const USAGE_FIELDS = [
 const MAX_SIGNED_64 = (1n << 63n) - 1n;
 const MAX_UNSIGNED_64 = (1n << 64n) - 1n;
 
+type FlowQueryResponseMap = Map<unknown, unknown> | Record<string, unknown>;
+
+interface DecodedFlowQueryBase {
+  readonly quality: FlowQueryQuality;
+  readonly raw: Readonly<Record<string, unknown>>;
+  readonly usage: FlowQueryUsage;
+}
+
+interface DecodedFlowQueryRecords<TRecord> extends DecodedFlowQueryBase {
+  readonly kind: "records";
+  readonly page: FlowQueryPage;
+  readonly records: TRecord[];
+}
+
+interface DecodedFlowQueryCount extends DecodedFlowQueryBase {
+  readonly count: FlowQueryInteger;
+  readonly kind: "count";
+}
+
+type DecodedFlowQuery<TRecord> =
+  | DecodedFlowQueryRecords<TRecord>
+  | DecodedFlowQueryCount;
+
 export function decodeFlowQueryResult(value: unknown): FlowQueryResult {
+  const result = decodeFlowQueryResponse(value, (mapping) => freezeMap(mapping));
+  if (result.kind === "records") {
+    return Object.freeze({
+      kind: "records",
+      version: FLOW_QUERY_RESULT_CONTRACT,
+      records: Object.freeze(result.records),
+      page: result.page,
+      quality: result.quality,
+      usage: result.usage,
+      raw: result.raw
+    });
+  }
+  return Object.freeze({
+    kind: "count",
+    version: FLOW_QUERY_RESULT_CONTRACT,
+    count: result.count,
+    quality: result.quality,
+    usage: result.usage,
+    raw: result.raw
+  });
+}
+
+export function decodeFlowQueryRecords<TRecord>(
+  value: unknown,
+  decodeRecord: (value: FlowQueryResponseMap, index: number) => TRecord
+): TRecord[] {
+  const result = decodeFlowQueryResponse(value, (mapping, index) =>
+    decodeRecord(mapping instanceof Map ? freezeMap(mapping) : mapping, index)
+  );
+  if (result.kind === "count") {
+    throw new FerricStoreError("Flow record convenience query returned a count result", {
+      raw: result.raw
+    });
+  }
+  return result.records;
+}
+
+function decodeFlowQueryResponse<TRecord>(
+  value: unknown,
+  decodeRecord: (value: FlowQueryResponseMap, index: number) => TRecord
+): DecodedFlowQuery<TRecord> {
   const mapping = requiredMap(value, "FLOW.QUERY result");
   requireContract(mapping, "version", FLOW_QUERY_RESULT_CONTRACT, "FLOW.QUERY result");
   const quality = decodeQuality(field(mapping, "quality"));
@@ -67,25 +132,27 @@ export function decodeFlowQueryResult(value: unknown): FlowQueryResult {
     if (!Array.isArray(rawRecords) || rawRecords.length > 100) {
       throw decodeError("FLOW.QUERY records must be an array of at most 100 maps", value);
     }
-    const records = new Array<FlowQueryRecord>(rawRecords.length);
+    const records = new Array<TRecord>(rawRecords.length);
     for (let index = 0; index < rawRecords.length; index += 1) {
       if (!Object.hasOwn(rawRecords, index)) {
         throw decodeError("FLOW.QUERY records must be a dense array", value);
       }
-      records[index] = freezeMap(requiredMap(rawRecords[index], `FLOW.QUERY record ${index}`));
+      records[index] = decodeRecord(
+        requiredMap(rawRecords[index], `FLOW.QUERY record ${index}`),
+        index
+      );
     }
     if (usage.resultRecords !== records.length) {
       throw decodeError("FLOW.QUERY usage result_records does not match records", value);
     }
-    return Object.freeze({
+    return {
       kind: "records",
-      version: FLOW_QUERY_RESULT_CONTRACT,
-      records: Object.freeze(records),
+      records,
       page: decodePage(field(mapping, "page")),
       quality,
       usage,
       raw
-    });
+    };
   }
 
   if (hasKey(mapping, "page")) {
@@ -103,14 +170,13 @@ export function decodeFlowQueryResult(value: unknown): FlowQueryResult {
   if (usage.resultRecords !== 1) {
     throw decodeError("FLOW.QUERY count usage result_records must be 1", value);
   }
-  return Object.freeze({
+  return {
     kind: "count",
-    version: FLOW_QUERY_RESULT_CONTRACT,
     count,
     quality,
     usage,
     raw
-  });
+  };
 }
 
 export function decodeFlowExplainResult(value: unknown): FlowExplainResult {
@@ -124,11 +190,18 @@ export function decodeFlowExplainResult(value: unknown): FlowExplainResult {
   if (status !== "planned" && status !== "rejected" && status !== "executed") {
     throw decodeError(`FLOW.QUERY explain status ${JSON.stringify(status)} is unsupported`, value);
   }
-  const plan = freezeMap(requiredMap(field(mapping, "plan"), "FLOW.QUERY explain plan"));
-  const estimate = freezeMap(
-    requiredMap(field(mapping, "estimate"), "FLOW.QUERY explain estimate")
+  const plan = freezeMetadataMap(
+    requiredMap(field(mapping, "plan"), "FLOW.QUERY explain plan"),
+    "FLOW.QUERY explain plan"
   );
-  const bounds = freezeMap(requiredMap(field(mapping, "bounds"), "FLOW.QUERY explain bounds"));
+  const estimate = freezeMetadataMap(
+    requiredMap(field(mapping, "estimate"), "FLOW.QUERY explain estimate"),
+    "FLOW.QUERY explain estimate"
+  );
+  const bounds = freezeMetadataMap(
+    requiredMap(field(mapping, "bounds"), "FLOW.QUERY explain bounds"),
+    "FLOW.QUERY explain bounds"
+  );
   const actualValue = field(mapping, "actual");
   let actual: FlowQueryUsage | undefined;
   if (status === "executed") {
@@ -173,7 +246,10 @@ export function tryDecodeFlowQueryError(
     const contextValue = field(mapping, "context");
     const context = contextValue == null
       ? undefined
-      : freezeMap(requiredMap(contextValue, "FLOW.QUERY diagnostic context"));
+      : freezeMetadataMap(
+        requiredMap(contextValue, "FLOW.QUERY diagnostic context"),
+        "FLOW.QUERY diagnostic context"
+      );
     const position = decodePosition(field(mapping, "position"));
     return new FlowQueryError({
       code: requiredText(mapping, "code", "FLOW.QUERY diagnostic"),
@@ -206,8 +282,9 @@ export function decodeFlowQueryIndexStatus(value: unknown): FlowQueryIndexStatus
     "FLOW.QUERY.INDEXES"
   );
   const registry = requiredMap(field(mapping, "registry"), "FLOW.QUERY.INDEXES registry");
-  const services = freezeMap(
-    requiredMap(field(mapping, "services"), "FLOW.QUERY.INDEXES services")
+  const services = freezeMetadataMap(
+    requiredMap(field(mapping, "services"), "FLOW.QUERY.INDEXES services"),
+    "FLOW.QUERY.INDEXES services"
   );
   const rawIndexes = field(mapping, "indexes");
   if (!Array.isArray(rawIndexes) || rawIndexes.length > 32) {

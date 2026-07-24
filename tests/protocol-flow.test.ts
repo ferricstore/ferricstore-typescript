@@ -1032,7 +1032,14 @@ describe("native Flow protocol codec", () => {
 });
 
 function responseFrame(opcode: number, body: Buffer): ResponseFrame {
-  return { body, bodyLength: body.byteLength, flags: 0, laneId: opcode < 0x0100 ? 0 : 1, opcode, requestId: 1n };
+  return {
+    body,
+    bodyLength: body.byteLength,
+    flags: FLAG_CUSTOM_PAYLOAD,
+    laneId: opcode < 0x0100 ? 0 : 1,
+    opcode,
+    requestId: 1n
+  };
 }
 
 function compactClaimReclaimExpired(body: Buffer): boolean {

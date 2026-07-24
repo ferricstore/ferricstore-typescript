@@ -79,9 +79,9 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.4.0");
+    expect(metadata.version).toBe("0.4.1");
     expect(metadata.ferricstore).toEqual({
-      minimumServerVersion: "0.10.0",
+      minimumServerVersion: "0.10.3",
       nativeProtocolVersion: 1
     });
     expect(manifest).toMatchObject({ magic: "FSNP", requestVersion: 1 });
@@ -115,10 +115,10 @@ describe("core compatibility CI", () => {
     const compose = readFileSync(`${repositoryRoot}/docker-compose.yml`, "utf8");
     const coreRevision = /ref:\s*([0-9a-f]{40})/u.exec(parityJob)?.[1];
     const immutableImage = /ghcr\.io\/ferricstore\/ferricstore:[^\s}"']+@sha256:[0-9a-f]{64}/gu;
-    const releaseImage = /ghcr\.io\/ferricstore\/ferricstore:0\.10\.2@sha256:[0-9a-f]{64}/u
+    const releaseImage = /ghcr\.io\/ferricstore\/ferricstore:0\.10\.3@sha256:[0-9a-f]{64}/u
       .exec(compose)?.[0];
 
-    expect(coreRevision).toBe("13c32657042558e2b88a9a8ae3c713d92b6b71cd");
+    expect(coreRevision).toBe("8ddcdf3e8cdc7c0fcf6d243d1e8260a9abd6f7a9");
     expect(releaseImage).toBeDefined();
     expect(compose).toMatch(immutableImage);
     expect(integrationJob).toMatch(immutableImage);
@@ -163,7 +163,7 @@ describe("core compatibility CI", () => {
 
     for (const authenticatedJob of [job, releaseJob]) {
       expect(authenticatedJob).toContain(
-        "ghcr.io/ferricstore/ferricstore:0.10.2@sha256:e6116d6f6c2c701e7c12076ed55233f4305e5fd6ff627cc3ed4ab7f828940cf3"
+        "ghcr.io/ferricstore/ferricstore:0.10.3@sha256:f78a6f716cef8a1ef0a36ff620e653f9615bf9ba45abe9d86c990234fb9850d3"
       );
       expect(authenticatedJob).toContain("node scripts/bootstrap-integration-auth.mjs");
       expect(authenticatedJob).toContain("npm run test:integration:deployment");

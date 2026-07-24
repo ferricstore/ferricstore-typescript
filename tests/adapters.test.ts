@@ -48,6 +48,26 @@ test("NativeAdapter handles fragmented response frames", async () => {
   }
 });
 
+test("NativeAdapter explicitly requests only compact response codecs it can decode", async () => {
+  let startupPayload: Record<string, unknown> | undefined;
+  const server = await startCountingServer((request) => {
+    if (request.opcode === OPCODES.startup) {
+      startupPayload = request.payload as Record<string, unknown>;
+      return v010Startup();
+    }
+    return undefined;
+  }, { fragmentResponses: false });
+  const address = server.address() as AddressInfo;
+  const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`);
+
+  try {
+    expect((startupPayload?.compact_response_codecs as Buffer[]).map((value) => value.toString("utf8")))
+      .toEqual(["flow_query_result_v1"]);
+  } finally {
+    await adapter.close();
+  }
+});
+
 test("NativeAdapter rejects client and topology options instead of silently ignoring them", async () => {
   await expect(NativeAdapter.fromUrl("ferric://127.0.0.1:1", {
     haRouting: true

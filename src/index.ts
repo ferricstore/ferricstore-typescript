@@ -101,6 +101,14 @@ export {
   type FlowQueryUsage
 } from "./flow-query-types.js";
 export {
+  FlowProjection,
+  projectFlowQuery,
+  type FlowEventProjectionField,
+  type FlowProjectionField,
+  type FlowProjectionShape,
+  type FlowRunProjectionField
+} from "./flow-query-projection.js";
+export {
   MAX_FLOW_POLICY_GENERATION,
   type FlowPolicyBackoffKind,
   type FlowPolicyBackoffSnapshot,

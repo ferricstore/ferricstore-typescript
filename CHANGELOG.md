@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-24
+
+### Changed
+
+- Require FerricStore 0.10.3 for result projections and the negotiated compact
+  FQL1 result codec while retaining native wire protocol v1.
+- Require the custom-payload frame flag for every negotiated compact response,
+  and reject malformed Unicode scalar text before native encoding.
+
+### Added
+
+- Add source-aware `FlowProjection` selectors and `projectFlowQuery` for
+  bounded sparse run/event results, plus a shared server/SDK codec golden corpus.
+
 ## [0.4.0] - 2026-07-23
 
 ### Added

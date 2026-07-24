@@ -26,7 +26,10 @@ export const EMPTY_COMPACT_RESPONSE_OPCODES: CompactResponseOpcodes = new Map();
 export function nativeNegotiation(value: unknown): NativeNegotiation {
   const capabilities = field(value, "capabilities") ?? value;
   const limits = field(capabilities, "limits");
-  const responseCodecs = field(capabilities, "response_codecs");
+  const rawResponseCodecs = field(capabilities, "response_codecs");
+  const responseCodecs = rawResponseCodecs == null
+    ? undefined
+    : requiredMap(rawResponseCodecs, "HELLO response_codecs");
   const schemas = requiredMap(field(capabilities, "schemas"), "HELLO schemas");
   const maxResponseBytes = positiveSafeInteger(field(limits, "max_response_bytes"));
   return {
@@ -40,6 +43,7 @@ export function nativeNegotiation(value: unknown): NativeNegotiation {
 
 const REQUIRED_FLOW_QUERY_CAPABILITIES = new Set([
   "flow_query_v1",
+  "flow_query_result_projection_v1",
   "flow_explain_v1",
   "flow_explain_analyze_v1",
   "flow_composite_index_v1",
@@ -197,40 +201,69 @@ export function compactResponseOpcodeSupports(
 }
 
 function parseCompactResponseOpcodes(value: unknown): CompactResponseOpcodes {
+  if (value == null) return EMPTY_COMPACT_RESPONSE_OPCODES;
   const entries = mapEntries(value);
-  if (entries == null) return EMPTY_COMPACT_RESPONSE_OPCODES;
+  if (entries == null) {
+    throw incompatibleServer("HELLO compact_response_opcodes must be a map");
+  }
+  if (entries.length > 32) {
+    throw incompatibleServer("HELLO compact_response_opcodes supports at most 32 codecs");
+  }
   const result = new Map<string, ReadonlySet<number>>();
+  let totalOpcodes = 0;
   for (const [rawName, rawOpcodes] of entries) {
-    const name = text(rawName);
-    if (name == null || name.length === 0 || !Array.isArray(rawOpcodes)) continue;
+    const name = strictText(rawName);
+    if (name == null || name.length === 0 || Buffer.byteLength(name) > 128) {
+      throw incompatibleServer("HELLO compact_response_opcodes contains an invalid codec name");
+    }
+    if (result.has(name)) {
+      throw incompatibleServer(`HELLO compact_response_opcodes contains duplicate codec ${name}`);
+    }
+    if (!Array.isArray(rawOpcodes)) {
+      throw incompatibleServer(`HELLO compact_response_opcodes codec ${name} must be an array`);
+    }
+    totalOpcodes += rawOpcodes.length;
+    if (totalOpcodes > 1_024) {
+      throw incompatibleServer("HELLO compact_response_opcodes supports at most 1024 opcodes");
+    }
     const opcodes = new Set<number>();
-    let valid = true;
     for (let index = 0; index < rawOpcodes.length; index += 1) {
       if (!Object.hasOwn(rawOpcodes, index)) {
-        valid = false;
-        break;
+        throw incompatibleServer(`HELLO compact_response_opcodes codec ${name} must be dense`);
       }
-      const opcode = unsigned16(rawOpcodes[index]);
+      const opcode = strictUnsigned16(rawOpcodes[index]);
       if (opcode == null) {
-        valid = false;
-        break;
+        throw incompatibleServer(`HELLO compact_response_opcodes codec ${name} has invalid opcode`);
+      }
+      if (opcodes.has(opcode)) {
+        throw incompatibleServer(`HELLO compact_response_opcodes codec ${name} has duplicate opcode`);
       }
       opcodes.add(opcode);
     }
-    if (valid) result.set(name, opcodes);
+    result.set(name, opcodes);
   }
   return result;
 }
 
 function mapEntries(value: unknown): readonly (readonly [unknown, unknown])[] | undefined {
   if (value instanceof Map) return [...value.entries()];
-  if (typeof value !== "object" || value == null || Array.isArray(value)) return undefined;
+  if (
+    typeof value !== "object" ||
+    value == null ||
+    Array.isArray(value) ||
+    Buffer.isBuffer(value) ||
+    value instanceof Uint8Array
+  ) return undefined;
   return Object.entries(value as Record<string, unknown>);
 }
 
-function unsigned16(value: unknown): number | undefined {
-  const parsed = nonNegativeSafeInteger(value);
-  return parsed != null && parsed <= 0xffff ? parsed : undefined;
+function strictUnsigned16(value: unknown): number | undefined {
+  if (typeof value === "bigint") {
+    return value >= 0n && value <= 0xffffn ? Number(value) : undefined;
+  }
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 0xffff
+    ? value
+    : undefined;
 }
 
 function positiveSafeInteger(value: unknown): number | undefined {

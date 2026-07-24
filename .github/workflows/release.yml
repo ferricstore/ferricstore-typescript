@@ -15,10 +15,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - server: release-0.10.2
-            image: ghcr.io/ferricstore/ferricstore:0.10.2@sha256:e6116d6f6c2c701e7c12076ed55233f4305e5fd6ff627cc3ed4ab7f828940cf3
+          - server: release-0.10.3
+            image: ghcr.io/ferricstore/ferricstore:0.10.3@sha256:f78a6f716cef8a1ef0a36ff620e653f9615bf9ba45abe9d86c990234fb9850d3
           - server: pinned-core
-            image: ghcr.io/ferricstore/ferricstore:ci-13c32657042558e2b88a9a8ae3c713d92b6b71cd@sha256:8e75f5d69ef8d6f1ed6a85ab329ccc26d2baaa9ff8c6c1e09f2ddf4954d64c33
+            image: ghcr.io/ferricstore/ferricstore:ci-8ddcdf3e8cdc7c0fcf6d243d1e8260a9abd6f7a9@sha256:07998493f7ded2f4f0a3a65bf4e550e4c36e94c0b2a6ce9ccd1663ee75fc51de
     env:
       FERRICSTORE_IMAGE: ${{ matrix.image }}
     steps:
@@ -29,6 +29,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:integration:isolated
+      - name: Build SDK for throughput smoke
+        if: ${{ matrix.server == 'release-0.10.3' }}
+        run: npm run build
+      - name: Start release server for throughput smoke
+        if: ${{ matrix.server == 'release-0.10.3' }}
+        run: npm run integration:up
+      - name: Acknowledged response throughput smoke
+        if: ${{ matrix.server == 'release-0.10.3' }}
+        run: >-
+          npm run bench:kv -- --command set --request-mode direct
+          --requests 1000 --pipeline 1 --clients 4 --inflight-batches 8
+          --value-bytes 32 --min-throughput 100
       - if: always()
         run: npm run integration:down
 
@@ -38,7 +50,7 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     env:
-      FERRICSTORE_IMAGE: ghcr.io/ferricstore/ferricstore:0.10.2@sha256:e6116d6f6c2c701e7c12076ed55233f4305e5fd6ff627cc3ed4ab7f828940cf3
+      FERRICSTORE_IMAGE: ghcr.io/ferricstore/ferricstore:0.10.3@sha256:f78a6f716cef8a1ef0a36ff620e653f9615bf9ba45abe9d86c990234fb9850d3
       FERRICSTORE_AUTH_PASSWORD: ts-sdk-integration-secret
       FERRICSTORE_AUTH_URL: ferric://default:ts-sdk-integration-secret@127.0.0.1:6388
     steps:

@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { FerricStoreError } from "./errors.js";
-import { setOwnValue } from "./protocol-core.js";
 import * as wire from "./protocol-constants.js";
+import { setProtocolMapEntry } from "./protocol-map-key.js";
 import { consumeDecodeItems, readBinary, requireAvailable } from "./protocol-value.js";
 
 export function decodeCompactIntegerList(
@@ -91,7 +91,7 @@ export function readCompactBinaryMap(
   for (let index = 0; index < count; index += 1) {
     const key = readBinary(data, offset);
     const value = readBinary(data, key.offset);
-    setOwnValue(values, key.value.toString("utf8"), value.value);
+    setProtocolMapEntry(values, key.value, value.value);
     offset = value.offset;
   }
   return { value: values, offset };

@@ -558,7 +558,7 @@ export function registerStoreFlowIntegrationTests(): void {
         state: "root",
         type
       });
-      const lineageCreate = await expectSupportedOrKnownServerError(flow.create(parentId, {
+      await expect(flow.create(parentId, {
         correlationId: `corr:${runId}`,
         idempotent: true,
         parentFlowId: rootId,
@@ -566,23 +566,12 @@ export function registerStoreFlowIntegrationTests(): void {
         rootFlowId: rootId,
         state: "dispatch",
         type
-      }), /unsupported|unknown|not supported|invalid.*(?:option|field)|(?:option|field).*invalid/i);
-      const lineageSupported = lineageCreate != null;
-      if (!lineageSupported) {
-        await flow.create(parentId, {
-          idempotent: true,
-          partitionKey: parentPartition,
-          state: "dispatch",
-          type
-        });
-      }
+      })).resolves.toBeDefined();
       const parent = await flow.get(parentId, { partitionKey: parentPartition });
       if (parent == null) {
         throw new Error("expected parent flow");
       }
-      if (lineageSupported) {
-        expect(parent).toMatchObject({ parentFlowId: rootId, rootFlowId: rootId });
-      }
+      expect(parent).toMatchObject({ parentFlowId: rootId, rootFlowId: rootId });
       await expect(flow.spawnChildren(parentId, [
         {
           id: `ts-sdk:child:${runId}:a`,
@@ -609,23 +598,21 @@ export function registerStoreFlowIntegrationTests(): void {
       })).resolves.toMatchObject({
         values: { childMarker: { child: "a" }, shared: { shared: true } }
       });
-      if (lineageSupported) {
-        await eventually(
-          () => flow.byParent(parentId, { partitionKey: parentPartition }),
-          (records) => records.some((record) => record.id === `ts-sdk:child:${runId}:a`),
-          "FLOW.QUERY parent projection did not become ready"
-        );
-        await eventually(
-          () => flow.byRoot(rootId, { partitionKey: parentPartition }),
-          (records) => records.some((record) => record.id === parentId),
-          "FLOW.QUERY root projection did not become ready"
-        );
-        await eventually(
-          () => flow.byCorrelation(`corr:${runId}`, { partitionKey: parentPartition }),
-          (records) => records.some((record) => record.id === parentId),
-          "FLOW.QUERY correlation projection did not become ready"
-        );
-      }
+      await eventually(
+        () => flow.byParent(parentId, { partitionKey: parentPartition }),
+        (records) => records.some((record) => record.id === `ts-sdk:child:${runId}:a`),
+        "FLOW.QUERY parent projection did not become ready"
+      );
+      await eventually(
+        () => flow.byRoot(rootId, { partitionKey: parentPartition }),
+        (records) => records.some((record) => record.id === parentId),
+        "FLOW.QUERY root projection did not become ready"
+      );
+      await eventually(
+        () => flow.byCorrelation(`corr:${runId}`, { partitionKey: parentPartition }),
+        (records) => records.some((record) => record.id === parentId),
+        "FLOW.QUERY correlation projection did not become ready"
+      );
 
       const rewindJob = await createAndClaim(flow, type, runId, "rewind");
       const historyBefore = await flow.history(rewindJob.id, { count: 10, partitionKey: rewindJob.partitionKey });

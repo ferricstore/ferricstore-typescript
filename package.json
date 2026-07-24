@@ -1,6 +1,6 @@
 {
   "name": "@ferricstore/ferricstore",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "TypeScript SDK for FerricStore and FerricFlow",
   "type": "module",
   "license": "Apache-2.0",
@@ -33,7 +33,7 @@
     "node": ">=22.22"
   },
   "ferricstore": {
-    "minimumServerVersion": "0.10.0",
+    "minimumServerVersion": "0.10.3",
     "nativeProtocolVersion": 1
   },
   "packageManager": "npm@11.6.2",
@@ -76,6 +76,7 @@
     "test:integration:deployment": "vitest run tests/integration/deployment.test.ts",
     "typecheck": "tsc --noEmit",
     "bench:kv": "node benchmarks/kv-benchmark.mjs",
+    "bench:flow-query": "node --expose-gc benchmarks/flow-query-benchmark.mjs",
     "bench:dbos": "node benchmarks/dbos-style-benchmark.mjs"
   },
   "devDependencies": {

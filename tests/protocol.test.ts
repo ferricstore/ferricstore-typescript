@@ -955,7 +955,7 @@ describe("native protocol codec", () => {
     ]);
 
     expect(decodeResponse(
-      responseFrame(COMMAND_OPCODES["FLOW.VALUE.MGET"], body),
+      responseFrame(COMMAND_OPCODES["FLOW.VALUE.MGET"], body, FLAG_CUSTOM_PAYLOAD),
       COMMAND_OPCODES["FLOW.VALUE.MGET"],
       compactResponseHints
     )).toEqual([storedNull, null]);
@@ -969,7 +969,7 @@ describe("native protocol codec", () => {
     ]);
 
     expect(decodeResponse(
-      responseFrame(OPCODES.mget, body), OPCODES.mget, compactResponseHints
+      responseFrame(OPCODES.mget, body, FLAG_CUSTOM_PAYLOAD), OPCODES.mget, compactResponseHints
     )).toEqual([
       Buffer.alloc(0),
       Buffer.alloc(0),
@@ -1119,8 +1119,8 @@ describe("native protocol codec", () => {
 
 });
 
-function responseFrame(opcode: number, body: Buffer): ResponseFrame {
-  return { body, bodyLength: body.byteLength, flags: 0, laneId: opcode < 0x0100 ? 0 : 1, opcode, requestId: 1n };
+function responseFrame(opcode: number, body: Buffer, flags = 0): ResponseFrame {
+  return { body, bodyLength: body.byteLength, flags, laneId: opcode < 0x0100 ? 0 : 1, opcode, requestId: 1n };
 }
 
 function u32(value: number): Buffer {

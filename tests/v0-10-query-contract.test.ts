@@ -68,7 +68,13 @@ function explainResult(
     version: "ferric.flow.explain/v1",
     query_fingerprint: "a".repeat(64),
     status,
-    plan: { path: "ordered_range" },
+    plan: {
+      order: Buffer.from("native"),
+      path: Buffer.from("ordered_range"),
+      requested_order: [
+        { direction: Buffer.from("desc"), field: Buffer.from("updated_at_ms") },
+      ],
+    },
     estimate: { scanned_entries: 2 },
     bounds: { scanned_entries: 50_000 },
     ...(status === "executed" ? { actual: USAGE } : {}),
@@ -121,6 +127,7 @@ function queryCapabilities(): Record<string, unknown> {
       language_versions: ["FQL1"],
       capabilities: [
         "flow_query_v1",
+        "flow_query_result_projection_v1",
         "flow_explain_v1",
         "flow_explain_analyze_v1",
         "flow_composite_index_v1",
@@ -219,9 +226,19 @@ describe("FerricStore 0.10 Flow query contract", () => {
     expect(result.usage.resultRecords).toBe(2);
     expect(result.quality.pagination).toBe("live_seek");
 
-    await expect(
-      client.explain(QUERY, { partition: "tenant-a", type: "invoice" }),
-    ).resolves.toMatchObject({ actual: undefined, status: "planned" });
+    const explained = await client.explain(QUERY, {
+      partition: "tenant-a",
+      type: "invoice",
+    });
+    expect(explained).toMatchObject({
+      actual: undefined,
+      plan: {
+        order: "native",
+        path: "ordered_range",
+        requested_order: [{ direction: "desc", field: "updated_at_ms" }],
+      },
+      status: "planned",
+    });
     await expect(
       client.explainAnalyze(QUERY, { partition: "tenant-a", type: "invoice" }),
     ).resolves.toMatchObject({
@@ -244,6 +261,36 @@ describe("FerricStore 0.10 Flow query contract", () => {
       retryable: false,
       safeToRetry: false,
     });
+  });
+
+  it("preserves sparse maps returned by a projected query", async () => {
+    const projectedRecord = {
+      id: Buffer.from("one"),
+      state: Buffer.from("queued"),
+      attributes: { customer: Buffer.from("acme") },
+    };
+    const executor = new FakeExecutor([
+      {
+        ...recordsResult(),
+        records: [projectedRecord],
+        page: { has_more: false, cursor: null },
+        usage: { ...USAGE, result_records: 1 },
+      },
+    ]);
+    const client = new FerricStoreClient(executor);
+    const query =
+      "FROM runs WHERE run_id = @run RETURN RECORD " +
+      "(run_id, state, attribute['customer'])";
+
+    const result = await client.query(query, { run: "one" });
+    if (result.kind !== "records") throw new Error("expected records result");
+
+    expect(result.records).toEqual([projectedRecord]);
+    expect(Object.keys(result.records[0] ?? {}).sort()).toEqual([
+      "attributes",
+      "id",
+      "state",
+    ]);
   });
 
   it("compiles collection conveniences to bounded partition-scoped FQL", async () => {
@@ -474,6 +521,14 @@ describe("FerricStore 0.10 Flow query contract", () => {
     expect(() => nativeNegotiation({ capabilities: incompatible })).toThrow(
       "index_status_contract",
     );
+    const missingProjection = queryCapabilities();
+    const manifest = missingProjection.flow_query as Record<string, unknown>;
+    manifest.capabilities = (manifest.capabilities as string[]).filter(
+      (capability) => capability !== "flow_query_result_projection_v1",
+    );
+    expect(() =>
+      nativeNegotiation({ capabilities: missingProjection }),
+    ).toThrow("flow_query_result_projection_v1");
     expect(() => nativeNegotiation({ capabilities: { limits: {} } })).toThrow(
       "incompatible FerricStore server",
     );

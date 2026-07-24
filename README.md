@@ -18,7 +18,7 @@ Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is te
 
 ## Compatibility
 
-SDK `0.4.x` requires FerricStore server `0.10.0` or newer. FerricStore 0.10 is a
+SDK `0.4.x` requires FerricStore server `0.10.3` or newer. FerricStore 0.10 is a
 breaking beta API contract update, while the native wire protocol remains v1
 (`FSNP` framing and existing opcode numbers are unchanged). Capabilities and
 response-size limits are negotiated per connection from the HELLO-shaped
@@ -42,7 +42,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.10.2
+  ghcr.io/ferricstore/ferricstore:0.10.3
 ```
 
 ## Query durable runs
@@ -60,6 +60,26 @@ const params = { partition: "partition-a", type: "invoice", state: "queued" };
 const result = await client.query(query, params);
 const plan = await client.explain(query, params);
 const indexes = await client.queryIndexes();
+```
+
+Select a sparse result map by adding up to 32 source-specific fields after
+`RETURN RECORD` or `RETURN RECORDS`, for example
+`RETURN RECORDS (run_id, state, attribute['customer'])`. A bare return keeps the
+complete public record. Projection runs after authorization, authoritative
+recheck, ordering, and cursor calculation: it reduces retained result data,
+encoding, network, and client decoding work, but not index scans or hydration.
+
+Use the source-aware builder to avoid hand-quoting result selectors:
+
+```ts
+const projected = projectFlowQuery(
+  "FROM runs WHERE partition_key = @partition AND run_id = @run",
+  "record",
+  FlowProjection.run.id,
+  FlowProjection.run.state,
+  FlowProjection.run.attribute("customer")
+);
+const result = await client.query(projected, { partition: "partition-a", run: "run-1" });
 ```
 
 ## Cluster-aware client
@@ -565,6 +585,15 @@ Use Docker Compose for local integration testing:
 npm run integration:up
 FERRICSTORE_INTEGRATION=1 npm run test:integration
 npm run integration:down
+```
+
+Benchmark raw FQL and the record convenience layer against a live server. The default
+comparison interleaves both paths and fails if either performs more than one `FLOW.QUERY`
+or any `FLOW.GET` hydration per operation:
+
+```bash
+npm run build
+npm run bench:flow-query -- --requests 500 --concurrency 2 --rows 100 --pretty
 ```
 
 Generate API docs with:

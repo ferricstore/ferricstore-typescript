@@ -30,6 +30,7 @@ async function canNativePing(targetHost, targetPort) {
     await sendRequest(socket, OP_STARTUP, 1n, {
       client_name: "ferricstore-typescript-wait",
       compact_flow_responses: true,
+      compact_response_codecs: ["flow_query_result_v1"],
       compression: "none",
       driver_name: "ferricstore-typescript-wait"
     });

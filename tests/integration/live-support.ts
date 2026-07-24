@@ -132,7 +132,8 @@ export async function claimOne(
     worker?: string;
   } = {}
 ): Promise<ClaimedItem> {
-  const jobs = await flow.claimJobs(type, {
+  const deadline = performance.now() + 5_000;
+  const claim = async (): Promise<ClaimedItem[]> => await flow.claimJobs(type, {
     leaseMs: options.leaseMs ?? 30_000,
     limit: 1,
     nowMs: options.nowMs,
@@ -140,6 +141,12 @@ export async function claimOne(
     state,
     worker: options.worker ?? "ts-sdk-integration-worker"
   });
+  let jobs = await claim();
+  while (jobs.length === 0 && performance.now() < deadline) {
+    // A successful empty claim has no mutation to replay. Errors propagate above.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    jobs = await claim();
+  }
   expect(jobs).toHaveLength(1);
   const job = jobs[0];
   if (job == null) {
@@ -158,18 +165,19 @@ export async function createAndClaim(
   const id = `ts-sdk:${name}:${runId}`;
   const partitionKey = `${id}:partition`;
   const state = options.state ?? "queued";
+  const nowMs = options.nowMs ?? Date.now();
   await flow.create(id, {
     idempotent: true,
-    nowMs: options.nowMs,
+    nowMs,
     partitionKey,
     payload: { name },
-    runAtMs: options.nowMs,
+    runAtMs: nowMs,
     state,
     type
   });
   const job = await claimOne(flow, type, state, partitionKey, {
     leaseMs: options.leaseMs,
-    nowMs: options.nowMs
+    nowMs
   });
   return { id, job, partitionKey };
 }

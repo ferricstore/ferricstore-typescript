@@ -150,7 +150,9 @@ function validateUnicodeScalarText(value: string, context: string): void {
     const code = value.charCodeAt(index);
     if (code >= 0xd800 && code <= 0xdbff) {
       const low = value.charCodeAt(index + 1);
-      if (low < 0xdc00 || low > 0xdfff) throw new TypeError(`${context} must be valid UTF-8`);
+      if (!(low >= 0xdc00 && low <= 0xdfff)) {
+        throw new TypeError(`${context} must be valid UTF-8`);
+      }
       index += 1;
     } else if (code >= 0xdc00 && code <= 0xdfff) {
       throw new TypeError(`${context} must be valid UTF-8`);

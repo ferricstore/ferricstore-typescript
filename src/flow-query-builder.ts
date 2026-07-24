@@ -306,7 +306,7 @@ function queryBuilder(options: ReadOptions): FlowCollectionQuery {
   return new FlowCollectionQuery(
     requiredPartition(options.partitionKey),
     boundedCount(options.count),
-    options.rev === true,
+    options.rev !== false,
   );
 }
 

@@ -18,6 +18,7 @@ import {
 import {
   decodeFlowExplainResult,
   decodeFlowQueryIndexStatus,
+  decodeFlowQueryRecords,
   decodeFlowQueryResult,
   tryDecodeFlowQueryError
 } from "./flow-query-response.js";
@@ -130,13 +131,8 @@ export class FerricStoreFlowQueryClient extends FerricStoreManagementClient {
     readonly query: string;
     readonly params: FlowQueryParameters;
   }): Promise<FlowRecord[]> {
-    const result = await this.query(request.query, request.params);
-    if (result.kind !== "records") {
-      throw new FerricStoreError("Flow record convenience query returned a count result", {
-        raw: result.raw
-      });
-    }
-    return this.records(Array.from(result.records));
+    const response = await this.executeFlowQuery(request.query, request.params);
+    return decodeFlowQueryRecords(response, (value) => flowRecordFromResp(value, this.codec));
   }
 
   private async executeExplain(
