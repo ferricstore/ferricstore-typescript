@@ -170,8 +170,10 @@ describe("core compatibility CI", () => {
       expect(authenticatedJob).toContain("FERRICSTORE_AUTH_URL:");
       expect(authenticatedJob).toMatch(/- if: always\(\)\s+run: npm run integration:down/u);
     }
-    expect(bootstrap).toContain('await client.aclSetUser("default"');
-    expect(bootstrap).toContain("await client.aclSave()");
+    expect(bootstrap).toContain('await bootstrapClient.aclSetUser("default"');
+    expect(bootstrap).toContain('nativeOptions: { password, username: "default" }');
+    expect(bootstrap).toContain("await authenticatedClient.ping()");
+    expect(bootstrap).toContain("await authenticatedClient.aclSave()");
   });
 });
 

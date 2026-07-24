@@ -7,15 +7,36 @@ if (password == null || password.length === 0) {
   throw new Error("FERRICSTORE_AUTH_PASSWORD is required");
 }
 
-const client = await FerricStoreClient.fromUrl(url, { reconnect: false });
+const bootstrapClient = await FerricStoreClient.fromUrl(url, { reconnect: false });
 
 try {
-  if (!await client.aclSetUser("default", ["on", `>${password}`, "~*", "+@all"])) {
+  if (!await bootstrapClient.aclSetUser("default", ["on", `>${password}`, "~*", "+@all"])) {
     throw new Error("ACL SETUSER did not acknowledge the integration credential");
   }
-  if (!await client.aclSave()) {
+} catch {
+  // Changing the current user's password may close this unauthenticated session.
+} finally {
+  await bootstrapClient.close().catch(() => undefined);
+}
+
+let authenticatedClient;
+try {
+  authenticatedClient = await FerricStoreClient.fromUrl(url, {
+    nativeOptions: { password, username: "default" },
+    reconnect: false
+  });
+} catch (error) {
+  throw new Error(
+    "integration credential could not authenticate after ACL SETUSER",
+    { cause: error }
+  );
+}
+
+try {
+  await authenticatedClient.ping();
+  if (!await authenticatedClient.aclSave()) {
     throw new Error("ACL SAVE did not acknowledge the integration credential");
   }
 } finally {
-  await client.close();
+  await authenticatedClient.close();
 }
