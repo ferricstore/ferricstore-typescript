@@ -41,7 +41,7 @@ describe("release workflow", () => {
     ]) {
       expect(isolated).toContain(file);
     }
-    expect(npm).toMatch(/needs:\s+integration/);
+    expect(npm).toMatch(/needs:\s*\[integration, authenticated-integration\]/u);
     expect(npm).toContain("npm publish --provenance --access public");
   });
 
@@ -146,6 +146,32 @@ describe("core compatibility CI", () => {
     for (const command of ["shards", "subscribe_events", "flow.query", "flow.query.explain"]) {
       expect(deployment).toContain(`"+${command}"`);
     }
+  });
+
+  it("executes the scoped query ACL case in an authenticated integration job", () => {
+    const workflow = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
+    const releaseWorkflow = readFileSync(
+      `${repositoryRoot}/.github/workflows/release.yml`,
+      "utf8"
+    );
+    const job = workflowJob(workflow, "authenticated-integration");
+    const releaseJob = workflowJob(releaseWorkflow, "authenticated-integration");
+    const bootstrap = readFileSync(
+      `${repositoryRoot}/scripts/bootstrap-integration-auth.mjs`,
+      "utf8"
+    );
+
+    for (const authenticatedJob of [job, releaseJob]) {
+      expect(authenticatedJob).toContain(
+        "ghcr.io/ferricstore/ferricstore:0.10.2@sha256:e6116d6f6c2c701e7c12076ed55233f4305e5fd6ff627cc3ed4ab7f828940cf3"
+      );
+      expect(authenticatedJob).toContain("node scripts/bootstrap-integration-auth.mjs");
+      expect(authenticatedJob).toContain("npm run test:integration:deployment");
+      expect(authenticatedJob).toContain("FERRICSTORE_AUTH_URL:");
+      expect(authenticatedJob).toMatch(/- if: always\(\)\s+run: npm run integration:down/u);
+    }
+    expect(bootstrap).toContain('await client.aclSetUser("default"');
+    expect(bootstrap).toContain("await client.aclSave()");
   });
 });
 

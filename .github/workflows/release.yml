@@ -32,9 +32,34 @@ jobs:
       - if: always()
         run: npm run integration:down
 
+  authenticated-integration:
+    name: authenticated query ACL integration
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    env:
+      FERRICSTORE_IMAGE: ghcr.io/ferricstore/ferricstore:0.10.2@sha256:e6116d6f6c2c701e7c12076ed55233f4305e5fd6ff627cc3ed4ab7f828940cf3
+      FERRICSTORE_AUTH_PASSWORD: ts-sdk-integration-secret
+      FERRICSTORE_AUTH_URL: ferric://default:ts-sdk-integration-secret@127.0.0.1:6388
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22.22.0
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run integration:up
+      - run: node scripts/bootstrap-integration-auth.mjs
+        env:
+          FERRICSTORE_AUTH_BOOTSTRAP_URL: ferric://127.0.0.1:6388
+      - run: npm run test:integration:deployment
+      - if: always()
+        run: npm run integration:down
+
   npm:
     name: publish npm
-    needs: integration
+    needs: [integration, authenticated-integration]
     permissions:
       contents: read
       id-token: write
