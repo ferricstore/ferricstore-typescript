@@ -87,12 +87,24 @@ describe("core compatibility CI", () => {
     expect(manifest).toMatchObject({ magic: "FSNP", requestVersion: 1 });
   });
 
-  it("fails documentation checks when tracked TypeDoc output is stale", () => {
+  it("compares generated TypeDoc output without depending on zlib bytes", () => {
     const metadata = JSON.parse(readFileSync(`${repositoryRoot}/package.json`, "utf8")) as {
       scripts?: Record<string, string>;
     };
+    const guardPath = `${repositoryRoot}/scripts/check-generated-docs.mjs`;
 
-    expect(metadata.scripts?.["docs:check"]).toContain("git diff --exit-code -- docs/api");
+    expect(metadata.scripts?.["docs:check"]).toBe(
+      "typedoc --logLevel Warn && node scripts/check-generated-docs.mjs"
+    );
+    expect(existsSync(guardPath)).toBe(true);
+    if (!existsSync(guardPath)) return;
+
+    const guard = readFileSync(guardPath, "utf8");
+    expect(guard).toContain("inflateSync");
+    expect(guard).toContain("git show");
+    for (const asset of ["hierarchy.js", "navigation.js", "search.js"]) {
+      expect(guard).toContain(asset);
+    }
   });
 
   it("runs routing and native ABI parity against a pinned core checkout and cannot silently skip", () => {

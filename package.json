@@ -64,7 +64,7 @@
     "build": "tsup src/index.ts --format esm,cjs --dts --sourcemap --clean",
     "check": "npm run typecheck && npm run lint && npm run test && npm run build && npm run test:exports && npm run docs:check",
     "docs": "typedoc",
-    "docs:check": "typedoc --logLevel Warn && git diff --exit-code -- docs/api",
+    "docs:check": "typedoc --logLevel Warn && node scripts/check-generated-docs.mjs",
     "integration:down": "docker compose down -v",
     "integration:up": "docker compose up -d ferricstore && node scripts/wait-for-ferricstore.mjs",
     "lint": "eslint .",
