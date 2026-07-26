@@ -104,6 +104,21 @@ function indexResult(): Record<string, unknown> {
         build_id: "build-1",
         state: "active",
         queryable: true,
+        covering_fields: [
+          "partition_key",
+          "run_id",
+          "updated_at_ms",
+          "version",
+          "attribute.customer",
+          "state_meta.failed.reason",
+        ],
+        format: {
+          query_row: "ferric.flow.query.row/v1",
+          key: "ferric.flow.query.composite.key/v1",
+          entry: "ferric.flow.query.composite.entry/v2",
+          reverse: "ferric.flow.query.composite.reverse/v1",
+          counter: null,
+        },
       },
     ],
   };
@@ -151,7 +166,7 @@ function queryCapabilities(): Record<string, unknown> {
   };
 }
 
-describe("FerricStore 0.10 Flow query contract", () => {
+describe("FerricStore 0.11 Flow query contract", () => {
   it("uses one opaque non-mutating collection opcode without the removed compact request", () => {
     expect(COMMAND_OPCODES["FLOW.QUERY"]).toBe(0x0231);
     const table = COMMAND_OPCODES as Readonly<
@@ -245,9 +260,27 @@ describe("FerricStore 0.10 Flow query contract", () => {
       actual: { resultRecords: 2 },
       status: "executed",
     });
-    await expect(client.queryIndexes()).resolves.toMatchObject({
+    const indexStatus = await client.queryIndexes();
+    expect(indexStatus).toMatchObject({
       registry: { catalogVersion: 3, epoch: 2 },
-      indexes: [{ id: "flow_runs_tenant_updated", queryable: true }],
+      indexes: [
+        {
+          id: "flow_runs_tenant_updated",
+          queryable: true,
+          coveringFields: [
+            "partition_key",
+            "run_id",
+            "updated_at_ms",
+            "version",
+            "attribute.customer",
+            "state_meta.failed.reason",
+          ],
+          format: {
+            entry: "ferric.flow.query.composite.entry/v2",
+            counter: undefined,
+          },
+        },
+      ],
     });
 
     const error = await client
@@ -261,6 +294,36 @@ describe("FerricStore 0.10 Flow query contract", () => {
       retryable: false,
       safeToRetry: false,
     });
+  });
+
+  it("requires bounded covering and format metadata in 0.11 index status", async () => {
+    const cases: ((index: Record<string, unknown>) => void)[] = [
+      (index) => { delete index.covering_fields; },
+      (index) => { index.covering_fields = ["run_id", "run_id"]; },
+      (index) => {
+        index.covering_fields = Array.from(
+          { length: 33 },
+          (_, position) => `attribute.field_${position}`,
+        );
+      },
+      (index) => { delete index.format; },
+      (index) => {
+        (index.format as Record<string, unknown>).counter = false;
+      },
+      (index) => {
+        (index.format as Record<string, unknown>).counter = undefined;
+      },
+    ];
+
+    for (const mutate of cases) {
+      const response = indexResult();
+      const index = (response.indexes as Record<string, unknown>[])[0];
+      if (index == null) throw new Error("index fixture must contain one index");
+      mutate(index);
+      await expect(
+        new FerricStoreClient(new FakeExecutor([response])).queryIndexes(),
+      ).rejects.toThrow(/covering_fields|format/u);
+    }
   });
 
   it("preserves sparse maps returned by a projected query", async () => {

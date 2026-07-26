@@ -29,7 +29,7 @@ const INVALID_QUERY =
   "FROM runs WHERE partition_key = @partition AND unsupported = 1 " +
   "ORDER BY updated_at_ms ASC LIMIT 2 RETURN RECORDS";
 
-describe("FerricStore 0.10 query planner integration", () => {
+describe("FerricStore 0.11 query planner integration", () => {
   it("covers pagination, count, explain, index status, diagnostics, and conveniences", async () => {
     const client = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
     const run = suffix();
@@ -118,6 +118,13 @@ describe("FerricStore 0.10 query planner integration", () => {
       const indexes = await client.queryIndexes();
       expect(greaterThanZero(indexes.registry.catalogVersion)).toBe(true);
       expect(indexes.indexes.length).toBeGreaterThan(0);
+      for (const index of indexes.indexes) {
+        expect(index.coveringFields.length).toBeGreaterThan(0);
+        expect(index.format.queryRow).not.toBe("");
+        expect(index.format.key).not.toBe("");
+        expect(index.format.entry).not.toBe("");
+        expect(index.format.reverse).not.toBe("");
+      }
 
       const error = await client.query(INVALID_QUERY, { partition })
         .catch((reason: unknown) => reason);

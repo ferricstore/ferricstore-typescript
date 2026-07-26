@@ -5,7 +5,8 @@
   "excludePrivate": true,
   "excludeInternal": true,
   "githubPages": false,
-  "gitRevision": "main",
+  "disableGit": true,
+  "sourceLinkTemplate": "https://github.com/ferricstore/ferricstore-typescript/blob/main/{path}#L{line}",
   "hideGenerator": true,
   "plugin": []
 }

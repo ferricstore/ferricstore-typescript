@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { FerricStoreError } from "./errors.js";
 import { field } from "./internal.js";
 import {
+  boundedText,
   boundedInteger,
   decodeError,
   freezeMap,
@@ -23,6 +24,7 @@ import {
   type FlowQueryErrorPosition,
   type FlowQueryInteger,
   type FlowQueryIndex,
+  type FlowQueryIndexFormat,
   type FlowQueryIndexStatus,
   type FlowQueryPage,
   type FlowQueryQuality,
@@ -337,7 +339,57 @@ function decodeIndex(value: unknown, index: number): FlowQueryIndex {
     buildId: requiredText(mapping, "build_id", "FLOW.QUERY.INDEXES index"),
     state: requiredText(mapping, "state", "FLOW.QUERY.INDEXES index"),
     queryable: requiredBoolean(mapping, "queryable", "FLOW.QUERY.INDEXES index"),
+    coveringFields: decodeCoveringFields(mapping),
+    format: decodeIndexFormat(mapping),
     raw: freezeMap(mapping)
+  });
+}
+
+function decodeCoveringFields(mapping: FlowQueryResponseMap): readonly string[] {
+  const raw = field(mapping, "covering_fields");
+  if (!Array.isArray(raw) || raw.length > 32) {
+    throw decodeError(
+      "FLOW.QUERY.INDEXES index covering_fields must contain at most 32 entries",
+      raw
+    );
+  }
+  const fields = new Array<string>(raw.length);
+  const seen = new Set<string>();
+  for (let index = 0; index < raw.length; index += 1) {
+    if (!Object.hasOwn(raw, index)) {
+      throw decodeError("FLOW.QUERY.INDEXES index covering_fields must be dense", raw);
+    }
+    const value = boundedText(
+      raw[index],
+      `FLOW.QUERY.INDEXES index covering_fields entry ${index}`,
+      512
+    );
+    if (seen.has(value)) {
+      throw decodeError("FLOW.QUERY.INDEXES index covering_fields contains duplicates", raw);
+    }
+    seen.add(value);
+    fields[index] = value;
+  }
+  return Object.freeze(fields);
+}
+
+function decodeIndexFormat(mapping: FlowQueryResponseMap): FlowQueryIndexFormat {
+  const raw = requiredMap(field(mapping, "format"), "FLOW.QUERY.INDEXES index format");
+  if (!hasKey(raw, "counter")) {
+    throw decodeError("FLOW.QUERY.INDEXES index format counter is missing", raw);
+  }
+  const counterValue = field(raw, "counter");
+  const counter =
+    counterValue === null
+      ? undefined
+      : boundedText(counterValue, "FLOW.QUERY.INDEXES index format counter", 128);
+  return Object.freeze({
+    queryRow: requiredBoundedText(raw, "query_row", "FLOW.QUERY.INDEXES index format", 128),
+    key: requiredBoundedText(raw, "key", "FLOW.QUERY.INDEXES index format", 128),
+    entry: requiredBoundedText(raw, "entry", "FLOW.QUERY.INDEXES index format", 128),
+    reverse: requiredBoundedText(raw, "reverse", "FLOW.QUERY.INDEXES index format", 128),
+    counter,
+    raw: freezeMap(raw)
   });
 }
 

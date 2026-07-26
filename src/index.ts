@@ -88,6 +88,7 @@ export {
   type FlowQueryCountResult,
   type FlowQueryErrorPosition,
   type FlowQueryIndex,
+  type FlowQueryIndexFormat,
   type FlowQueryInteger,
   type FlowQueryIndexRegistry,
   type FlowQueryIndexStatus,

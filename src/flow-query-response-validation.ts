@@ -217,6 +217,21 @@ export function requiredBoundedText(
   return value;
 }
 
+export function boundedText(
+  value: unknown,
+  context: string,
+  maximumBytes: number,
+): string {
+  const decoded = strictText(value);
+  if (decoded == null || decoded.length === 0) {
+    throw decodeError(`${context} must be non-empty text`, value);
+  }
+  if (Buffer.byteLength(decoded, "utf8") > maximumBytes) {
+    throw decodeError(`${context} exceeds ${maximumBytes} bytes`, value);
+  }
+  return decoded;
+}
+
 export function requiredBoolean(
   mapping: Map<unknown, unknown> | Record<string, unknown>,
   name: string,

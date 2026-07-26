@@ -109,12 +109,23 @@ export interface FlowQueryIndexRegistry {
   readonly catalogVersion: FlowQueryInteger;
 }
 
+export interface FlowQueryIndexFormat {
+  readonly queryRow: string;
+  readonly key: string;
+  readonly entry: string;
+  readonly reverse: string;
+  readonly counter?: string;
+  readonly raw: Readonly<Record<string, unknown>>;
+}
+
 export interface FlowQueryIndex {
   readonly id: string;
   readonly version: FlowQueryInteger;
   readonly buildId: string;
   readonly state: string;
   readonly queryable: boolean;
+  readonly coveringFields: readonly string[];
+  readonly format: FlowQueryIndexFormat;
   readonly raw: Readonly<Record<string, unknown>>;
 }
 

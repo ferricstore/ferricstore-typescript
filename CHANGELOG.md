@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-26
+
+### Changed
+
+- Require FerricStore 0.11.0 while retaining native wire protocol v1 and the
+  existing FQL1 query/result contracts.
+- Reject missing, duplicate, oversized, invalid UTF-8, and malformed nullable
+  query-index generation metadata before returning it to callers.
+
+### Added
+
+- Expose bounded `coveringFields` and opaque per-generation `format` codec
+  identities from `queryIndexes()`, with live OSS catalog coverage.
+
 ## [0.4.1] - 2026-07-24
 
 ### Changed
