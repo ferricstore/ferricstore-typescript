@@ -11,8 +11,9 @@ The format is based on Keep a Changelog, and this project follows semver once it
 ### Changed
 
 - Validate the unchanged compact FQL1 query/result contract against
-  FerricStore 0.11.1's fused index execution and prepared response path.
-- Pin live integration and core parity to FerricStore 0.11.1 while retaining
+  FerricStore 0.11.2's fused index execution and corrected compact
+  `EXPLAIN ANALYZE` response path.
+- Pin live integration and core parity to FerricStore 0.11.2 while retaining
   FerricStore 0.11.0 as the minimum compatible server and native wire v1.
 
 ## [0.5.0] - 2026-07-26

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.1";
+const testedServerVersion = "0.11.2";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -99,9 +99,9 @@ describe("core compatibility CI", () => {
     );
 
     for (const source of [testWorkflow, releaseWorkflow]) {
-      expect(source).toContain("release-0.11.1");
+      expect(source).toContain("release-0.11.2");
       expect(source).toMatch(
-        /ghcr\.io\/ferricstore\/ferricstore:0\.11\.1@sha256:[0-9a-f]{64}/u
+        /ghcr\.io\/ferricstore\/ferricstore:0\.11\.2@sha256:[0-9a-f]{64}/u
       );
     }
   });
@@ -146,10 +146,10 @@ describe("core compatibility CI", () => {
   });
 
   it("pins parity and pinned-core integration to the reviewed OSS revision", () => {
-    const revision = "dc12cff4a916496a7c56e2f3421c9a13bd3dcd8d";
+    const revision = "1f26dd855d875c5ff811511848aa9aa6296373dd";
     const image =
       `ghcr.io/ferricstore/ferricstore:ci-${revision}` +
-      "@sha256:6e18ef6d869358b0bb03997858450e36ead565f7e9a31042740f38bcc7b3a03d";
+      "@sha256:b70605c7c9944937db11e337e2bc5882d4df8589d4afdc7892574fc91b4397e6";
     const testWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
     const releaseWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/release.yml`, "utf8");
 
@@ -172,7 +172,7 @@ describe("core compatibility CI", () => {
       "u"
     ).exec(compose)?.[0];
 
-    expect(coreRevision).toBe("dc12cff4a916496a7c56e2f3421c9a13bd3dcd8d");
+    expect(coreRevision).toBe("1f26dd855d875c5ff811511848aa9aa6296373dd");
     expect(releaseImage).toBeDefined();
     expect(compose).toMatch(immutableImage);
     expect(integrationJob).toMatch(immutableImage);

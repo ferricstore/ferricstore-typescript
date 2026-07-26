@@ -19,7 +19,7 @@ Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is te
 ## Compatibility
 
 SDK `0.5.x` requires FerricStore server `0.11.0` or newer and is tested against
-FerricStore `0.11.1`. FerricStore 0.11 is a breaking beta API contract update,
+FerricStore `0.11.2`. FerricStore 0.11 is a breaking beta API contract update,
 while the native wire protocol remains v1 (`FSNP` framing and existing opcode
 numbers are unchanged). Capabilities and response-size limits are negotiated
 per connection from the HELLO-shaped startup response rather than inferred from
@@ -43,7 +43,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.11.1
+  ghcr.io/ferricstore/ferricstore:0.11.2
 ```
 
 ## Query durable runs
