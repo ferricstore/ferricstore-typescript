@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
+const testedServerVersion = "0.11.1";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -79,12 +80,30 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.5.0");
+    expect(metadata.version).toBe("0.5.1");
     expect(metadata.ferricstore).toEqual({
       minimumServerVersion: "0.11.0",
       nativeProtocolVersion: 1
     });
     expect(manifest).toMatchObject({ magic: "FSNP", requestVersion: 1 });
+  });
+
+  it("tests against the latest patch without raising the compatible server floor", () => {
+    const testWorkflow = readFileSync(
+      `${repositoryRoot}/.github/workflows/test.yml`,
+      "utf8"
+    );
+    const releaseWorkflow = readFileSync(
+      `${repositoryRoot}/.github/workflows/release.yml`,
+      "utf8"
+    );
+
+    for (const source of [testWorkflow, releaseWorkflow]) {
+      expect(source).toContain("release-0.11.1");
+      expect(source).toMatch(
+        /ghcr\.io\/ferricstore\/ferricstore:0\.11\.1@sha256:[0-9a-f]{64}/u
+      );
+    }
   });
 
   it("compares generated TypeDoc output without depending on zlib bytes", () => {
@@ -127,10 +146,10 @@ describe("core compatibility CI", () => {
   });
 
   it("pins parity and pinned-core integration to the reviewed OSS revision", () => {
-    const revision = "fc2f77573ecd4f46b384244b50e1c1d4df10198f";
+    const revision = "dc12cff4a916496a7c56e2f3421c9a13bd3dcd8d";
     const image =
       `ghcr.io/ferricstore/ferricstore:ci-${revision}` +
-      "@sha256:b4655d3c16616a837a4cdb6d5659a66d0589c9adb49bd682c0941168be8ad75c";
+      "@sha256:6e18ef6d869358b0bb03997858450e36ead565f7e9a31042740f38bcc7b3a03d";
     const testWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
     const releaseWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/release.yml`, "utf8");
 
@@ -142,22 +161,18 @@ describe("core compatibility CI", () => {
   it("pins live server images immutably and tests the same pinned core revision", () => {
     const testWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
     const releaseWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/release.yml`, "utf8");
-    const metadata = JSON.parse(readFileSync(`${repositoryRoot}/package.json`, "utf8")) as {
-      ferricstore?: { minimumServerVersion?: string };
-    };
     const parityJob = workflowJob(testWorkflow, "core-routing-parity");
     const integrationJob = workflowJob(testWorkflow, "integration");
     const releaseIntegrationJob = workflowJob(releaseWorkflow, "integration");
     const compose = readFileSync(`${repositoryRoot}/docker-compose.yml`, "utf8");
     const coreRevision = /ref:\s*([0-9a-f]{40})/u.exec(parityJob)?.[1];
     const immutableImage = /ghcr\.io\/ferricstore\/ferricstore:[^\s}"']+@sha256:[0-9a-f]{64}/gu;
-    const serverVersion = metadata.ferricstore?.minimumServerVersion ?? "missing";
     const releaseImage = new RegExp(
-      `ghcr\\.io/ferricstore/ferricstore:${serverVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
+      `ghcr\\.io/ferricstore/ferricstore:${testedServerVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
       "u"
     ).exec(compose)?.[0];
 
-    expect(coreRevision).toBe("fc2f77573ecd4f46b384244b50e1c1d4df10198f");
+    expect(coreRevision).toBe("dc12cff4a916496a7c56e2f3421c9a13bd3dcd8d");
     expect(releaseImage).toBeDefined();
     expect(compose).toMatch(immutableImage);
     expect(integrationJob).toMatch(immutableImage);
@@ -199,12 +214,8 @@ describe("core compatibility CI", () => {
       `${repositoryRoot}/scripts/bootstrap-integration-auth.mjs`,
       "utf8"
     );
-    const metadata = JSON.parse(readFileSync(`${repositoryRoot}/package.json`, "utf8")) as {
-      ferricstore?: { minimumServerVersion?: string };
-    };
-    const serverVersion = metadata.ferricstore?.minimumServerVersion ?? "missing";
     const releaseImage = new RegExp(
-      `ghcr\\.io/ferricstore/ferricstore:${serverVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
+      `ghcr\\.io/ferricstore/ferricstore:${testedServerVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
       "u"
     ).exec(readFileSync(`${repositoryRoot}/docker-compose.yml`, "utf8"))?.[0];
 
