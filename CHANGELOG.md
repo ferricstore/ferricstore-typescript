@@ -6,6 +6,23 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-27
+
+### Added
+
+- Expose typed specialized-plan capabilities and the complete query-index
+  service, field, lifecycle, validation, retirement, and statistics status.
+
+### Changed
+
+- Propagate the client timeout into the server-side query deadline for direct
+  and pipelined native requests without adding another timer or payload copy.
+- Reject oversized or malformed query parameters, non-canonical compact
+  cursors, unsupported quality values, and inconsistent usage counters before
+  exposing a result.
+- Pin live integration and core parity to FerricStore 0.11.3 while retaining
+  FerricStore 0.11.0 as the minimum compatible server and native wire v1.
+
 ## [0.5.1] - 2026-07-26
 
 ### Changed

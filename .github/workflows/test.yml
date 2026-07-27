@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           repository: ferricstore/ferricstore
-          ref: 1f26dd855d875c5ff811511848aa9aa6296373dd
+          ref: 21bff730cc206db23413b02a9d32d90008de4492
           path: ferricstore-core
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
@@ -70,14 +70,14 @@ jobs:
       matrix:
         include:
           - node-version: 22.22.0
-            server: release-0.11.2
-            image: ghcr.io/ferricstore/ferricstore:0.11.2@sha256:90758c3a2d191659928a728c5fb5e5f61d0ee910583e263f3bad543e5055bff8
+            server: release-0.11.3
+            image: ghcr.io/ferricstore/ferricstore:0.11.3@sha256:c2eef2036f45e7916359edfb92a50e3f36b8ea3c7a4067f22581305f5253c217
           - node-version: 24.x
-            server: release-0.11.2
-            image: ghcr.io/ferricstore/ferricstore:0.11.2@sha256:90758c3a2d191659928a728c5fb5e5f61d0ee910583e263f3bad543e5055bff8
+            server: release-0.11.3
+            image: ghcr.io/ferricstore/ferricstore:0.11.3@sha256:c2eef2036f45e7916359edfb92a50e3f36b8ea3c7a4067f22581305f5253c217
           - node-version: 22.22.0
             server: pinned-core
-            image: ghcr.io/ferricstore/ferricstore:ci-1f26dd855d875c5ff811511848aa9aa6296373dd@sha256:b70605c7c9944937db11e337e2bc5882d4df8589d4afdc7892574fc91b4397e6
+            image: ghcr.io/ferricstore/ferricstore:ci-21bff730cc206db23413b02a9d32d90008de4492@sha256:54c8abb5c584dbfc40b022e48b6d010c2bc8632f44c8e8ff3d83915268f02445
     env:
       FERRICSTORE_IMAGE: ${{ matrix.image }}
     steps:
@@ -89,13 +89,13 @@ jobs:
       - run: npm ci
       - run: npm run test:integration:isolated
       - name: Build SDK for throughput smoke
-        if: ${{ matrix.server == 'release-0.11.2' && matrix.node-version == '22.22.0' }}
+        if: ${{ matrix.server == 'release-0.11.3' && matrix.node-version == '22.22.0' }}
         run: npm run build
       - name: Start release server for throughput smoke
-        if: ${{ matrix.server == 'release-0.11.2' && matrix.node-version == '22.22.0' }}
+        if: ${{ matrix.server == 'release-0.11.3' && matrix.node-version == '22.22.0' }}
         run: npm run integration:up
       - name: Acknowledged response throughput smoke
-        if: ${{ matrix.server == 'release-0.11.2' && matrix.node-version == '22.22.0' }}
+        if: ${{ matrix.server == 'release-0.11.3' && matrix.node-version == '22.22.0' }}
         run: >-
           npm run bench:kv -- --command set --request-mode direct
           --requests 1000 --pipeline 1 --clients 4 --inflight-batches 8
@@ -107,7 +107,7 @@ jobs:
     name: authenticated query ACL integration
     runs-on: ubuntu-latest
     env:
-      FERRICSTORE_IMAGE: ghcr.io/ferricstore/ferricstore:0.11.2@sha256:90758c3a2d191659928a728c5fb5e5f61d0ee910583e263f3bad543e5055bff8
+      FERRICSTORE_IMAGE: ghcr.io/ferricstore/ferricstore:0.11.3@sha256:c2eef2036f45e7916359edfb92a50e3f36b8ea3c7a4067f22581305f5253c217
       FERRICSTORE_AUTH_PASSWORD: ts-sdk-integration-secret
       FERRICSTORE_AUTH_URL: ferric://default:ts-sdk-integration-secret@127.0.0.1:6388
     steps:

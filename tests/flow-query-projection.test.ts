@@ -52,6 +52,31 @@ describe("Flow query projection builder", () => {
       "record",
       FlowProjection.run.id
     )).toThrow("already contains");
+    for (const query of [
+      "FROM runs WHERE run_id = @id;;",
+      "FROM runs WHERE run_id = @id; ;"
+    ]) {
+      expect(() => projectFlowQuery(
+        query,
+        "record",
+        FlowProjection.run.id
+      )).toThrow("at most one trailing semicolon");
+    }
+    expect(() => projectFlowQuery(
+      "\u00a0FROM runs WHERE run_id = @id",
+      "record",
+      FlowProjection.run.id
+    )).toThrow("must start with FROM");
+    for (const query of [
+      "FROM runs\u00e9 WHERE run_id = @id",
+      "FROM run\u017f WHERE run_id = @id"
+    ]) {
+      expect(() => projectFlowQuery(
+        query,
+        "record",
+        FlowProjection.run.id
+      )).toThrow("must start with FROM");
+    }
   });
 
   it("bounds field counts, dynamic names, and the final query bytes", () => {

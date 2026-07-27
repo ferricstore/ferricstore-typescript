@@ -7,6 +7,8 @@ import {
   type FlowQueryResult,
 } from "../src/index.js";
 import { nativeNegotiation } from "../src/native-negotiation.js";
+import { hasFlowExplainPrefix } from "../src/flow-query-request.js";
+import { tryDecodeFlowQueryError } from "../src/flow-query-response.js";
 import * as flowProtocol from "../src/protocol-flow.js";
 import {
   buildProtocolCommand,
@@ -55,7 +57,7 @@ function recordsResult(): Record<string, unknown> {
   return {
     version: "ferric.flow.query.result/v1",
     records: [record("one"), record("two")],
-    page: { has_more: true, cursor: "fqc1_next" },
+    page: { has_more: true, cursor: "fqc1_next-page-token" },
     quality: QUALITY,
     usage: USAGE,
   };
@@ -76,8 +78,30 @@ function explainResult(
       ],
     },
     estimate: { scanned_entries: 2 },
+    stats: { source: "fresh" },
+    quality: QUALITY,
     bounds: { scanned_entries: 50_000 },
-    ...(status === "executed" ? { actual: USAGE } : {}),
+    pressure: { resources: [] },
+    decision: { reason: "only_bounded_candidate" },
+    alternatives: [],
+    actual: status === "executed" ? USAGE : null,
+    diagnostic: null,
+  };
+}
+
+function specializedExplainResult(): Record<string, unknown> {
+  return {
+    version: "ferric.flow.explain/v1",
+    query_fingerprint: "a".repeat(64),
+    status: "planned",
+    capabilities: {
+      requested: [],
+      available: ["flow_query_point_v1"],
+      missing: [],
+    },
+    plan: { path: "primary_key", record_source: "authoritative_log" },
+    estimate: { scan_records: 1, result_records: 1 },
+    bounds: { scan_records: 1, result_records: 1, groups: 0 },
   };
 }
 
@@ -93,31 +117,81 @@ function countResult(value: number | bigint): Record<string, unknown> {
 function indexResult(): Record<string, unknown> {
   return {
     contract_version: "ferric.flow.query.indexes/v1",
-    observed_at_ms: 100,
-    statistics_max_age_ms: 30_000,
+    observed_at_ms: 1_000_000,
+    statistics_max_age_ms: 300_000,
     registry: { epoch: 2, catalog_version: 3 },
-    services: { backfill: { status: "idle" } },
+    services: {
+      registry: "ready",
+      lifecycle_worker: "ready",
+      statistics_store: "ready",
+      statistics_worker: "unavailable",
+    },
     indexes: [
       {
         id: "flow_runs_tenant_updated",
         version: 1,
         build_id: "build-1",
+        source: "runs",
         state: "active",
         queryable: true,
+        fields: [
+          { name: "partition_key", direction: "asc", encoding: "hashed" },
+          { name: "updated_at_ms", direction: "desc", encoding: "ordered" },
+        ],
+        workloads: ["tenant_updated"],
+        count_prefixes: [1],
         covering_fields: [
           "partition_key",
           "run_id",
           "updated_at_ms",
           "version",
-          "attribute.customer",
-          "state_meta.failed.reason",
         ],
         format: {
           query_row: "ferric.flow.query.row/v1",
           key: "ferric.flow.query.composite.key/v1",
           entry: "ferric.flow.query.composite.entry/v2",
           reverse: "ferric.flow.query.composite.reverse/v1",
-          counter: null,
+          counter: "ferric.flow.query.composite.counter/v1",
+        },
+        coverage: {
+          complete_shards: 2,
+          total_shards: 2,
+          validation: "passed",
+        },
+        build: {
+          scope: "catalog_build",
+          phase_counts: { done: 2 },
+          current_phases: ["done"],
+          completed_shards: 2,
+          total_shards: 2,
+          scanned_records: 10,
+          written_entries: 10,
+          written_bytes: 900,
+        },
+        validation: {
+          scope: "catalog_build",
+          status: "passed",
+          phase_counts: { done: 2 },
+          current_phases: ["done"],
+          completed_shards: 2,
+          total_shards: 2,
+          checked_records: 10,
+          checked_entries: 10,
+          mismatches: 0,
+          failure_reason: null,
+          validated_at_ms: 999_000,
+        },
+        retirement: { status: "not_applicable" },
+        statistics: {
+          status: "fresh",
+          samples: 2,
+          fresh_samples: 2,
+          stale_samples: 0,
+          future_samples: 0,
+          oldest_collected_at_ms: 998_000,
+          newest_collected_at_ms: 999_000,
+          oldest_age_ms: 2_000,
+          newest_age_ms: 1_000,
         },
       },
     ],
@@ -237,7 +311,10 @@ describe("FerricStore 0.11 Flow query contract", () => {
     expect(result.kind).toBe("records");
     if (result.kind !== "records") throw new Error("expected records result");
     expect(result.records).toHaveLength(2);
-    expect(result.page).toEqual({ hasMore: true, cursor: "fqc1_next" });
+    expect(result.page).toEqual({
+      hasMore: true,
+      cursor: "fqc1_next-page-token",
+    });
     expect(result.usage.resultRecords).toBe(2);
     expect(result.quality.pagination).toBe("live_seek");
 
@@ -247,6 +324,11 @@ describe("FerricStore 0.11 Flow query contract", () => {
     });
     expect(explained).toMatchObject({
       actual: undefined,
+      stats: { source: "fresh" },
+      quality: QUALITY,
+      pressure: { resources: [] },
+      decision: { reason: "only_bounded_candidate" },
+      alternatives: [],
       plan: {
         order: "native",
         path: "ordered_range",
@@ -266,19 +348,29 @@ describe("FerricStore 0.11 Flow query contract", () => {
       indexes: [
         {
           id: "flow_runs_tenant_updated",
+          source: "runs",
           queryable: true,
+          fields: [
+            { name: "partition_key", direction: "asc", encoding: "hashed" },
+            { name: "updated_at_ms", direction: "desc", encoding: "ordered" },
+          ],
+          workloads: ["tenant_updated"],
+          countPrefixes: [1],
           coveringFields: [
             "partition_key",
             "run_id",
             "updated_at_ms",
             "version",
-            "attribute.customer",
-            "state_meta.failed.reason",
           ],
           format: {
             entry: "ferric.flow.query.composite.entry/v2",
-            counter: undefined,
+            counter: "ferric.flow.query.composite.counter/v1",
           },
+          coverage: { completeShards: 2, totalShards: 2, validation: "passed" },
+          build: { completedShards: 2, scannedRecords: 10 },
+          validation: { status: "passed", validatedAtMs: 999_000 },
+          retirement: { status: "not_applicable" },
+          statistics: { status: "fresh", samples: 2 },
         },
       ],
     });
@@ -294,6 +386,321 @@ describe("FerricStore 0.11 Flow query contract", () => {
       retryable: false,
       safeToRetry: false,
     });
+  });
+
+  it("requires the complete actionable EXPLAIN v1 envelope", async () => {
+    for (const field of [
+      "stats",
+      "quality",
+      "pressure",
+      "decision",
+      "alternatives",
+      "actual",
+      "diagnostic",
+    ]) {
+      const response = Object.fromEntries(
+        Object.entries(explainResult("planned")).filter(([name]) => name !== field),
+      );
+      await expect(
+        new FerricStoreClient(new FakeExecutor([response])).explain(QUERY, {
+          partition: "tenant-a",
+          type: "invoice",
+        }),
+      ).rejects.toThrow(/explain/u);
+    }
+  });
+
+  it("rejects unsupported full-result quality values", async () => {
+    const response = recordsResult();
+    response.quality = { ...QUALITY, exactness: "future_exactness" };
+
+    await expect(
+      new FerricStoreClient(new FakeExecutor([response])).query(QUERY, {
+        partition: "tenant-a",
+        type: "invoice",
+      }),
+    ).rejects.toThrow(/quality/u);
+  });
+
+  it("rejects diagnostics outside the server's bounded wire contract", () => {
+    const diagnostic = {
+      code: "unsupported_field",
+      message: "unsupported query field",
+      detail: "Use a supported field.",
+      hint: "See context.supported_fields.",
+      retryable: false,
+      safe_to_retry: false,
+      retry_after_ms: 0,
+      position: { byte: 18, line: 1, column: 19 },
+      context: { supported_fields: ["partition_key", "run_id", "type"] },
+    };
+    const cases: Record<string, unknown>[] = [
+      { ...diagnostic, detail: "x".repeat(1_025) },
+      {
+        ...diagnostic,
+        context: Object.fromEntries(
+          Array.from({ length: 17 }, (_, index) => [`field_${index}`, index]),
+        ),
+      },
+      { ...diagnostic, context: { "": "invalid" } },
+      { ...diagnostic, context: { fields: Array.from({ length: 33 }, () => 0) } },
+      { ...diagnostic, context: { estimate: 1.5 } },
+      { ...diagnostic, context: { estimate: 1n << 63n } },
+      {
+        ...diagnostic,
+        context: { a: { b: { c: { d: { e: { f: { value: 1 } } } } } } },
+      },
+    ];
+
+    expect(tryDecodeFlowQueryError(diagnostic)).toBeInstanceOf(FlowQueryError);
+    for (const malformed of cases) {
+      expect(tryDecodeFlowQueryError(malformed)).toBeUndefined();
+    }
+  });
+
+  it("decodes bounded specialized EXPLAIN capabilities", async () => {
+    const result = await new FerricStoreClient(
+      new FakeExecutor([specializedExplainResult()]),
+    ).explain("FROM runs WHERE run_id = @run RETURN RECORD", { run: "run-1" });
+
+    expect(result).toMatchObject({
+      status: "planned",
+      capabilities: {
+        requested: [],
+        available: ["flow_query_point_v1"],
+        missing: [],
+      },
+      stats: undefined,
+      quality: undefined,
+      alternatives: [],
+    });
+  });
+
+  it("rejects malformed specialized EXPLAIN envelopes", async () => {
+    const cases: ((response: Record<string, unknown>) => void)[] = [
+      (response) => {
+        delete response.capabilities;
+      },
+      (response) => {
+        delete (response.capabilities as Record<string, unknown>).requested;
+      },
+      (response) => {
+        (response.capabilities as Record<string, unknown>).available = [
+          "flow_query_point_v1",
+          "flow_query_point_v1",
+        ];
+      },
+      (response) => {
+        (response.capabilities as Record<string, unknown>).missing = Array.from(
+          { length: 65 },
+          (_, index) => `missing_${index}`,
+        );
+      },
+      (response) => {
+        response.stats = {};
+      },
+      (response) => {
+        response.status = "executed";
+      },
+      (response) => {
+        response.actual = null;
+      },
+    ];
+
+    for (const mutate of cases) {
+      const response = specializedExplainResult();
+      mutate(response);
+      await expect(
+        new FerricStoreClient(new FakeExecutor([response])).explain(
+          "FROM runs WHERE run_id = @run RETURN RECORD",
+          { run: "run-1" },
+        ),
+      ).rejects.toThrow(/explain/u);
+    }
+  });
+
+  it("requires every typed index lifecycle section and service", async () => {
+    const indexFields = [
+      "source",
+      "fields",
+      "workloads",
+      "count_prefixes",
+      "coverage",
+      "build",
+      "validation",
+      "retirement",
+      "statistics",
+    ];
+    for (const field of indexFields) {
+      const response = indexResult();
+      const index = (response.indexes as Record<string, unknown>[])[0];
+      if (index == null) throw new Error("index fixture must contain one index");
+      response.indexes = [
+        Object.fromEntries(Object.entries(index).filter(([name]) => name !== field)),
+      ];
+      await expect(
+        new FerricStoreClient(new FakeExecutor([response])).queryIndexes(),
+      ).rejects.toThrow(/FLOW\.QUERY\.INDEXES/u);
+    }
+    for (const service of [
+      "registry",
+      "lifecycle_worker",
+      "statistics_store",
+      "statistics_worker",
+    ]) {
+      const response = indexResult();
+      response.services = Object.fromEntries(
+        Object.entries(response.services as Record<string, unknown>).filter(
+          ([name]) => name !== service,
+        ),
+      );
+      await expect(
+        new FerricStoreClient(new FakeExecutor([response])).queryIndexes(),
+      ).rejects.toThrow(/services/u);
+    }
+  });
+
+  it("decodes retirement progress without build-only scope metadata", async () => {
+    const response = indexResult();
+    const index = (response.indexes as Record<string, unknown>[])[0];
+    if (index == null) throw new Error("index fixture must contain one index");
+    index.state = "retiring";
+    index.queryable = false;
+    index.retirement = {
+      status: "pending",
+      phase_counts: { pending: 2 },
+      current_phases: ["pending"],
+      completed_shards: 0,
+      total_shards: 2,
+      deleted_entries: 0,
+      deleted_bytes: 0,
+      rewritten_reverse_rows: 0,
+    };
+
+    await expect(
+      new FerricStoreClient(new FakeExecutor([response])).queryIndexes(),
+    ).resolves.toMatchObject({
+      indexes: [{ retirement: { status: "pending", completedShards: 0 } }],
+    });
+  });
+
+  it("preserves unsigned 64-bit index counters and timestamps", async () => {
+    const maximum = (1n << 64n) - 1n;
+    const response = indexResult();
+    const registry = response.registry as Record<string, unknown>;
+    const index = (response.indexes as Record<string, unknown>[])[0];
+    if (index == null) throw new Error("index fixture must contain one index");
+    const coverage = index.coverage as Record<string, unknown>;
+    const build = index.build as Record<string, unknown>;
+    const validation = index.validation as Record<string, unknown>;
+    const statistics = index.statistics as Record<string, unknown>;
+
+    response.observed_at_ms = maximum;
+    response.statistics_max_age_ms = maximum;
+    registry.epoch = maximum;
+    registry.catalog_version = maximum;
+    index.version = maximum;
+    index.state = "retiring";
+    index.queryable = false;
+    Object.assign(coverage, { complete_shards: maximum, total_shards: maximum });
+    Object.assign(build, {
+      phase_counts: { done: maximum },
+      completed_shards: maximum,
+      total_shards: maximum,
+      scanned_records: maximum,
+      written_entries: maximum,
+      written_bytes: maximum,
+    });
+    Object.assign(validation, {
+      phase_counts: { done: maximum },
+      completed_shards: maximum,
+      total_shards: maximum,
+      checked_records: maximum,
+      checked_entries: maximum,
+      validated_at_ms: maximum,
+    });
+    index.retirement = {
+      status: "complete",
+      phase_counts: { done: maximum },
+      current_phases: ["done"],
+      completed_shards: maximum,
+      total_shards: maximum,
+      deleted_entries: maximum,
+      deleted_bytes: maximum,
+      rewritten_reverse_rows: maximum,
+    };
+    Object.assign(statistics, {
+      samples: maximum,
+      fresh_samples: maximum,
+      stale_samples: 0,
+      future_samples: 0,
+      oldest_collected_at_ms: 0,
+      newest_collected_at_ms: 0,
+      oldest_age_ms: maximum,
+      newest_age_ms: maximum,
+    });
+
+    const status = await new FerricStoreClient(
+      new FakeExecutor([response]),
+    ).queryIndexes();
+
+    expect(status.observedAtMs).toBe(maximum);
+    expect(status.indexes[0]?.build.scannedRecords).toBe(maximum);
+    expect(status.indexes[0]?.validation.validatedAtMs).toBe(maximum);
+    expect(status.indexes[0]?.retirement.deletedEntries).toBe(maximum);
+    expect(status.indexes[0]?.statistics.samples).toBe(maximum);
+  });
+
+  it("rejects inconsistent bounded result accounting and short cursors", async () => {
+    const cases: Record<string, unknown>[] = [
+      { ...recordsResult(), usage: { ...USAGE, hydrated_records: 3 } },
+      { ...recordsResult(), usage: { ...USAGE, duplicate_entries: 3 } },
+      { ...recordsResult(), usage: { ...USAGE, range_pages: 4 } },
+      { ...recordsResult(), usage: { ...USAGE, residual_checks: 25 } },
+      {
+        ...recordsResult(),
+        usage: { ...USAGE, scanned_entries: 1, hydrated_records: 1 },
+      },
+      { ...recordsResult(), page: { has_more: true, cursor: "fqc1_short" } },
+    ];
+    for (const response of cases) {
+      await expect(
+        new FerricStoreClient(new FakeExecutor([response])).query(QUERY, {
+          partition: "tenant-a",
+          type: "invoice",
+        }),
+      ).rejects.toThrow(/usage|cursor/u);
+    }
+  });
+
+  it("preserves non-grammar leading whitespace when building EXPLAIN", async () => {
+    const executor = new FakeExecutor([explainResult("planned")]);
+    const query = "\u00a0FROM runs WHERE run_id = @id RETURN RECORD";
+
+    await new FerricStoreClient(executor).explain(query, { id: "run-1" });
+
+    expect(executor.calls[0]?.[2]).toBe(`EXPLAIN ${query}`);
+  });
+
+  it("does not case-fold Unicode confusables into FQL keywords", () => {
+    expect(hasFlowExplainPrefix("EXPLA\u0131N FROM runs")).toBe(false);
+  });
+
+  it("rejects invalid parameter identifiers and values above 65535 bytes before IO", async () => {
+    const executor = new FakeExecutor([]);
+    const client = new FerricStoreClient(executor);
+    for (const name of ["space name", "unicode_ä", "colon:name", "slash/name"]) {
+      await expect(client.query(QUERY, { [name]: "value" })).rejects.toThrow(
+        /parameter name/u,
+      );
+    }
+    await expect(
+      client.query(QUERY, { value: "x".repeat(65_536) }),
+    ).rejects.toThrow(/65535 bytes/u);
+    await expect(
+      client.query(QUERY, { value: Buffer.alloc(65_536) }),
+    ).rejects.toThrow(/65535 bytes/u);
+    expect(executor.calls).toHaveLength(0);
   });
 
   it("requires bounded covering and format metadata in 0.11 index status", async () => {
