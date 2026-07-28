@@ -428,6 +428,42 @@ await flow.scheduleCreate("orders-every-five-minutes", {
 });
 ```
 
+Overdue interval schedules use bounded `fire_once` catch-up. Recovery creates
+one target, coalesces additional elapsed periods in constant time, and sets the
+next run one full interval after recovery:
+
+```ts
+const schedule = await flow.scheduleCreate("billing-sweep", {
+  catchupPolicy: "fire_once",
+  everyMs: 60_000,
+  kind: "interval",
+  overlapPolicy: "queue_after_previous",
+  target: { id_prefix: "billing-sweep", type: "billing" }
+});
+```
+
+`ScheduleRecord` exposes `catchup_policy`, `coalesced_count`,
+`last_coalesced_count`, `last_catchup_at_ms`, and `last_planning_error` using
+the server's canonical field names. `scheduleFireDue()` returns
+`ScheduleFireDueResult`, including the
+batch `coalesced` total. Its `errors` entries correspond to claimed schedules;
+`claim_error` separately reports a failure to request a later wave after
+completed outcomes were preserved. Catch-up handles scheduler delay; overlap
+policy separately handles a previous target that is still active. `fire_once` is the
+default and only catch-up policy for intervals; other schedule kinds reject it.
+The built-in server scheduler normally owns due execution. Call
+`scheduleFireDue()` only for tests, administration, or a deployment that
+deliberately disables the built-in runner and supplies a custom one.
+
+Recurring targets reject a fixed `id`. Set `id_prefix` to choose their
+generated prefix, or omit it to use the schedule ID. `ScheduleState` includes
+the transient `"running"` state used while the server holds a due-execution
+lease. Bounded catch-up is interval-only; overdue cron schedules advance one
+matching occurrence per successful automatic fire.
+When planning fails, `state` is `"failed"`, `end_reason` is
+`"planning_failed"`, and `last_planning_error` contains the actionable error.
+`scheduleDelete()` resolves to `undefined` only after an `OK` server reply.
+
 FIFO Flow state policy is opt-in per state:
 
 ```ts

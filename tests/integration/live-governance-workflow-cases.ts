@@ -133,7 +133,43 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
       await expect(flow.scheduleResume(scheduleId, { nowMs: now + 9 })).resolves.toBeTypeOf("object");
       await expect(flow.scheduleList({ count: 10 })).resolves.toBeInstanceOf(Array);
       await expect(flow.scheduleFireDue({ limit: 1, nowMs: now + 10 })).resolves.toBeTypeOf("object");
-      await expect(flow.scheduleDelete(scheduleId, { nowMs: now + 11 })).resolves.toBeTypeOf("object");
+      await expect(flow.scheduleDelete(scheduleId, { nowMs: now + 11 })).resolves.toBeUndefined();
+
+      const catchupScheduleId = `ts-sdk:schedule-catchup:${runId}`;
+      const catchupDue = now + 800;
+      const catchupEvery = 5;
+      const catchupRecovery = catchupDue + 10 * catchupEvery;
+      const createdCatchup = await flow.scheduleCreate(catchupScheduleId, {
+        catchupPolicy: "fire_once",
+        everyMs: catchupEvery,
+        kind: "interval",
+        nowMs: now,
+        startAtMs: catchupDue,
+        target: {
+          id_prefix: `ts-sdk:scheduled-catchup:${runId}`,
+          partition_key: partitionKey,
+          state: "scheduled",
+          type
+        }
+      });
+      expect(createdCatchup.catchup_policy).toBe("fire_once");
+
+      const catchupSummary = await flow.scheduleFireDue({
+        limit: 100,
+        nowMs: catchupRecovery,
+        worker: "ts-sdk-catchup-scheduler"
+      });
+      expect(catchupSummary.fired).toBeGreaterThanOrEqual(1);
+      expect(catchupSummary.coalesced).toBeGreaterThanOrEqual(10);
+
+      const storedCatchup = await flow.scheduleGet(catchupScheduleId);
+      expect(storedCatchup).toMatchObject({
+        coalesced_count: 10,
+        fire_count: 1,
+        last_catchup_at_ms: catchupRecovery,
+        last_coalesced_count: 10,
+        next_run_at_ms: catchupRecovery + catchupEvery
+      });
 
       const approvalId = `ts-sdk:approval:${runId}`;
       await expect(flow.approvalRequest(approvalId, {

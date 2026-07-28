@@ -31,8 +31,16 @@ export type {
   LimitListOptions,
   LimitReleaseOptions,
   ScheduleFireDueOptions,
+  ScheduleFireOptions,
+  ScheduleFireDueResult,
+  ScheduleFireResult,
   ScheduleListOptions,
-  ScheduleOptions
+  ScheduleOptions,
+  ScheduleRecord,
+  ScheduleCatchupPolicy,
+  ScheduleKind,
+  ScheduleOverlapPolicy,
+  ScheduleState
 } from "./client-admin-options.js";
 
 export interface FlowBatchCompletedItem {
