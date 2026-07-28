@@ -18,10 +18,10 @@ Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is te
 
 ## Compatibility
 
-SDK `0.5.x` requires FerricStore server `0.11.0` or newer and is tested against
-FerricStore `0.11.3`. FerricStore 0.11 is a breaking beta API contract update,
-while the native wire protocol remains v1 (`FSNP` framing and existing opcode
-numbers are unchanged). Capabilities and response-size limits are negotiated
+TypeScript SDK `0.11.4` requires FerricStore server `0.11.4` or newer because
+schedule responses now use the complete recurrence contract. The native wire
+protocol remains v1 (`FSNP` framing and existing opcode numbers are unchanged).
+Capabilities and response-size limits are negotiated
 per connection from the HELLO-shaped startup response rather than inferred from
 a server version table.
 
@@ -43,7 +43,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.11.3
+  ghcr.io/ferricstore/ferricstore:0.11.4
 ```
 
 ## Query durable runs
@@ -442,9 +442,12 @@ const schedule = await flow.scheduleCreate("billing-sweep", {
 });
 ```
 
-`ScheduleRecord` exposes `catchup_policy`, `coalesced_count`,
-`last_coalesced_count`, `last_catchup_at_ms`, and `last_planning_error` using
-the server's canonical field names. `scheduleFireDue()` returns
+`ScheduleRecord` exposes the complete recurrence configuration through
+`created_at_ms`, `every_ms`, `cron`, `timezone`, `overlap_policy`, and
+`overlap_retry_ms`, in addition to `catchup_policy`, `coalesced_count`,
+`last_coalesced_count`, `last_catchup_at_ms`, and `last_planning_error`, using
+the server's canonical field names. Non-applicable recurrence fields are
+`null`, not omitted. `scheduleFireDue()` returns
 `ScheduleFireDueResult`, including the
 batch `coalesced` total. Its `errors` entries correspond to claimed schedules;
 `claim_error` separately reports a failure to request a later wave after

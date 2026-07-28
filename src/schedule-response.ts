@@ -72,6 +72,16 @@ export function scheduleRecordResponse(value: unknown, context: string): Schedul
     !SCHEDULE_OVERLAP_POLICIES.has(record.overlap_policy)) {
     throw new TypeError(`${context} response missing or invalid overlap_policy`);
   }
+  safeNonNegativeInteger(record, "created_at_ms", context, true);
+  const everyMs = requiredNullableNonNegativeInteger(record, "every_ms", context);
+  const cron = requiredNullableResponseText(record, "cron", context);
+  const timezone = requiredNullableResponseText(record, "timezone", context);
+  const overlapRetryMs = requiredNullableNonNegativeInteger(
+    record,
+    "overlap_retry_ms",
+    context
+  );
+  validateRecurrence(record, context, everyMs, cron, timezone, overlapRetryMs);
   let coalescedCount = 0;
   let lastCoalescedCount = 0;
   for (const field of REQUIRED_SCHEDULE_INTEGER_FIELDS) {
@@ -87,6 +97,46 @@ export function scheduleRecordResponse(value: unknown, context: string): Schedul
   }
   validateCatchupState(record, context, coalescedCount, lastCoalescedCount);
   return record as ScheduleRecord;
+}
+
+function validateRecurrence(
+  record: FlowAdminRecord,
+  context: string,
+  everyMs: number | null,
+  cron: string | null,
+  timezone: string | null,
+  overlapRetryMs: number | null
+): void {
+  if (record.kind === "interval") {
+    if (everyMs == null || everyMs <= 0) {
+      throw new TypeError(`${context} interval every_ms must be positive`);
+    }
+  } else if (everyMs != null) {
+    throw new TypeError(`${context} every_ms is only valid for interval schedules`);
+  }
+
+  if (record.kind === "cron") {
+    if (cron == null) throw new TypeError(`${context} cron schedule is missing cron`);
+    if (timezone == null) throw new TypeError(`${context} cron schedule is missing timezone`);
+  } else if (cron != null) {
+    throw new TypeError(`${context} cron is only valid for cron schedules`);
+  } else if (timezone != null) {
+    throw new TypeError(`${context} timezone is only valid for cron schedules`);
+  }
+
+  if (record.kind !== "interval" && record.kind !== "cron" &&
+    record.overlap_policy !== "allow") {
+    throw new TypeError(`${context} overlap_policy is only valid for recurring schedules`);
+  }
+
+  if (overlapRetryMs != null) {
+    if (overlapRetryMs <= 0) {
+      throw new TypeError(`${context} overlap_retry_ms must be positive`);
+    }
+    if (record.overlap_policy !== "queue_after_previous") {
+      throw new TypeError(`${context} overlap_retry_ms requires queue_after_previous`);
+    }
+  }
 }
 
 function validateCatchupState(
@@ -208,6 +258,31 @@ function optionalResponseText(
     throw new TypeError(`${context} ${field} must be non-empty text`);
   }
   return value;
+}
+
+function requiredNullableResponseText(
+  record: FlowAdminRecord,
+  field: string,
+  context: string
+): string | null {
+  if (!(field in record)) throw new TypeError(`${context} response missing ${field}`);
+  if (record[field] === undefined) {
+    throw new TypeError(`${context} response missing ${field}`);
+  }
+  return optionalResponseText(record, field, context) ?? null;
+}
+
+function requiredNullableNonNegativeInteger(
+  record: FlowAdminRecord,
+  field: string,
+  context: string
+): number | null {
+  if (!(field in record)) throw new TypeError(`${context} response missing ${field}`);
+  if (record[field] === undefined) {
+    throw new TypeError(`${context} response missing ${field}`);
+  }
+  if (record[field] === null) return null;
+  return safeNonNegativeInteger(record, field, context);
 }
 
 function safeNonNegativeInteger(

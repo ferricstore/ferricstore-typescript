@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.3";
+const testedServerVersion = "0.11.4";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -80,9 +80,9 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.5.2");
+    expect(metadata.version).toBe("0.11.4");
     expect(metadata.ferricstore).toEqual({
-      minimumServerVersion: "0.11.0",
+      minimumServerVersion: "0.11.4",
       nativeProtocolVersion: 1
     });
     expect(manifest).toMatchObject({ magic: "FSNP", requestVersion: 1 });
@@ -99,9 +99,9 @@ describe("core compatibility CI", () => {
     );
 
     for (const source of [testWorkflow, releaseWorkflow]) {
-      expect(source).toContain("release-0.11.3");
+      expect(source).toContain("release-0.11.4");
       expect(source).toMatch(
-        /ghcr\.io\/ferricstore\/ferricstore:0\.11\.3@sha256:[0-9a-f]{64}/u
+        /ghcr\.io\/ferricstore\/ferricstore:0\.11\.4@sha256:[0-9a-f]{64}/u
       );
     }
   });
@@ -146,10 +146,10 @@ describe("core compatibility CI", () => {
   });
 
   it("pins parity and pinned-core integration to the reviewed OSS revision", () => {
-    const revision = "21bff730cc206db23413b02a9d32d90008de4492";
+    const revision = "70d77b3cdb4e5b2ddd4500d85c7a234cf19de4da";
     const image =
       `ghcr.io/ferricstore/ferricstore:ci-${revision}` +
-      "@sha256:54c8abb5c584dbfc40b022e48b6d010c2bc8632f44c8e8ff3d83915268f02445";
+      "@sha256:febb2271a24dcf5dc044d366d037b1e2c175796ed1eb3e836ccd2df31c954033";
     const testWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
     const releaseWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/release.yml`, "utf8");
 
@@ -172,7 +172,7 @@ describe("core compatibility CI", () => {
       "u"
     ).exec(compose)?.[0];
 
-    expect(coreRevision).toBe("21bff730cc206db23413b02a9d32d90008de4492");
+    expect(coreRevision).toBe("70d77b3cdb4e5b2ddd4500d85c7a234cf19de4da");
     expect(releaseImage).toBeDefined();
     expect(compose).toMatch(immutableImage);
     expect(integrationJob).toMatch(immutableImage);

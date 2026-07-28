@@ -153,6 +153,13 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
         }
       });
       expect(createdCatchup.catchup_policy).toBe("fire_once");
+      expect(createdCatchup).toMatchObject({
+        created_at_ms: now,
+        cron: null,
+        every_ms: catchupEvery,
+        overlap_retry_ms: null,
+        timezone: null
+      });
 
       const catchupSummary = await flow.scheduleFireDue({
         limit: 100,
@@ -166,9 +173,14 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
       expect(storedCatchup).toMatchObject({
         coalesced_count: 10,
         fire_count: 1,
+        created_at_ms: now,
+        cron: null,
+        every_ms: catchupEvery,
         last_catchup_at_ms: catchupRecovery,
         last_coalesced_count: 10,
-        next_run_at_ms: catchupRecovery + catchupEvery
+        next_run_at_ms: catchupRecovery + catchupEvery,
+        overlap_retry_ms: null,
+        timezone: null
       });
 
       const approvalId = `ts-sdk:approval:${runId}`;

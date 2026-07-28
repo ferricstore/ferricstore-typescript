@@ -10,10 +10,10 @@
 
 <p>Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is tested with Node 22, 24, and 26.</p>
 <h2 id="compatibility" class="tsd-anchor-link">Compatibility<a href="#compatibility" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
-<p>SDK <code>0.5.x</code> requires FerricStore server <code>0.11.0</code> or newer and is tested against
-FerricStore <code>0.11.3</code>. FerricStore 0.11 is a breaking beta API contract update,
-while the native wire protocol remains v1 (<code>FSNP</code> framing and existing opcode
-numbers are unchanged). Capabilities and response-size limits are negotiated
+<p>TypeScript SDK <code>0.11.4</code> requires FerricStore server <code>0.11.4</code> or newer because
+schedule responses now use the complete recurrence contract. The native wire
+protocol remains v1 (<code>FSNP</code> framing and existing opcode numbers are unchanged).
+Capabilities and response-size limits are negotiated
 per connection from the HELLO-shaped startup response rather than inferred from
 a server version table.</p>
 <p>ESM:</p>
@@ -25,7 +25,7 @@ a server version table.</p>
 </code><button type="button">Copy</button></pre>
 
 <h2 id="run-ferricstore-locally" class="tsd-anchor-link">Run FerricStore Locally<a href="#run-ferricstore-locally" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
-<pre><code class="bash"><span class="hl-0">docker</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-5">-p</span><span class="hl-1"> </span><span class="hl-2">6388:6388</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-e</span><span class="hl-1"> </span><span class="hl-2">FERRICSTORE_PROTECTED_MODE=</span><span class="hl-5">false</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-v</span><span class="hl-1"> </span><span class="hl-2">ferricstore_data:/data</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-2">ghcr.io/ferricstore/ferricstore:0.11.3</span>
+<pre><code class="bash"><span class="hl-0">docker</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-5">-p</span><span class="hl-1"> </span><span class="hl-2">6388:6388</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-e</span><span class="hl-1"> </span><span class="hl-2">FERRICSTORE_PROTECTED_MODE=</span><span class="hl-5">false</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-v</span><span class="hl-1"> </span><span class="hl-2">ferricstore_data:/data</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-2">ghcr.io/ferricstore/ferricstore:0.11.4</span>
 </code><button type="button">Copy</button></pre>
 
 <h2 id="query-durable-runs" class="tsd-anchor-link">Query durable runs<a href="#query-durable-runs" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
@@ -219,9 +219,12 @@ next run one full interval after recovery:</p>
 <pre><code class="ts"><span class="hl-5">const</span><span class="hl-1"> </span><span class="hl-6">schedule</span><span class="hl-1"> = </span><span class="hl-3">await</span><span class="hl-1"> </span><span class="hl-4">flow</span><span class="hl-1">.</span><span class="hl-0">scheduleCreate</span><span class="hl-1">(</span><span class="hl-2">&quot;billing-sweep&quot;</span><span class="hl-1">, {</span><br/><span class="hl-1">  </span><span class="hl-4">catchupPolicy:</span><span class="hl-1"> </span><span class="hl-2">&quot;fire_once&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">everyMs:</span><span class="hl-1"> </span><span class="hl-9">60_000</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">kind:</span><span class="hl-1"> </span><span class="hl-2">&quot;interval&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">overlapPolicy:</span><span class="hl-1"> </span><span class="hl-2">&quot;queue_after_previous&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-4">target:</span><span class="hl-1"> { </span><span class="hl-4">id_prefix:</span><span class="hl-1"> </span><span class="hl-2">&quot;billing-sweep&quot;</span><span class="hl-1">, </span><span class="hl-4">type:</span><span class="hl-1"> </span><span class="hl-2">&quot;billing&quot;</span><span class="hl-1"> }</span><br/><span class="hl-1">});</span>
 </code><button type="button">Copy</button></pre>
 
-<p><code>ScheduleRecord</code> exposes <code>catchup_policy</code>, <code>coalesced_count</code>,
-<code>last_coalesced_count</code>, <code>last_catchup_at_ms</code>, and <code>last_planning_error</code> using
-the server's canonical field names. <code>scheduleFireDue()</code> returns
+<p><code>ScheduleRecord</code> exposes the complete recurrence configuration through
+<code>created_at_ms</code>, <code>every_ms</code>, <code>cron</code>, <code>timezone</code>, <code>overlap_policy</code>, and
+<code>overlap_retry_ms</code>, in addition to <code>catchup_policy</code>, <code>coalesced_count</code>,
+<code>last_coalesced_count</code>, <code>last_catchup_at_ms</code>, and <code>last_planning_error</code>, using
+the server's canonical field names. Non-applicable recurrence fields are
+<code>null</code>, not omitted. <code>scheduleFireDue()</code> returns
 <code>ScheduleFireDueResult</code>, including the
 batch <code>coalesced</code> total. Its <code>errors</code> entries correspond to claimed schedules;
 <code>claim_error</code> separately reports a failure to request a later wave after

@@ -6,6 +6,18 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-07-28
+
+### Added
+
+- Decode and validate the complete durable-schedule recurrence response,
+  including creation time, interval period, cron expression, timezone, and
+  overlap retry configuration.
+
+### Changed
+
+- Require FerricStore 0.11.4 while retaining native wire protocol v1.
+
 ## [0.5.2] - 2026-07-27
 
 ### Added

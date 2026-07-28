@@ -15,6 +15,13 @@ export type ScheduleRecord = FlowAdminRecord & {
   kind: ScheduleKind;
   state: ScheduleState;
   target: Record<string, unknown>;
+  created_at_ms: number;
+  /** Interval period, or `null` for non-interval schedules. */
+  every_ms: number | null;
+  /** Cron expression, or `null` for non-cron schedules. */
+  cron: string | null;
+  /** IANA timezone, or `null` for non-cron schedules. */
+  timezone: string | null;
   /** `fire_once` for interval schedules and `null` for other kinds. */
   catchup_policy: ScheduleCatchupPolicy | null;
   /** Cumulative elapsed interval occurrences intentionally not replayed. */
@@ -26,6 +33,8 @@ export type ScheduleRecord = FlowAdminRecord & {
   /** Actionable recurrence error when `end_reason` is `planning_failed`. */
   last_planning_error?: string | null;
   overlap_policy: ScheduleOverlapPolicy;
+  /** Optional retry override for `queue_after_previous`. */
+  overlap_retry_ms: number | null;
   next_run_at_ms?: number | null;
   /** Targets actually created; coalesced occurrences are excluded. */
   fire_count: number;

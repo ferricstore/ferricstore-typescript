@@ -19,12 +19,61 @@ class ResponseExecutor implements CommandExecutor {
   }
 }
 
+function intervalSchedule(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    attempts: 0,
+    catchup_policy: "fire_once",
+    coalesced_count: 0,
+    created_at_ms: 500,
+    cron: null,
+    every_ms: 1_000,
+    fire_count: 0,
+    id: "daily",
+    kind: "interval",
+    last_coalesced_count: 0,
+    overlap_policy: "allow",
+    overlap_retry_ms: null,
+    skipped_count: 0,
+    state: "active",
+    target: { id_prefix: "daily", type: "task" },
+    timezone: null,
+    ...overrides
+  };
+}
+
+function cronSchedule(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return intervalSchedule({
+    catchup_policy: null,
+    cron: "* * * * *",
+    every_ms: null,
+    kind: "cron",
+    timezone: "Etc/UTC",
+    ...overrides
+  });
+}
+
+function oneShotSchedule(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return intervalSchedule({
+    catchup_policy: null,
+    every_ms: null,
+    kind: "one_shot",
+    ...overrides
+  });
+}
+
+function withoutField(record: Record<string, unknown>, field: string): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(record).filter(([key]) => key !== field));
+}
+
 describe("schedule catch-up responses", () => {
   it("types and preserves catch-up schedule fields", async () => {
     const executor = new ResponseExecutor({
       attempts: 0,
       catchup_policy: "fire_once",
       coalesced_count: 12,
+      created_at_ms: 500,
+      cron: null,
+      every_ms: 1_000,
       fire_count: 1,
       id: "daily",
       kind: "interval",
@@ -32,9 +81,11 @@ describe("schedule catch-up responses", () => {
       last_coalesced_count: 4,
       next_run_at_ms: 2_000,
       overlap_policy: "allow",
+      overlap_retry_ms: null,
       skipped_count: 0,
       state: "active",
-      target: { id_prefix: "daily", type: "task" }
+      target: { id_prefix: "daily", type: "task" },
+      timezone: null
     });
     const client = new FerricStoreClient(executor);
 
@@ -47,6 +98,12 @@ describe("schedule catch-up responses", () => {
 
     expect(schedule.catchup_policy).toBe("fire_once");
     expect(schedule.coalesced_count).toBe(12);
+    expectTypeOf(schedule.created_at_ms).toEqualTypeOf<number>();
+    expectTypeOf(schedule.every_ms).toEqualTypeOf<number | null>();
+    expectTypeOf(schedule.cron).toEqualTypeOf<string | null>();
+    expectTypeOf(schedule.overlap_retry_ms).toEqualTypeOf<number | null>();
+    expect(schedule.created_at_ms).toBe(500);
+    expect(schedule.every_ms).toBe(1_000);
     expect(schedule.last_catchup_at_ms).toBe(1_950);
     expect(schedule.last_coalesced_count).toBe(4);
     expect(executor.calls).toEqual([[
@@ -61,6 +118,40 @@ describe("schedule catch-up responses", () => {
       "CATCHUP_POLICY",
       "fire_once"
     ]]);
+  });
+
+  it.each(["created_at_ms", "every_ms", "cron", "timezone", "overlap_retry_ms"])(
+    "rejects an incomplete recurrence response missing %s",
+    async (field) => {
+      const response = withoutField(intervalSchedule(), field);
+      const client = new FerricStoreClient(new ResponseExecutor(response));
+
+      await expect(client.scheduleGet("daily")).rejects.toThrow(field);
+    }
+  );
+
+  it.each(["every_ms", "cron", "timezone", "overlap_retry_ms"])(
+    "rejects a required-nullable recurrence response with undefined %s",
+    async (field) => {
+      const client = new FerricStoreClient(new ResponseExecutor(intervalSchedule({
+        [field]: undefined
+      })));
+
+      await expect(client.scheduleGet("daily")).rejects.toThrow(field);
+    }
+  );
+
+  it.each([
+    [intervalSchedule({ every_ms: 0 }), "every_ms"],
+    [intervalSchedule({ cron: "* * * * *" }), "cron"],
+    [intervalSchedule({ timezone: "Etc/UTC" }), "timezone"],
+    [cronSchedule({ cron: null }), "cron"],
+    [cronSchedule({ timezone: null }), "timezone"],
+    [intervalSchedule({ overlap_retry_ms: 5 }), "overlap_retry_ms"],
+    [oneShotSchedule({ overlap_policy: "skip" }), "overlap_policy"]
+  ])("rejects an inconsistent recurrence response", async (response, field) => {
+    const client = new FerricStoreClient(new ResponseExecutor(response));
+    await expect(client.scheduleGet("daily")).rejects.toThrow(field);
   });
 
   it("returns a typed fire-due coalesced total", async () => {
@@ -94,40 +185,23 @@ describe("schedule catch-up responses", () => {
   });
 
   it("accepts a schedule while its due occurrence is leased", async () => {
-    const client = new FerricStoreClient(new ResponseExecutor({
+    const client = new FerricStoreClient(new ResponseExecutor(intervalSchedule({
       attempts: 1,
-      catchup_policy: "fire_once",
-      coalesced_count: 0,
-      fire_count: 0,
-      id: "daily",
-      kind: "interval",
-      last_coalesced_count: 0,
-      overlap_policy: "allow",
-      skipped_count: 0,
-      state: "running",
-      target: { id_prefix: "daily", type: "task" }
-    }));
+      state: "running"
+    })));
 
     const schedule = await client.scheduleGet("daily");
     expect(schedule?.state).toBe("running");
   });
 
   it("preserves an actionable recurrence planning failure", async () => {
-    const client = new FerricStoreClient(new ResponseExecutor({
+    const client = new FerricStoreClient(new ResponseExecutor(cronSchedule({
       attempts: 1,
-      catchup_policy: null,
-      coalesced_count: 0,
       end_reason: "planning_failed",
-      fire_count: 0,
-      id: "daily",
-      kind: "cron",
-      last_coalesced_count: 0,
       last_planning_error: "ERR invalid recurrence",
-      overlap_policy: "allow",
-      skipped_count: 0,
       state: "failed",
       target: { type: "task" }
-    }));
+    })));
 
     const schedule = await client.scheduleGet("daily");
     expectTypeOf(schedule?.last_planning_error).toEqualTypeOf<string | null | undefined>();
@@ -181,94 +255,23 @@ describe("schedule catch-up responses", () => {
   });
 
   it.each([
+    [withoutField(intervalSchedule(), "kind"), "kind"],
+    [intervalSchedule({ catchup_policy: null }), "catchup_policy"],
+    [cronSchedule({ catchup_policy: "fire_once" }), "catchup_policy"],
+    [withoutField(intervalSchedule(), "fire_count"), "fire_count"],
+    [oneShotSchedule({ coalesced_count: 1 }), "coalesced_count"],
     [
-      {
-        attempts: 0, catchup_policy: null, coalesced_count: 0, fire_count: 0,
-        id: "daily", last_coalesced_count: 0, overlap_policy: "allow",
-        skipped_count: 0, state: "active", target: { type: "task" }
-      },
-      "kind"
-    ],
-    [
-      {
-        attempts: 0, catchup_policy: null, coalesced_count: 0, fire_count: 0,
-        id: "daily", kind: "interval", last_coalesced_count: 0,
-        overlap_policy: "allow", skipped_count: 0, state: "active",
-        target: { id_prefix: "daily", type: "task" }
-      },
-      "catchup_policy"
-    ],
-    [
-      {
-        attempts: 0, catchup_policy: "fire_once", coalesced_count: 0, fire_count: 0,
-        id: "daily", kind: "cron", last_coalesced_count: 0,
-        overlap_policy: "allow", skipped_count: 0, state: "active",
-        target: { id_prefix: "daily", type: "task" }
-      },
-      "catchup_policy"
-    ],
-    [
-      {
-        attempts: 0, catchup_policy: "fire_once", coalesced_count: 0,
-        id: "daily", kind: "interval", last_coalesced_count: 0,
-        overlap_policy: "allow", skipped_count: 0, state: "active",
-        target: { id_prefix: "daily", type: "task" }
-      },
-      "fire_count"
-    ],
-    [
-      {
-        attempts: 0, catchup_policy: null, coalesced_count: 1, fire_count: 0,
-        id: "daily", kind: "one_shot", last_coalesced_count: 0,
-        overlap_policy: "allow", skipped_count: 0, state: "active",
-        target: { type: "task" }
-      },
-      "coalesced_count"
-    ],
-    [
-      {
-        attempts: 0, catchup_policy: "fire_once", coalesced_count: 3,
-        fire_count: 0, id: "daily", kind: "interval", last_catchup_at_ms: 100,
-        last_coalesced_count: 4, overlap_policy: "allow", skipped_count: 0,
-        state: "active", target: { type: "task" }
-      },
+      intervalSchedule({
+        coalesced_count: 3,
+        last_catchup_at_ms: 100,
+        last_coalesced_count: 4
+      }),
       "last_coalesced_count"
     ],
-    [
-      {
-        attempts: 0, catchup_policy: "fire_once", coalesced_count: 1,
-        fire_count: 0, id: "daily", kind: "interval", last_coalesced_count: 1,
-        overlap_policy: "allow", skipped_count: 0, state: "active",
-        target: { type: "task" }
-      },
-      "last_catchup_at_ms"
-    ],
-    [
-      {
-        attempts: 0, catchup_policy: "fire_once", coalesced_count: 0,
-        fire_count: 0, flow_id: 7, id: "daily", kind: "interval",
-        last_coalesced_count: 0, overlap_policy: "allow", skipped_count: 0,
-        state: "active", target: { type: "task" }
-      },
-      "flow_id"
-    ],
-    [
-      {
-        attempts: 0, catchup_policy: "fire_once", coalesced_count: 0,
-        fire_count: 0, id: "daily", kind: "interval", last_coalesced_count: 0,
-        last_target_id: "", overlap_policy: "allow", skipped_count: 0,
-        state: "active", target: { type: "task" }
-      },
-      "last_target_id"
-    ],
-    [
-      {
-        attempts: 0, catchup_policy: "fire_once", coalesced_count: 0,
-        fire_count: 0, id: "daily", kind: "interval", last_coalesced_count: 0,
-        overlap_policy: "allow", skipped_count: 0, state: "active", target: {}
-      },
-      "target type"
-    ]
+    [intervalSchedule({ coalesced_count: 1, last_coalesced_count: 1 }), "last_catchup_at_ms"],
+    [intervalSchedule({ flow_id: 7 }), "flow_id"],
+    [intervalSchedule({ last_target_id: "" }), "last_target_id"],
+    [intervalSchedule({ target: {} }), "target type"]
   ])("rejects malformed canonical schedule records", async (response, message) => {
     const client = new FerricStoreClient(new ResponseExecutor(response));
     await expect(client.scheduleCreate("daily", {
@@ -281,19 +284,7 @@ describe("schedule catch-up responses", () => {
   it("sends lease and explicit manual fire timestamps", async () => {
     const executor = new ResponseExecutor({
       fired: 1,
-      schedule: {
-        attempts: 0,
-        catchup_policy: "fire_once",
-        coalesced_count: 0,
-        fire_count: 1,
-        id: "daily",
-        kind: "interval",
-        last_coalesced_count: 0,
-        overlap_policy: "allow",
-        skipped_count: 0,
-        state: "active",
-        target: { id_prefix: "daily", type: "task" }
-      },
+      schedule: intervalSchedule({ fire_count: 1 }),
       target_id: "daily:900:1"
     });
     const client = new FerricStoreClient(executor);
@@ -322,12 +313,7 @@ describe("schedule catch-up responses", () => {
 
   it("builds schedule lifecycle commands", async () => {
     const calls: unknown[][] = [];
-    const record = {
-      attempts: 0, catchup_policy: null, coalesced_count: 0, fire_count: 0,
-      id: "daily", kind: "cron", last_coalesced_count: 0,
-      overlap_policy: "allow", skipped_count: 0, state: "active",
-      target: { type: "task" }
-    };
+    const record = cronSchedule({ target: { type: "task" } });
     const executor: CommandExecutor = {
       async executeCommand(...args): Promise<unknown> {
         calls.push(args);
@@ -368,12 +354,7 @@ describe("schedule catch-up responses", () => {
     [
       {
         fired: 1,
-        schedule: {
-          attempts: 0, catchup_policy: "fire_once", coalesced_count: 0,
-          fire_count: 1, id: "daily", kind: "interval", last_coalesced_count: 0,
-          overlap_policy: "allow", skipped_count: 0, state: "active",
-          target: { id_prefix: "daily", type: "task" }
-        }
+        schedule: intervalSchedule({ fire_count: 1 })
       },
       "target_id"
     ],
@@ -381,12 +362,7 @@ describe("schedule catch-up responses", () => {
       {
         fired: 0,
         reason: "overlap",
-        schedule: {
-          attempts: 0, catchup_policy: "fire_once", coalesced_count: 0,
-          fire_count: 1, id: "daily", kind: "interval", last_coalesced_count: 0,
-          overlap_policy: "allow", skipped_count: 0, state: "active",
-          target: { id_prefix: "daily", type: "task" }
-        },
+        schedule: intervalSchedule({ fire_count: 1 }),
         skipped: 1,
         target_id: "stale"
       },
@@ -396,12 +372,7 @@ describe("schedule catch-up responses", () => {
       {
         fired: 1,
         reason: "stale",
-        schedule: {
-          attempts: 0, catchup_policy: "fire_once", coalesced_count: 0,
-          fire_count: 1, id: "daily", kind: "interval", last_coalesced_count: 0,
-          overlap_policy: "allow", skipped_count: 0, state: "active",
-          target: { id_prefix: "daily", type: "task" }
-        },
+        schedule: intervalSchedule({ fire_count: 1 }),
         target_id: "daily:1:1"
       },
       "reason"
