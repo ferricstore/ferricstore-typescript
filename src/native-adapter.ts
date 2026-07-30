@@ -203,7 +203,7 @@ export class NativeAdapter implements CommandExecutor {
     options: ExecutePipelineOptions = {}
   ): Promise<unknown[] | undefined> {
     return await executeNativeFusedPipeline(
-      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes
+      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes, this.capabilities.compactStreamXAdd
     );
   }
 
@@ -214,7 +214,7 @@ export class NativeAdapter implements CommandExecutor {
     options: ExecutePipelineOptions = {}
   ): Promise<unknown[]> {
     return await executeNativePipeline(
-      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes
+      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes, this.capabilities.compactStreamXAdd
     );
   }
 

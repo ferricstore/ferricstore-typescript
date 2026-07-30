@@ -30,14 +30,15 @@ export async function executeNativeFusedPipeline(
   laneId: number | undefined,
   options: ExecutePipelineOptions,
   maxPipelineCommands: number,
-  maxRequestFrameBytes: number
+  maxRequestFrameBytes: number,
+  compactStreamXAdd = true
 ): Promise<unknown[] | undefined> {
   commands = snapshotPipelineCommands(commands);
   options = snapshotPipelineOptions(options) ?? options;
   if (commands.length === 0) return [];
   if (maxPipelineCommands === 0 || commands.length > maxPipelineCommands) return undefined;
   try {
-    const pipeline = tryPipelineCommand(commands, maxRequestFrameBytes);
+    const pipeline = tryPipelineCommand(commands, maxRequestFrameBytes, compactStreamXAdd);
     if (pipeline == null) return undefined;
     const response = await host.executeProtocolCommand(pipeline, laneId);
     return unwrapPipelineResponse(response, options, commands.length);
@@ -53,7 +54,8 @@ export async function executeNativePipeline(
   laneId: number | undefined,
   options: ExecutePipelineOptions,
   maxPipelineCommands: number,
-  maxRequestFrameBytes: number
+  maxRequestFrameBytes: number,
+  compactStreamXAdd = true
 ): Promise<unknown[]> {
   commands = snapshotPipelineCommands(commands);
   options = snapshotPipelineOptions(options) ?? options;
@@ -62,7 +64,7 @@ export async function executeNativePipeline(
     return await executeIndividually(host, commands, laneId, pipelineFallbackOptions(commands, options));
   }
   if (commands.length <= maxPipelineCommands) {
-    return await executeChunk(host, commands, laneId, options, maxRequestFrameBytes);
+    return await executeChunk(host, commands, laneId, options, maxRequestFrameBytes, compactStreamXAdd);
   }
 
   const collectingOptions = pipelineErrorCollectingOptions(options);
@@ -75,7 +77,8 @@ export async function executeNativePipeline(
       chunk,
       laneId,
       pipelineSliceOptions(collectingOptions, start, start + chunk.length),
-      maxRequestFrameBytes
+      maxRequestFrameBytes,
+      compactStreamXAdd
     );
     for (let index = 0; index < chunkResults.length; index += 1) results[start + index] = chunkResults[index];
     rejected = collectPipelineRejections(chunkResults, start, rejected);
@@ -89,10 +92,11 @@ async function executeChunk(
   commands: readonly Command[],
   laneId: number | undefined,
   options: ExecutePipelineOptions,
-  maxRequestFrameBytes: number
+  maxRequestFrameBytes: number,
+  compactStreamXAdd: boolean
 ): Promise<unknown[]> {
   try {
-    const pipeline = tryPipelineCommand(commands, maxRequestFrameBytes);
+    const pipeline = tryPipelineCommand(commands, maxRequestFrameBytes, compactStreamXAdd);
     if (pipeline != null) {
       const response = await host.executeProtocolCommand(pipeline, laneId);
       return unwrapPipelineResponse(response, options, commands.length);
@@ -110,14 +114,16 @@ async function executeChunk(
       commands.slice(0, middle),
       laneId,
       pipelineSliceOptions(collectingOptions, 0, middle),
-      maxRequestFrameBytes
+      maxRequestFrameBytes,
+      compactStreamXAdd
     );
     const second = await executeChunk(
       host,
       commands.slice(middle),
       laneId,
       pipelineSliceOptions(collectingOptions, middle, commands.length),
-      maxRequestFrameBytes
+      maxRequestFrameBytes,
+      compactStreamXAdd
     );
     return surfaceFirstPipelineItemError(mergePipelineResults(first, second), options);
   }

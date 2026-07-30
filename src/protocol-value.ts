@@ -251,10 +251,19 @@ function decodeValueAt(
     const count = data.readUInt32BE(offset);
     requireValueContainer(count, depth, limits, budget);
     offset += 4;
-    const values: unknown[] = [];
+    const values = new Array<unknown>(count);
+    if (count === 3) {
+      const first = decodeValueAt(data, offset, limits, budget, depth + 1);
+      const second = decodeValueAt(data, first.offset, limits, budget, depth + 1);
+      const third = decodeValueAt(data, second.offset, limits, budget, depth + 1);
+      values[0] = first.value;
+      values[1] = second.value;
+      values[2] = third.value;
+      return { value: values, offset: third.offset };
+    }
     for (let index = 0; index < count; index += 1) {
       const read = decodeValueAt(data, offset, limits, budget, depth + 1);
-      values.push(read.value);
+      values[index] = read.value;
       offset = read.offset;
     }
     return { value: values, offset };

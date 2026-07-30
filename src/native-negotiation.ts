@@ -6,6 +6,7 @@ export type CompactResponseOpcodes = ReadonlyMap<string, ReadonlySet<number>>;
 
 export interface NativeNegotiation {
   readonly compactResponseOpcodes: CompactResponseOpcodes;
+  readonly compactStreamXAdd: boolean;
   readonly flowQuery: FlowQueryNegotiation;
   readonly maxResponseBytes?: number;
 }
@@ -36,6 +37,8 @@ export function nativeNegotiation(value: unknown): NativeNegotiation {
     compactResponseOpcodes: parseCompactResponseOpcodes(
       field(responseCodecs, "compact_response_opcodes")
     ),
+    compactStreamXAdd:
+      strictUnsigned16(field(field(field(capabilities, "pipeline"), "modes"), "stream_xadd_auto")) === 34,
     flowQuery: parseFlowQueryNegotiation(capabilities, schemas),
     ...(maxResponseBytes == null ? {} : { maxResponseBytes })
   };
