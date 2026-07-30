@@ -18,9 +18,9 @@ Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is te
 
 ## Compatibility
 
-TypeScript SDK `0.11.4` requires FerricStore server `0.11.4` or newer because
-schedule responses now use the complete recurrence contract. The native wire
-protocol remains v1 (`FSNP` framing and existing opcode numbers are unchanged).
+TypeScript SDK `0.11.5` requires FerricStore server `0.11.4` or newer. With
+FerricStore 0.11.5 it negotiates compact Stream mode 34 for homogeneous auto-ID
+`XADD` pipelines. Native wire protocol v1 and the generic fallback are unchanged.
 Capabilities and response-size limits are negotiated
 per connection from the HELLO-shaped startup response rather than inferred from
 a server version table.

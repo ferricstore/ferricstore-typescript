@@ -4,6 +4,7 @@ import type { Command, CommandArgument } from "./internal.js";
 import {
   assertCompactPayloadFits,
   commandNameIs,
+  commandTokenIs,
   compactBinaryByteLength,
   compactPayloadFits,
   isCompactBinaryScalar,
@@ -74,7 +75,8 @@ export function compactKeyPipelinePayload(
 
 export function compactPipelinePayload(
   commands: readonly Command[],
-  maxBodyBytes: number
+  maxBodyBytes: number,
+  allowStreamXAdd = true
 ): Buffer | undefined {
   if (commands.length === 0) {
     assertCompactPayloadFits(6, maxBodyBytes);
@@ -87,7 +89,68 @@ export function compactPipelinePayload(
   }
   if (commandNameIs(commands[0]?.[0], "SET")) return compactSetPipelinePayload(commands, maxBodyBytes);
   if (commandNameIs(commands[0]?.[0], "GET")) return compactGetPipelinePayload(commands, maxBodyBytes);
+  if (commandNameIs(commands[0]?.[0], "XADD")) {
+    return allowStreamXAdd ? compactStreamXAddPipelinePayload(commands, maxBodyBytes) : undefined;
+  }
   return undefined;
+}
+
+function compactStreamXAddPipelinePayload(
+  commands: readonly Command[],
+  maxBodyBytes: number
+): Buffer | undefined {
+  let argumentCount = 0;
+  let minimum = 6;
+  for (const command of commands) {
+    if (!Array.isArray(command)) {
+      throw new TypeError("pipeline commands must be a dense array of command arrays");
+    }
+    if (command.length < 5 || (command.length - 3) % 2 !== 0) return undefined;
+    for (let argumentIndex = 0; argumentIndex < command.length; argumentIndex += 1) {
+      if (!Object.hasOwn(command, argumentIndex)) {
+        throw new TypeError("pipeline command arguments must be dense");
+      }
+    }
+    if (!commandTokenIs(command[0], "XADD") || !commandTokenIs(command[2], "*")) return undefined;
+    if ((command.length - 3) / 2 > 0xffff) return undefined;
+    for (let argumentIndex = 1; argumentIndex < command.length; argumentIndex += 1) {
+      if (argumentIndex !== 2 && !isCompactBinaryScalar(command[argumentIndex])) return undefined;
+    }
+    argumentCount += command.length - 2;
+    minimum += 2 + (command.length - 2) * 4;
+  }
+  assertCompactPayloadFits(minimum, maxBodyBytes);
+
+  const byteLengths = new Uint32Array(argumentCount);
+  let lengthIndex = 0;
+  let total = 6;
+  for (const command of commands) {
+    total += 2;
+    for (let argumentIndex = 1; argumentIndex < command.length; argumentIndex += 1) {
+      if (argumentIndex === 2) continue;
+      const value = command[argumentIndex];
+      const byteLength = compactBinaryByteLength(value);
+      byteLengths[lengthIndex] = byteLength;
+      lengthIndex += 1;
+      total += 4 + byteLength;
+    }
+  }
+  assertCompactPayloadFits(total, maxBodyBytes);
+
+  const out = Buffer.allocUnsafe(total);
+  let offset = writeCompactPipelineHeader(out, 0x80 | 34, commands.length);
+  lengthIndex = 0;
+  for (const command of commands) {
+    offset = writeBinaryValue(out, offset, command[1], byteLengths[lengthIndex] ?? 0);
+    lengthIndex += 1;
+    out.writeUInt16BE((command.length - 3) / 2, offset);
+    offset += 2;
+    for (let argumentIndex = 3; argumentIndex < command.length; argumentIndex += 1) {
+      offset = writeBinaryValue(out, offset, command[argumentIndex], byteLengths[lengthIndex] ?? 0);
+      lengthIndex += 1;
+    }
+  }
+  return out;
 }
 
 function compactSetPipelinePayload(commands: readonly Command[], maxBodyBytes: number): Buffer | undefined {

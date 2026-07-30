@@ -6,6 +6,16 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-07-30
+
+### Changed
+
+- Negotiate FerricStore 0.11.5's compact Stream producer capability and encode
+  homogeneous `XADD key * field value...` pipelines with mode 34. Legacy
+  servers, explicit IDs, trimming, `NOMKSTREAM`, malformed pairs, and
+  unsupported values retain the generic pipeline path.
+- Retain FerricStore 0.11.4 as the minimum server and native wire protocol v1.
+
 ## [0.11.4] - 2026-07-28
 
 ### Added
