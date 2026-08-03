@@ -203,8 +203,8 @@ export class NativeAdapter implements CommandExecutor {
     options: ExecutePipelineOptions = {}
   ): Promise<unknown[] | undefined> {
     return await executeNativeFusedPipeline(
-      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes, this.capabilities.compactStreamXAdd
-    );
+      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes,
+      this.capabilities.compactStreamXAdd, this.capabilities.compactPubSubPublish);
   }
 
   /** @internal Execute an ordered pipeline on a topology-selected lane. */
@@ -214,8 +214,8 @@ export class NativeAdapter implements CommandExecutor {
     options: ExecutePipelineOptions = {}
   ): Promise<unknown[]> {
     return await executeNativePipeline(
-      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes, this.capabilities.compactStreamXAdd
-    );
+      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes,
+      this.capabilities.compactStreamXAdd, this.capabilities.compactPubSubPublish);
   }
 
   async close(): Promise<void> {
