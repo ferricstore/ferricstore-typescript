@@ -347,9 +347,15 @@ export function buildProtocolCommand(
 export function tryPipelineCommand(
   commands: readonly Command[],
   maxBodyBytes = Number.MAX_SAFE_INTEGER,
-  allowStreamXAdd = true
+  allowStreamXAdd = true,
+  allowPubSubPublish = true
 ): wire.ProtocolCommand | undefined {
-  const compact = compactPipelinePayload(commands, maxBodyBytes, allowStreamXAdd);
+  const compact = compactPipelinePayload(
+    commands,
+    maxBodyBytes,
+    allowStreamXAdd,
+    allowPubSubPublish,
+  );
   if (compact != null) {
     return {
       compactResponseItems: commands.length,

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.4";
+const testedServerVersion = "0.11.5";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -37,6 +37,7 @@ describe("release workflow", () => {
     expect(isolated).toContain("npm, [\"run\", \"integration:down\"]");
     for (const file of [
       "tests/integration/live.test.ts",
+      "tests/integration/live-pubsub-pipeline.test.ts",
       "tests/integration/live-store-flow.test.ts",
       "tests/integration/live-governance-workflow.test.ts"
     ]) {
@@ -146,10 +147,10 @@ describe("core compatibility CI", () => {
   });
 
   it("pins parity and pinned-core integration to the reviewed OSS revision", () => {
-    const revision = "70d77b3cdb4e5b2ddd4500d85c7a234cf19de4da";
+    const revision = "014997467189c292f7a15b7ca605d514adcd8df2";
     const image =
       `ghcr.io/ferricstore/ferricstore:ci-${revision}` +
-      "@sha256:febb2271a24dcf5dc044d366d037b1e2c175796ed1eb3e836ccd2df31c954033";
+      "@sha256:2dc91388959a308947e762081bc447feaa2a5f6846d56de9e05aca17ce2f57f7";
     const testWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
     const releaseWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/release.yml`, "utf8");
 
@@ -172,7 +173,7 @@ describe("core compatibility CI", () => {
       "u"
     ).exec(compose)?.[0];
 
-    expect(coreRevision).toBe("70d77b3cdb4e5b2ddd4500d85c7a234cf19de4da");
+    expect(coreRevision).toBe("014997467189c292f7a15b7ca605d514adcd8df2");
     expect(releaseImage).toBeDefined();
     expect(compose).toMatch(immutableImage);
     expect(integrationJob).toMatch(immutableImage);

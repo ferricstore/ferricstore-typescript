@@ -4,6 +4,7 @@ const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const groups = [
   ["core SDK", "tests/integration/live.test.ts"],
   ["compact Stream multi-topic pipeline", "tests/integration/live-stream-pipeline.test.ts"],
+  ["compact Pub/Sub pipeline", "tests/integration/live-pubsub-pipeline.test.ts"],
   ["Flow retention cleanup", "tests/integration/live-retention.test.ts"],
   ["Flow query planner", "tests/integration/live-query.test.ts"],
   [

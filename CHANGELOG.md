@@ -6,7 +6,7 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
-## [0.11.5] - 2026-07-30
+## [0.11.5] - 2026-08-03
 
 ### Changed
 
@@ -14,6 +14,9 @@ The format is based on Keep a Changelog, and this project follows semver once it
   homogeneous `XADD key * field value...` pipelines with mode 34. Legacy
   servers, explicit IDs, trimming, `NOMKSTREAM`, malformed pairs, and
   unsupported values retain the generic pipeline path.
+- Negotiate compact Pub/Sub mode 35 and encode homogeneous `PUBLISH` pipelines
+  without typed command maps. Servers without the capability retain the generic
+  pipeline path.
 - Retain FerricStore 0.11.4 as the minimum server and native wire protocol v1.
 
 ## [0.11.4] - 2026-07-28
