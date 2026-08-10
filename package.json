@@ -83,11 +83,11 @@
     "@emnapi/core": "^1.11.1",
     "@emnapi/runtime": "^1.11.1",
     "@eslint/js": "^10.0.1",
-    "@types/node": "^22.20.0",
+    "@types/node": "^26.1.2",
     "eslint": "^10.4.1",
     "tsup": "^8.5.1",
     "typedoc": "^0.28.19",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.60.1",
     "vitest": "^4.1.8"
   }
