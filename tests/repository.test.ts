@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.5";
+const testedServerVersion = "0.11.6";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -81,7 +81,7 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.11.5");
+    expect(metadata.version).toBe("0.11.6");
     expect(metadata.ferricstore).toEqual({
       minimumServerVersion: "0.11.4",
       nativeProtocolVersion: 1
@@ -167,9 +167,9 @@ describe("core compatibility CI", () => {
     const releaseIntegrationJob = workflowJob(releaseWorkflow, "integration");
     const compose = readFileSync(`${repositoryRoot}/docker-compose.yml`, "utf8");
     const coreRevision = /ref:\s*([0-9a-f]{40})/u.exec(parityJob)?.[1];
-    const immutableImage = /ghcr\.io\/ferricstore\/ferricstore:[^\s}"']+@sha256:[0-9a-f]{64}/gu;
+    const immutableImage = /quay\.io\/ferricstore\/ferricstore:[^\s}"']+@sha256:[0-9a-f]{64}/gu;
     const releaseImage = new RegExp(
-      `ghcr\\.io/ferricstore/ferricstore:${testedServerVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
+      `quay\\.io/ferricstore/ferricstore:${testedServerVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
       "u"
     ).exec(compose)?.[0];
 
@@ -216,7 +216,7 @@ describe("core compatibility CI", () => {
       "utf8"
     );
     const releaseImage = new RegExp(
-      `ghcr\\.io/ferricstore/ferricstore:${testedServerVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
+      `quay\\.io/ferricstore/ferricstore:${testedServerVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
       "u"
     ).exec(readFileSync(`${repositoryRoot}/docker-compose.yml`, "utf8"))?.[0];
 

@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.11.6] - 2026-08-19
+
+### Changed
+
+- Validate the unchanged native protocol v1 and FerricStore 0.11.4
+  compatibility floor against FerricStore 0.11.6.
+- Move live integration from GHCR to the immutable FerricStore 0.11.6 image on
+  Quay.io.
+- Refresh transitive development dependencies to resolve the `brace-expansion`
+  and `nanoid` denial-of-service advisories enforced by the publish gate.
+
 ## [0.11.5] - 2026-08-03
 
 ### Changed
