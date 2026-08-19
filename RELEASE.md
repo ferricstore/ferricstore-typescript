@@ -17,7 +17,7 @@ Releases are published to npm from GitHub Actions when a version tag is pushed.
 4. Create a signed tag:
 
    ```bash
-   git tag -s v0.11.5 -m "v0.11.5"
+   git tag -s v0.11.6 -m "v0.11.6"
    git push origin main --tags
    ```
 
