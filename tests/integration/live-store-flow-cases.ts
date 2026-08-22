@@ -1,6 +1,5 @@
 import { expect, it } from "vitest";
 import {
-  FerricStoreClient,
   JsonCodec,
   RawCodec
 } from "../../src/index.js";
@@ -13,15 +12,15 @@ import {
   expectSupportedOrKnownServerError,
   fenced,
   field,
+  integrationClient,
   ok,
   suffix,
   text,
-  url
 } from "./live-support.js";
 
 export function registerStoreFlowIntegrationTests(): void {
   it("covers typed native store families", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
+    const flow = await integrationClient({ codec: new RawCodec() });
     const runId = suffix();
     const prefix = `ts-sdk:store:{${runId}}:`;
 
@@ -224,7 +223,7 @@ export function registerStoreFlowIntegrationTests(): void {
   }, 30_000);
 
   it("covers native probabilistic helpers", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
+    const flow = await integrationClient({ codec: new RawCodec() });
     const runId = suffix();
     const prefix = `ts-sdk:prob:{${runId}}:`;
 
@@ -294,7 +293,7 @@ export function registerStoreFlowIntegrationTests(): void {
   });
 
   it("covers Flow state-machine repair and index commands", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const flow = await integrationClient({ codec: new JsonCodec() });
     const runId = suffix();
     const type = `ts-sdk-flow-${runId}`;
     const now = Date.now();

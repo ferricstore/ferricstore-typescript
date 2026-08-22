@@ -6,6 +6,25 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.11.9] - 2026-08-22
+
+### Added
+
+- Add stateless HTTP and HTTPS transports behind the existing command, Flow,
+  and pipeline APIs while retaining native TCP as the default.
+- Reuse HTTP/1.1 keep-alive connections and multiplexed HTTP/2 sessions with
+  TLS authentication, retained redirect headers, bounded envelopes, and
+  whole-request deadlines.
+
+### Changed
+
+- Encode typed Flow commands through transport-neutral native descriptors,
+  reject connection-affine operations locally, and cover the exact 67-command
+  Flow surface against FerricStore HTTP and OSS 0.11.9.
+- Refresh compatible development dependencies while retaining the Node 22.22
+  runtime floor, FerricStore 0.11.4 native compatibility floor, and native wire
+  protocol v1.
+
 ## [0.11.8] - 2026-08-22
 
 ### Fixed
