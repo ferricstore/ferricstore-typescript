@@ -18,8 +18,8 @@ Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is te
 
 ## Compatibility
 
-TypeScript SDK `0.11.6` requires FerricStore server `0.11.4` or newer. With
-FerricStore 0.11.6 it negotiates compact Stream mode 34 for homogeneous auto-ID
+TypeScript SDK `0.11.7` requires FerricStore server `0.11.4` or newer. With
+FerricStore 0.11.8 it negotiates compact Stream mode 34 for homogeneous auto-ID
 `XADD` pipelines and compact Pub/Sub mode 35 for homogeneous `PUBLISH`
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
 Capabilities and response-size limits are negotiated
@@ -44,7 +44,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  quay.io/ferricstore/ferricstore:0.11.6
+  quay.io/ferricstore/ferricstore:0.11.8
 ```
 
 ## Query durable runs
