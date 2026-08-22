@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.7";
+const testedServerVersion = "0.11.8";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");

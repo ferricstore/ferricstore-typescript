@@ -11,7 +11,7 @@ The format is based on Keep a Changelog, and this project follows semver once it
 ### Changed
 
 - Validate the unchanged native protocol v1 and FerricStore 0.11.4
-  compatibility floor against FerricStore 0.11.7, including authenticated and
+  compatibility floor against FerricStore 0.11.8, including authenticated and
   isolated integration coverage.
 - Keep the existing native TCP command, pipeline, topology, Pub/Sub, and Flow
   query behavior unchanged while FerricStore adds transport-neutral gateway
