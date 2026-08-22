@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { expect } from "vitest";
 import {
   FerricStoreClient,
+  type FerricStoreClientFromUrlOptions,
   type ClaimedItem,
   type FencedItem,
   type FlowRecord
@@ -10,6 +12,32 @@ import {
 
 export function url(): string {
   return process.env.FERRICSTORE_URL ?? "ferric://127.0.0.1:6388";
+}
+
+export async function integrationClient(
+  options: FerricStoreClientFromUrlOptions = {}
+): Promise<FerricStoreClient> {
+  const target = url();
+  if (!target.startsWith("http://") && !target.startsWith("https://")) {
+    return await FerricStoreClient.fromUrl(target, options);
+  }
+  const password = process.env.FERRICSTORE_PASSWORD;
+  if (password == null || password === "") throw new Error("FERRICSTORE_PASSWORD is required for HTTP integration");
+  const caFile = process.env.FERRICSTORE_CA_FILE;
+  return await FerricStoreClient.fromUrl(target, {
+    ...options,
+    reconnect: false,
+    httpOptions: {
+      ...(options.httpOptions ?? {}),
+      http2: process.env.FERRICSTORE_HTTP2 !== "false",
+      password,
+      tlsOptions: {
+        ...(options.httpOptions?.tlsOptions ?? {}),
+        ...(caFile == null || caFile === "" ? {} : { ca: readFileSync(caFile) })
+      },
+      username: process.env.FERRICSTORE_USERNAME ?? "default"
+    }
+  });
 }
 
 export function suffix(): string {
@@ -94,7 +122,12 @@ export async function expectSupportedOrKnownServerError<T>(
 
 export function field(source: unknown, name: string): unknown {
   if (source instanceof Map) {
-    return source.get(name) ?? source.get(Buffer.from(name));
+    if (source.has(name)) return source.get(name);
+    const expected = Buffer.from(name);
+    for (const [key, value] of source.entries()) {
+      if ((Buffer.isBuffer(key) || key instanceof Uint8Array) && Buffer.from(key).equals(expected)) return value;
+    }
+    return undefined;
   }
   if (typeof source === "object" && source != null) {
     const record = source as Record<string, unknown>;

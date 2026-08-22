@@ -7,6 +7,7 @@ import {
   type CommandArgument
 } from "./internal.js";
 import { NativeAdapter } from "./adapters.js";
+import { HTTPAdapter } from "./http-adapter.js";
 import { ReconnectingExecutor } from "./reconnecting-executor.js";
 import { TopologyNativeAdapterPool } from "./topology.js";
 import {
@@ -117,6 +118,14 @@ import { snapshotFencedItem, snapshotFlowManyOptions } from "./flow-many-snapsho
 export class FerricStoreClient extends FerricStoreProducerClient {
   static async fromUrl(url: string, options: FerricStoreClientFromUrlOptions = {}): Promise<FerricStoreClient> {
     const clientOptions = snapshotClientOptions(options);
+    const scheme = new URL(url).protocol;
+    if (scheme === "http:" || scheme === "https:") {
+      if (clientOptions.nativeOptions != null) {
+        throw new TypeError("nativeOptions are not valid for an HTTP FerricStore URL");
+      }
+      const executor = await HTTPAdapter.fromUrl(url, clientOptions.httpOptions);
+      return new FerricStoreClient(executor, clientOptions);
+    }
     const nativeOptions = snapshotNativeClientOptions(clientOptions.nativeOptions ?? {});
     const reconnectOptions = clientOptions.reconnect ?? nativeOptions.autoReconnect ?? true;
     const seeds = nativeOptions.seeds ?? [];

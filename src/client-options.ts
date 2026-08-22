@@ -1,5 +1,6 @@
 import type { Codec } from "./codecs.js";
 import type { NativeClientOptions, ReconnectOptions } from "./adapters.js";
+import type { HTTPAdapterOptions } from "./http-options.js";
 import type { CommandArgument } from "./internal.js";
 import type {
   BackpressurePolicy,
@@ -73,6 +74,7 @@ export interface FerricStoreClientOptions {
 }
 
 export interface FerricStoreClientFromUrlOptions extends FerricStoreClientOptions {
+  httpOptions?: HTTPAdapterOptions;
   nativeOptions?: NativeClientOptions;
   reconnect?: boolean | ReconnectOptions;
 }

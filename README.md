@@ -90,6 +90,40 @@ const projected = projectFlowQuery(
 const result = await client.query(projected, { partition: "partition-a", run: "run-1" });
 ```
 
+## HTTP transport
+
+`fromUrl` accepts `http://` and `https://` without changing the command API.
+HTTP/1.1 uses a persistent keep-alive pool. Set `http2: true` to use one
+multiplexed HTTP/2 session per origin:
+
+```ts
+const client = await FerricStoreClient.fromUrl(
+  "https://ferricstore-http.example.com",
+  {
+    httpOptions: {
+      username: "default",
+      password,
+      http2: true
+    }
+  }
+);
+
+await client.ping();
+```
+
+Use `bearerToken` for Bearer authentication. Basic username/password
+authentication requires HTTPS; omitting the username uses `default`. One SDK
+pipeline becomes one ordered HTTP request. `httpOptions` also bounds request
+and response bytes, batch items, HTTP/1.1 connections, redirects, and the whole
+request deadline.
+
+The HTTP endpoint is stateless. `AUTH`, `CLIENT`, transactions, Pub/Sub
+subscriptions, blocking list/stream reads, and `WATCH` require native TCP and
+fail before network I/O. Redirects intentionally retain authentication and
+custom headers across origins, so configure only endpoints and redirect targets
+you trust. Use `ferric://` or `ferrics://` whenever connection-local behavior is
+required.
+
 ## Cluster-aware client
 
 For a single node, use `fromUrl`. For a FerricStore cluster, pass multiple seed URLs. The SDK fetches the server `SHARDS` topology, routes keyed commands to the current shard leader, and refuses learned hosts outside the seed-host trust set by default. The creation promise resolves only after startup and authentication succeed; cluster creation also waits for the initial topology, so connection failures reject the corresponding `await` directly.
