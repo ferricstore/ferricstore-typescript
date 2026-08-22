@@ -81,7 +81,7 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.11.7");
+    expect(metadata.version).toBe("0.11.8");
     expect(metadata.ferricstore).toEqual({
       minimumServerVersion: "0.11.4",
       nativeProtocolVersion: 1
@@ -190,6 +190,19 @@ describe("core compatibility CI", () => {
 
     expect(protocol).toContain('from "./native-protocol-manifest.json"');
     expect(readiness).toContain('from "../src/native-protocol-manifest.json"');
+  });
+
+  it("waits for the ACL catalog projection before starting integration tests", () => {
+    const readiness = readFileSync(`${repositoryRoot}/scripts/wait-for-ferricstore.mjs`, "utf8");
+
+    expect(readiness).toContain("const OP_COMMAND_EXEC = 0x0100");
+    expect(readiness).toContain("const OP_CLUSTER_HEALTH = 0x0301");
+    expect(readiness).toContain("const REQUIRED_READY_SAMPLES = 3");
+    expect(readiness).toContain('command: "ACL"');
+    expect(readiness).toContain('args: ["WHOAMI"]');
+    expect(readiness).toContain('sendRequest(socket, OP_CLUSTER_HEALTH');
+    expect(readiness).toContain('field(capabilities, "flow_query")');
+    expect(readiness).toContain('"ferric.flow.query.request/v1"');
   });
 
   it("grants native bootstrap controls to the scoped query integration user", () => {

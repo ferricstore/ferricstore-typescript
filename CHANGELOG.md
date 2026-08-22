@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.11.8] - 2026-08-22
+
+### Fixed
+
+- Wait for native query capabilities, healthy shards, and ACL projection
+  readiness across consecutive fresh connections before starting live tests.
+- Treat the fail-closed ACL catalog reconciliation window after `ACL LOAD` as
+  a bounded workflow transition without masking unrelated permission errors.
+
 ## [0.11.7] - 2026-08-22
 
 ### Changed
