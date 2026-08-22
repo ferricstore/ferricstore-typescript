@@ -12,7 +12,7 @@
 <h1>Interface HTTPAdapterOptions</h1></div>
 <div class="tsd-signature"><span class="tsd-signature-keyword">interface</span> <span class="tsd-kind-interface">HTTPAdapterOptions</span> <span class="tsd-signature-symbol">{</span><br/>    <a class="tsd-kind-property" href="#bearertoken">bearerToken</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#headers">headers</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">Readonly</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">Record</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#http2">http2</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#maxbatchitems">maxBatchItems</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#maxconnections">maxConnections</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#maxredirects">maxRedirects</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#maxrequestbytes">maxRequestBytes</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#maxresponsebytes">maxResponseBytes</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#password">password</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#timeoutms">timeoutMs</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#tlsoptions">tlsOptions</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">ConnectionOptions</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#username">username</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/><span class="tsd-signature-symbol">}</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L3">src/http-options.ts:3</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L5">src/http-options.ts:5</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -40,62 +40,66 @@
 <h3 class="tsd-anchor-link" id="bearertoken"><code class="tsd-tag">Optional</code><span>bearer<wbr/>Token</span><a href="#bearertoken" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">bearerToken</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L4">src/http-options.ts:4</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L6">src/http-options.ts:6</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="headers"><code class="tsd-tag">Optional</code><span>headers</span><a href="#headers" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">headers</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">Readonly</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">Record</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">&gt;</span><span class="tsd-signature-symbol">&gt;</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L5">src/http-options.ts:5</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L7">src/http-options.ts:7</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="http2"><code class="tsd-tag">Optional</code><span>http2</span><a href="#http2" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">http2</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L6">src/http-options.ts:6</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L8">src/http-options.ts:8</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="maxbatchitems"><code class="tsd-tag">Optional</code><span>max<wbr/>Batch<wbr/>Items</span><a href="#maxbatchitems" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">maxBatchItems</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L7">src/http-options.ts:7</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L9">src/http-options.ts:9</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="maxconnections"><code class="tsd-tag">Optional</code><span>max<wbr/>Connections</span><a href="#maxconnections" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
-<div class="tsd-signature"><span class="tsd-kind-property">maxConnections</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
+<div class="tsd-signature"><span class="tsd-kind-property">maxConnections</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div>
+<div class="tsd-comment tsd-typography"><p>Maximum HTTP/1.1 sockets or concurrent streams on one HTTP/2 session. Defaults to 100.</p>
+</div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L8">src/http-options.ts:8</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L11">src/http-options.ts:11</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="maxredirects"><code class="tsd-tag">Optional</code><span>max<wbr/>Redirects</span><a href="#maxredirects" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">maxRedirects</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L9">src/http-options.ts:9</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L12">src/http-options.ts:12</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="maxrequestbytes"><code class="tsd-tag">Optional</code><span>max<wbr/>Request<wbr/>Bytes</span><a href="#maxrequestbytes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">maxRequestBytes</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L10">src/http-options.ts:10</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L13">src/http-options.ts:13</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="maxresponsebytes"><code class="tsd-tag">Optional</code><span>max<wbr/>Response<wbr/>Bytes</span><a href="#maxresponsebytes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">maxResponseBytes</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L11">src/http-options.ts:11</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L14">src/http-options.ts:14</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="password"><code class="tsd-tag">Optional</code><span>password</span><a href="#password" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">password</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L12">src/http-options.ts:12</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L15">src/http-options.ts:15</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="timeoutms"><code class="tsd-tag">Optional</code><span>timeout<wbr/>Ms</span><a href="#timeoutms" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
-<div class="tsd-signature"><span class="tsd-kind-property">timeoutMs</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
+<div class="tsd-signature"><span class="tsd-kind-property">timeoutMs</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div>
+<div class="tsd-comment tsd-typography"><p>Base whole-request deadline. Command-declared blocking waits are added; a zero block disables it.</p>
+</div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L13">src/http-options.ts:13</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L17">src/http-options.ts:17</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="tlsoptions"><code class="tsd-tag">Optional</code><span>tls<wbr/>Options</span><a href="#tlsoptions" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">tlsOptions</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">ConnectionOptions</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L14">src/http-options.ts:14</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L18">src/http-options.ts:18</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="username"><code class="tsd-tag">Optional</code><span>username</span><a href="#username" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">username</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L15">src/http-options.ts:15</a></li></ul></aside></section></section></details></div>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/http-options.ts#L19">src/http-options.ts:19</a></li></ul></aside></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">

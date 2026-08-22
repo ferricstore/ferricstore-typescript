@@ -350,6 +350,9 @@ describe("native protocol codec", () => {
     expect(buildProtocolCommand(["BLMOVE", "source", "target", "LEFT", "RIGHT", 3]).serverBlockMs).toBe(3_000);
     expect(buildProtocolCommand(["BRPOPLPUSH", "source", "target", 4]).serverBlockMs).toBe(4_000);
     expect(buildProtocolCommand(["BLMPOP", 0.25, 1, "queue", "LEFT"]).serverBlockMs).toBe(250);
+    expect(buildProtocolCommand(["BZMPOP", 0.5, 1, "scores", "MIN"]).serverBlockMs).toBe(500);
+    expect(buildProtocolCommand(["BZPOPMAX", "scores", 0.75]).serverBlockMs).toBe(750);
+    expect(buildProtocolCommand(["BZPOPMIN", "scores", 1.25]).serverBlockMs).toBe(1_250);
     expect(buildProtocolCommand(["XREAD", "COUNT", 1, "BLOCK", 400, "STREAMS", "events", "$"]).serverBlockMs).toBe(400);
     expect(buildProtocolCommand([
       "XREADGROUP",
@@ -403,6 +406,9 @@ describe("native protocol codec", () => {
       ["BRPOPLPUSH", "source", "target", 1],
       ["BLMOVE", "source", "target", "LEFT", "RIGHT", 1],
       ["BLMPOP", 1, 1, "queue", "LEFT"],
+      ["BZMPOP", 1, 1, "scores", "MIN"],
+      ["BZPOPMAX", "scores", 1],
+      ["BZPOPMIN", "scores", 1],
       ["XREAD", "BLOCK", 100, "STREAMS", "events", "$"],
       ["XREADGROUP", "GROUP", "workers", "worker-1", "BLOCK", 100, "STREAMS", "events", ">"]
     ] as const;

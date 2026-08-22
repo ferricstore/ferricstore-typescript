@@ -20,8 +20,8 @@
 
 <p>Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is tested with Node 22, 24, and 26.</p>
 <h2 id="compatibility" class="tsd-anchor-link">Compatibility<a href="#compatibility" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
-<p>TypeScript SDK <code>0.11.9</code> requires FerricStore server <code>0.11.4</code> or newer. With
-FerricStore 0.11.8 it negotiates compact Stream mode 34 for homogeneous auto-ID
+<p>TypeScript SDK <code>0.11.10</code> requires FerricStore server <code>0.11.4</code> or newer. With
+FerricStore 0.11.10 it negotiates compact Stream mode 34 for homogeneous auto-ID
 <code>XADD</code> pipelines and compact Pub/Sub mode 35 for homogeneous <code>PUBLISH</code>
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
 Capabilities and response-size limits are negotiated
@@ -36,7 +36,7 @@ a server version table.</p>
 </code><button type="button">Copy</button></pre>
 
 <h2 id="run-ferricstore-locally" class="tsd-anchor-link">Run FerricStore Locally<a href="#run-ferricstore-locally" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
-<pre><code class="bash"><span class="hl-0">docker</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-5">-p</span><span class="hl-1"> </span><span class="hl-2">6388:6388</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-e</span><span class="hl-1"> </span><span class="hl-2">FERRICSTORE_PROTECTED_MODE=</span><span class="hl-5">false</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-v</span><span class="hl-1"> </span><span class="hl-2">ferricstore_data:/data</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-2">quay.io/ferricstore/ferricstore:0.11.8</span>
+<pre><code class="bash"><span class="hl-0">docker</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-5">-p</span><span class="hl-1"> </span><span class="hl-2">6388:6388</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-e</span><span class="hl-1"> </span><span class="hl-2">FERRICSTORE_PROTECTED_MODE=</span><span class="hl-5">false</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-v</span><span class="hl-1"> </span><span class="hl-2">ferricstore_data:/data</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-2">quay.io/ferricstore/ferricstore:0.11.10@sha256:3af390b7429ea3fea2983938eb7adcdd3e8005d06c67473f769f29ebd48e8ab3</span>
 </code><button type="button">Copy</button></pre>
 
 <h2 id="query-durable-runs" class="tsd-anchor-link">Query durable runs<a href="#query-durable-runs" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
@@ -70,13 +70,19 @@ multiplexed HTTP/2 session per origin:</p>
 <p>Use <code>bearerToken</code> for Bearer authentication. Basic username/password
 authentication requires HTTPS; omitting the username uses <code>default</code>. One SDK
 pipeline becomes one ordered HTTP request. <code>httpOptions</code> also bounds request
-and response bytes, batch items, HTTP/1.1 connections, redirects, and the whole
-request deadline.</p>
+and response bytes, batch items, HTTP/1.1 sockets or concurrent HTTP/2 streams,
+redirects, and the whole request deadline. HTTP/2 honors the peer's advertised
+stream limit and queues excess work locally within the same deadline.</p>
 <p>The HTTP endpoint is stateless. <code>AUTH</code>, <code>CLIENT</code>, transactions, Pub/Sub
-subscriptions, blocking list/stream reads, and <code>WATCH</code> require native TCP and
-fail before network I/O. Redirects intentionally retain authentication and
-custom headers across origins, so configure only endpoints and redirect targets
-you trust. Use <code>ferric://</code> or <code>ferrics://</code> whenever connection-local behavior is
+subscriptions, session state, and cluster/replication session controls require
+native TCP and fail before network I/O. Blocking list, sorted-set, and stream
+reads remain supported as long-lived HTTP requests, including inside an explicit
+ordered pipeline. Their declared server waits are added to the ordinary
+whole-request deadline; a zero block disables the SDK request deadline until the
+request completes or the client closes. Independently submitted blocking calls
+are not auto-coalesced. Redirects intentionally retain authentication and custom
+headers across origins, so configure only endpoints and redirect targets you
+trust. Use <code>ferric://</code> or <code>ferrics://</code> whenever connection-local behavior is
 required.</p>
 <h2 id="cluster-aware-client" class="tsd-anchor-link">Cluster-aware client<a href="#cluster-aware-client" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
 <p>For a single node, use <code>fromUrl</code>. For a FerricStore cluster, pass multiple seed URLs. The SDK fetches the server <code>SHARDS</code> topology, routes keyed commands to the current shard leader, and refuses learned hosts outside the seed-host trust set by default. The creation promise resolves only after startup and authentication succeed; cluster creation also waits for the initial topology, so connection failures reject the corresponding <code>await</code> directly.</p>

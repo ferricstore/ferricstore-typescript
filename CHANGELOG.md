@@ -6,6 +6,32 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.11.10] - 2026-08-23
+
+### Fixed
+
+- Abort active and pool-queued HTTP work when the client closes, and retain
+  correct deadlines above Node's single-timer limit.
+- Queue HTTP/2 streams behind both client and peer concurrency limits, replace
+  GOAWAY sessions without stale cleanup races, and disable server push.
+- Enforce every declared native-only command locally, preserve binary command
+  names, bound request encoding before large intermediate allocations, and
+  harden response records and `Retry-After` metadata.
+- Keep single-request blocking list and stream reads available over HTTP while
+  reserving only connection-affine command families for native TCP.
+- Extend HTTP deadlines by finite server-block intervals, disable the response
+  deadline for zero-block requests, and cover `BZMPOP` and blocking sorted-set
+  variants in the shared transport metadata.
+- Keep `ASKING`, `PSYNC`, `REPLCONF`, and `SYNC` on native TCP because their
+  cluster or replication state cannot be represented by stateless HTTP calls.
+
+### Changed
+
+- Validate the unchanged native wire protocol v1, native TCP command and Flow
+  surfaces, and HTTP transport policy against the immutable multi-architecture
+  FerricStore 0.11.10 release while retaining FerricStore 0.11.4 as the minimum
+  compatible server.
+
 ## [0.11.9] - 2026-08-22
 
 ### Added

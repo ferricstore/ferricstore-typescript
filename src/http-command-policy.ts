@@ -1,9 +1,13 @@
+import { Buffer } from "node:buffer";
+import { InvalidCommandError } from "./errors.js";
+
 const nativeOnlyCommands = new Set([
   "AUTH",
   "BACKPRESSURE",
   "CLIENT",
   "CLIENT.INFO",
   "CLIENT.SETNAME",
+  "COMMAND_EXEC",
   "EVENT",
   "GOAWAY",
   "HELLO",
@@ -20,26 +24,31 @@ const nativeOnlyCommands = new Set([
 ]);
 
 const sessionOnlyCommands = new Set([
+  "ASKING",
   "AUTH",
-  "BLMOVE",
-  "BLMPOP",
-  "BLPOP",
-  "BRPOP",
   "CLIENT",
   "DISCARD",
   "EXEC",
   "HELLO",
+  "MONITOR",
   "MULTI",
   "PSUBSCRIBE",
+  "PSYNC",
   "PUNSUBSCRIBE",
   "QUIT",
+  "READONLY",
+  "READWRITE",
+  "REPLCONF",
+  "RESET",
+  "SANDBOX",
   "SELECT",
+  "SSUBSCRIBE",
   "SUBSCRIBE",
+  "SUNSUBSCRIBE",
+  "SYNC",
   "UNSUBSCRIBE",
   "UNWATCH",
-  "WATCH",
-  "XREAD",
-  "XREADGROUP"
+  "WATCH"
 ]);
 
 export type HTTPCommandDisposition = "supported" | "native_only";
@@ -52,8 +61,20 @@ export function httpCommandDisposition(name: string): HTTPCommandDisposition {
 }
 
 export function assertHTTPCommandSupported(name: unknown): void {
-  if (typeof name !== "string" || name === "") throw new TypeError("HTTP command must have a name");
-  if (sessionOnlyCommands.has(name.toUpperCase())) {
-    throw new Error(`${name.toUpperCase()} requires a persistent native TCP session`);
+  const normalized = normalizedCommandName(name);
+  if (normalized == null || normalized === "") throw new TypeError("HTTP command must have a name");
+  if (sessionOnlyCommands.has(normalized)) {
+    throw new InvalidCommandError(`${normalized} requires a persistent native TCP session`);
   }
+  if (nativeOnlyCommands.has(normalized)) {
+    throw new InvalidCommandError(`${normalized} is a native TCP transport control command`);
+  }
+}
+
+function normalizedCommandName(value: unknown): string | undefined {
+  if (typeof value === "string") return value.toUpperCase();
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    return Buffer.from(value).toString("utf8").toUpperCase();
+  }
+  return undefined;
 }

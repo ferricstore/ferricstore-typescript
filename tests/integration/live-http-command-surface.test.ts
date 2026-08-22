@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { COMMAND_OPCODES, httpCommandDisposition, RawCodec } from "../../src/index.js";
 import { integrationClient, url } from "./live-support.js";
 
-describe("FerricStore HTTP command integration", () => {
+const httpIntegration = /^https?:\/\//u.test(url());
+
+describe.runIf(httpIntegration)("FerricStore HTTP command integration", () => {
   it("accepts the complete typed Flow command catalog", async () => {
     expect(url()).toMatch(/^https?:\/\//u);
     const commands = [...Object.keys(COMMAND_OPCODES), "FLOW.QUERY.INDEXES"]

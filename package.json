@@ -1,6 +1,6 @@
 {
   "name": "@ferricstore/ferricstore",
-  "version": "0.11.9",
+  "version": "0.11.10",
   "description": "TypeScript SDK for FerricStore and FerricFlow",
   "type": "module",
   "license": "Apache-2.0",

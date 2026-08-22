@@ -12,6 +12,7 @@ import {
   type HTTPAdapterOptions
 } from "./http-options.js";
 import { HTTPTransport } from "./http-transport.js";
+import { combinedServerBlockMs, serverResponseTimeoutMs } from "./server-response-timeout.js";
 
 interface HTTPResult {
   readonly error?: unknown;
@@ -72,11 +73,16 @@ export class HTTPAdapter implements CommandExecutor {
       throw new HTTPTransportError("HTTP command batch exceeds maxBatchItems");
     }
     for (const command of commands) assertHTTPCommandSupported(command[0]);
-    const body = encodeHTTPCommands(commands.map((command) => httpCommand(command, this.#config.maxRequestBytes)));
+    const prepared = commands.map((command) => prepareHTTPCommand(command, this.#config.maxRequestBytes));
+    const body = encodeHTTPCommands(prepared.map((command) => command.encoded), this.#config.maxRequestBytes);
     if (body.byteLength > this.#config.maxRequestBytes) {
       throw new HTTPTransportError("HTTP command request exceeds maxRequestBytes");
     }
-    const response = await this.#transport.post(body);
+    const serverBlockMs = combinedServerBlockMs(prepared.map((command) => command.serverBlockMs));
+    const response = await this.#transport.post(
+      body,
+      serverResponseTimeoutMs(this.#config.timeoutMs, serverBlockMs)
+    );
     let envelope: Record<string, unknown> = {};
     try {
       if (response.body.byteLength > 0) envelope = decodeHTTPEnvelope(response.body);
@@ -99,12 +105,25 @@ const commandNamesByOpcode = new Map<number, string>(
   Object.entries(COMMAND_OPCODES).map(([name, opcode]) => [opcode, name])
 );
 
-function httpCommand(command: readonly CommandArgument[], maxRequestBytes: number): unknown {
+interface PreparedHTTPCommand {
+  readonly encoded: unknown;
+  readonly serverBlockMs?: number;
+}
+
+function prepareHTTPCommand(
+  command: readonly CommandArgument[],
+  maxRequestBytes: number
+): PreparedHTTPCommand {
   const protocol = buildProtocolCommand(command, maxRequestBytes, false);
-  if (protocol.opcode === OPCODES.commandExec) return command;
+  if (protocol.opcode === OPCODES.commandExec) {
+    return { encoded: command, serverBlockMs: protocol.serverBlockMs };
+  }
   const name = commandNamesByOpcode.get(protocol.opcode);
   if (name == null) throw new HTTPTransportError(`HTTP command has unknown opcode ${protocol.opcode}`);
-  return { command: name, opcode: protocol.opcode, payload: protocol.payload ?? {} };
+  return {
+    encoded: { command: name, opcode: protocol.opcode, payload: protocol.payload ?? {} },
+    serverBlockMs: protocol.serverBlockMs
+  };
 }
 
 function validatedResult(value: unknown): HTTPResult {
@@ -131,9 +150,7 @@ function topLevelError(status: number, envelope: Record<string, unknown>, retryA
   const message = typeof details.message === "string"
     ? details.message
     : `HTTP command request failed with status ${status}`;
-  const retryAfterMs = retryAfter == null || !/^\d+$/u.test(retryAfter)
-    ? undefined
-    : Number(retryAfter) * 1_000;
+  const retryAfterMs = retryAfterMilliseconds(retryAfter);
   return new HTTPTransportError(message, {
     raw: details,
     retryable: status === 408 || status === 425 || status === 429 || status >= 500,
@@ -141,6 +158,19 @@ function topLevelError(status: number, envelope: Record<string, unknown>, retryA
     safeToRetry: false,
     statusCode: status
   });
+}
+
+function retryAfterMilliseconds(value: string | undefined): number | undefined {
+  if (value == null) return undefined;
+  if (/^\d+$/u.test(value)) {
+    const seconds = Number.parseInt(value, 10);
+    const milliseconds = seconds * 1_000;
+    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
+  }
+  const deadline = Date.parse(value);
+  if (!Number.isFinite(deadline)) return undefined;
+  const milliseconds = Math.max(0, deadline - Date.now());
+  return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
