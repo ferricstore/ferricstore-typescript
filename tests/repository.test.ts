@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.6";
+const testedServerVersion = "0.11.7";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -81,7 +81,7 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.11.6");
+    expect(metadata.version).toBe("0.11.7");
     expect(metadata.ferricstore).toEqual({
       minimumServerVersion: "0.11.4",
       nativeProtocolVersion: 1

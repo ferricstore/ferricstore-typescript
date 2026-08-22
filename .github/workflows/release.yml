@@ -17,8 +17,8 @@ jobs:
         include:
           - server: release-0.11.4
             image: ghcr.io/ferricstore/ferricstore:0.11.4@sha256:ee49d39e3b15cd6298537a88818647e71bcfc7571921e88bcf3a201311c690fc
-          - server: release-0.11.6
-            image: quay.io/ferricstore/ferricstore:0.11.6@sha256:0d615217030ecfc3bb21109109d4dd23fd615b994d2e3b28e037692dce937fdf
+          - server: release-0.11.7
+            image: quay.io/ferricstore/ferricstore:0.11.7@sha256:4e54e6846e168eb52deb24fb780edeb8c5bc94907812958cfd7ba048c657eedf
           - server: pinned-core
             image: ghcr.io/ferricstore/ferricstore:ci-014997467189c292f7a15b7ca605d514adcd8df2@sha256:2dc91388959a308947e762081bc447feaa2a5f6846d56de9e05aca17ce2f57f7
     env:
@@ -32,13 +32,13 @@ jobs:
       - run: npm ci
       - run: npm run test:integration:isolated
       - name: Build SDK for throughput smoke
-        if: ${{ matrix.server == 'release-0.11.6' }}
+        if: ${{ matrix.server == 'release-0.11.7' }}
         run: npm run build
       - name: Start release server for throughput smoke
-        if: ${{ matrix.server == 'release-0.11.6' }}
+        if: ${{ matrix.server == 'release-0.11.7' }}
         run: npm run integration:up
       - name: Acknowledged response throughput smoke
-        if: ${{ matrix.server == 'release-0.11.6' }}
+        if: ${{ matrix.server == 'release-0.11.7' }}
         run: >-
           npm run bench:kv -- --command set --request-mode direct
           --requests 1000 --pipeline 1 --clients 4 --inflight-batches 8
@@ -52,7 +52,7 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     env:
-      FERRICSTORE_IMAGE: quay.io/ferricstore/ferricstore:0.11.6@sha256:0d615217030ecfc3bb21109109d4dd23fd615b994d2e3b28e037692dce937fdf
+      FERRICSTORE_IMAGE: quay.io/ferricstore/ferricstore:0.11.7@sha256:4e54e6846e168eb52deb24fb780edeb8c5bc94907812958cfd7ba048c657eedf
       FERRICSTORE_AUTH_PASSWORD: ts-sdk-integration-secret
       FERRICSTORE_AUTH_URL: ferric://default:ts-sdk-integration-secret@127.0.0.1:6388
     steps:
