@@ -22,7 +22,8 @@ import {
   isReadonlyArray,
   suffix,
   text,
-  url
+  url,
+  waitForAclProjection
 } from "./live-support.js";
 
 const nativeProtocolCommands = new Set<string>(
@@ -1017,10 +1018,13 @@ describe("FerricStore integration", () => {
       );
       if (aclWhoami != null) expect(aclWhoami).toBe("default");
       await expectSupportedOrKnownServerError(flow.aclSave());
-      await expectSupportedOrKnownServerError(
+      const aclLoad = await expectSupportedOrKnownServerError(
         flow.aclLoad(),
         /unsupported|unknown|not supported|not enabled|invalid|no config file|connection closed/i
       );
+      if (aclLoad != null) {
+        await expect(waitForAclProjection(async () => await flow.aclWhoami())).resolves.toBe("default");
+      }
       await expectSupportedOrKnownServerError(flow.aclDelUser(`ts-sdk-${runId}`));
       await expect(flow.auth("bad-password")).rejects.toThrow(/stable single connection/i);
       await expect(flow.clusterHealth()).resolves.toBeTypeOf("object");

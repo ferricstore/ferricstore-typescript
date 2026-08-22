@@ -41,6 +41,30 @@ export async function eventually<T>(
   throw new Error(message, { cause: lastError ?? lastValue });
 }
 
+export async function waitForAclProjection<T>(
+  operation: () => Promise<T>,
+  options: { readonly intervalMs?: number; readonly timeoutMs?: number } = {}
+): Promise<T> {
+  const deadline = performance.now() + (options.timeoutMs ?? 5_000);
+  const intervalMs = options.intervalMs ?? 25;
+  let lastError: Error | undefined;
+
+  while (performance.now() < deadline) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!(error instanceof Error) ||
+          !/^(?:NOPERM|LOADING) ACL catalog projection unavailable$/i.test(error.message)) {
+        throw error;
+      }
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error("ACL catalog projection did not become ready", { cause: lastError });
+}
+
 export function text(value: unknown): string {
   if (Buffer.isBuffer(value)) {
     return value.toString("utf8");
