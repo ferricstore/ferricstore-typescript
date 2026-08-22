@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+import { validateHeaderName, validateHeaderValue } from "node:http";
 import type { ConnectionOptions } from "node:tls";
 
 export interface HTTPAdapterOptions {
@@ -5,11 +7,13 @@ export interface HTTPAdapterOptions {
   headers?: Readonly<Record<string, string>>;
   http2?: boolean;
   maxBatchItems?: number;
+  /** Maximum HTTP/1.1 sockets or concurrent streams on one HTTP/2 session. Defaults to 100. */
   maxConnections?: number;
   maxRedirects?: number;
   maxRequestBytes?: number;
   maxResponseBytes?: number;
   password?: string;
+  /** Base whole-request deadline. Command-declared blocking waits are added; a zero block disables it. */
   timeoutMs?: number;
   tlsOptions?: ConnectionOptions;
   username?: string;
@@ -54,10 +58,12 @@ export function normalizeHTTPOptions(value: string, options: HTTPAdapterOptions)
 }
 
 function normalizedHeaders(source: Readonly<Record<string, string>>): Record<string, string> {
-  const headers: Record<string, string> = {};
+  // Header names such as `__proto__` are valid HTTP tokens. A null-prototype
+  // record preserves them as data instead of invoking Object.prototype setters.
+  const headers = Object.create(null) as Record<string, string>;
   for (const [rawName, value] of Object.entries(source)) {
     const name = rawName.toLowerCase();
-    if (name === "" || !safeHeader(name) || !safeHeader(value)) {
+    if (typeof value !== "string" || !validHeader(name, value)) {
       throw new TypeError(`invalid HTTP header: ${rawName}`);
     }
     headers[name] = value;
@@ -74,7 +80,9 @@ function authorizationHeader(
   const count = Number(custom != null) + Number(options.bearerToken != null) + Number(basic);
   if (count > 1) throw new TypeError("HTTP credentials are mutually exclusive");
   if (options.bearerToken != null) {
-    if (!safeHeader(options.bearerToken)) throw new TypeError("invalid bearer token");
+    if (options.bearerToken === "" || !validHeader("authorization", `Bearer ${options.bearerToken}`)) {
+      throw new TypeError("invalid bearer token");
+    }
     return `Bearer ${options.bearerToken}`;
   }
   if (!basic) return custom;
@@ -107,4 +115,14 @@ function booleanOption(value: boolean | undefined, fallback: boolean, name: stri
 
 function safeHeader(value: string): boolean {
   return !value.includes("\r") && !value.includes("\n");
+}
+
+function validHeader(name: string, value: string): boolean {
+  try {
+    validateHeaderName(name);
+    validateHeaderValue(name, value);
+    return true;
+  } catch {
+    return false;
+  }
 }

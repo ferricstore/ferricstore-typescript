@@ -1,5 +1,25 @@
 # FerricStore TypeScript SDK benchmark results
 
+Release-validation and CI throughput smoke tests use the immutable
+multi-architecture OSS image
+`quay.io/ferricstore/ferricstore:0.11.10@sha256:3af390b7429ea3fea2983938eb7adcdd3e8005d06c67473f769f29ebd48e8ab3`.
+
+The KV harness also measures the HTTP transports through the same acknowledged
+command and pipeline paths. Credentials are read from the environment so they
+do not appear in the process list:
+
+```bash
+FERRICSTORE_USERNAME=worker FERRICSTORE_PASSWORD=secret npm run bench:kv -- \
+  --url https://127.0.0.1:8443 --http2 --ca-file ./ca.pem \
+  --command set --requests 32000 --pipeline 1 --clients 64 \
+  --inflight-batches 8 --http-max-connections 100 --pretty
+```
+
+Omit `--http2` for HTTP/1.1 keep-alive, or use
+`FERRICSTORE_BEARER_TOKEN` instead of Basic credentials. Compare only matching
+server, TLS, command, payload, and concurrency shapes; HTTP results include the
+HTTP gateway hop and are not directly comparable to the native figures below.
+
 Environment:
 - Machine: local macOS development machine
 - Server: `ghcr.io/ferricstore/ferricstore:0.5.2` via `docker compose`

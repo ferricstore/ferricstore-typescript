@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.8";
+const testedServerVersion = "0.11.10";
+const testedServerImage =
+  "quay.io/ferricstore/ferricstore:0.11.10" +
+  "@sha256:3af390b7429ea3fea2983938eb7adcdd3e8005d06c67473f769f29ebd48e8ab3";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -81,7 +84,7 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.11.9");
+    expect(metadata.version).toBe("0.11.10");
     expect(metadata.ferricstore).toEqual({
       minimumServerVersion: "0.11.4",
       nativeProtocolVersion: 1
@@ -174,7 +177,7 @@ describe("core compatibility CI", () => {
     ).exec(compose)?.[0];
 
     expect(coreRevision).toBe("014997467189c292f7a15b7ca605d514adcd8df2");
-    expect(releaseImage).toBeDefined();
+    expect(releaseImage).toBe(testedServerImage);
     expect(compose).toMatch(immutableImage);
     expect(integrationJob).toMatch(immutableImage);
     expect(integrationJob).toContain(releaseImage ?? "missing-release-image");
@@ -234,7 +237,7 @@ describe("core compatibility CI", () => {
     ).exec(readFileSync(`${repositoryRoot}/docker-compose.yml`, "utf8"))?.[0];
 
     for (const authenticatedJob of [job, releaseJob]) {
-      expect(releaseImage).toBeDefined();
+      expect(releaseImage).toBe(testedServerImage);
       expect(authenticatedJob).toContain(releaseImage ?? "missing-release-image");
       expect(authenticatedJob).toContain("node scripts/bootstrap-integration-auth.mjs");
       expect(authenticatedJob).toContain("npm run test:integration:deployment");

@@ -18,8 +18,8 @@ Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is te
 
 ## Compatibility
 
-TypeScript SDK `0.11.9` requires FerricStore server `0.11.4` or newer. With
-FerricStore 0.11.8 it negotiates compact Stream mode 34 for homogeneous auto-ID
+TypeScript SDK `0.11.10` requires FerricStore server `0.11.4` or newer. With
+FerricStore 0.11.10 it negotiates compact Stream mode 34 for homogeneous auto-ID
 `XADD` pipelines and compact Pub/Sub mode 35 for homogeneous `PUBLISH`
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
 Capabilities and response-size limits are negotiated
@@ -44,7 +44,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  quay.io/ferricstore/ferricstore:0.11.8
+  quay.io/ferricstore/ferricstore:0.11.10@sha256:3af390b7429ea3fea2983938eb7adcdd3e8005d06c67473f769f29ebd48e8ab3
 ```
 
 ## Query durable runs
@@ -114,14 +114,20 @@ await client.ping();
 Use `bearerToken` for Bearer authentication. Basic username/password
 authentication requires HTTPS; omitting the username uses `default`. One SDK
 pipeline becomes one ordered HTTP request. `httpOptions` also bounds request
-and response bytes, batch items, HTTP/1.1 connections, redirects, and the whole
-request deadline.
+and response bytes, batch items, HTTP/1.1 sockets or concurrent HTTP/2 streams,
+redirects, and the whole request deadline. HTTP/2 honors the peer's advertised
+stream limit and queues excess work locally within the same deadline.
 
 The HTTP endpoint is stateless. `AUTH`, `CLIENT`, transactions, Pub/Sub
-subscriptions, blocking list/stream reads, and `WATCH` require native TCP and
-fail before network I/O. Redirects intentionally retain authentication and
-custom headers across origins, so configure only endpoints and redirect targets
-you trust. Use `ferric://` or `ferrics://` whenever connection-local behavior is
+subscriptions, session state, and cluster/replication session controls require
+native TCP and fail before network I/O. Blocking list, sorted-set, and stream
+reads remain supported as long-lived HTTP requests, including inside an explicit
+ordered pipeline. Their declared server waits are added to the ordinary
+whole-request deadline; a zero block disables the SDK request deadline until the
+request completes or the client closes. Independently submitted blocking calls
+are not auto-coalesced. Redirects intentionally retain authentication and custom
+headers across origins, so configure only endpoints and redirect targets you
+trust. Use `ferric://` or `ferrics://` whenever connection-local behavior is
 required.
 
 ## Cluster-aware client
