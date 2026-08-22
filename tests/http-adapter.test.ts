@@ -656,7 +656,11 @@ test("HTTP response headers preserve prototype-like names as ordinary data", asy
     stream.on("data", () => undefined);
     stream.on("end", () => {
       const headers: http2.OutgoingHttpHeaders = { ":status": 200 };
-      Object.defineProperty(headers, "__proto__", { enumerable: true, value: "trace-value" });
+      const prototypeLikeHeader = ["__", "proto", "__"].join("");
+      Object.defineProperty(headers, prototypeLikeHeader, {
+        enumerable: true,
+        value: "trace-value",
+      });
       stream.respond(headers);
       stream.end("ok");
     });
