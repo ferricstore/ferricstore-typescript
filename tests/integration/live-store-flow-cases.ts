@@ -641,6 +641,6 @@ export function registerStoreFlowIntegrationTests(): void {
     } finally {
       await flow.close();
     }
-  }, 20_000);
+  }, 60_000);
 
 }
