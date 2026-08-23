@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { expect } from "vitest";
 import {
+  HTTPAdapter,
   FerricStoreClient,
+  NativeAdapter,
+  type CommandExecutor,
   type FerricStoreClientFromUrlOptions,
   type ClaimedItem,
   type FencedItem,
@@ -12,6 +15,10 @@ import {
 
 export function url(): string {
   return process.env.FERRICSTORE_URL ?? "ferric://127.0.0.1:6388";
+}
+
+export function httpIntegration(): boolean {
+  return url().startsWith("http://") || url().startsWith("https://");
 }
 
 export async function integrationClient(
@@ -37,6 +44,20 @@ export async function integrationClient(
       },
       username: process.env.FERRICSTORE_USERNAME ?? "default"
     }
+  });
+}
+
+export async function integrationExecutor(): Promise<CommandExecutor & { close(): Promise<void> }> {
+  const target = url();
+  if (!httpIntegration()) return await NativeAdapter.fromUrl(target);
+  const password = process.env.FERRICSTORE_PASSWORD;
+  if (password == null || password === "") throw new Error("FERRICSTORE_PASSWORD is required for HTTP integration");
+  const caFile = process.env.FERRICSTORE_CA_FILE;
+  return await HTTPAdapter.fromUrl(target, {
+    http2: process.env.FERRICSTORE_HTTP2 !== "false",
+    password,
+    tlsOptions: caFile == null || caFile === "" ? {} : { ca: readFileSync(caFile) },
+    username: process.env.FERRICSTORE_USERNAME ?? "default"
   });
 }
 

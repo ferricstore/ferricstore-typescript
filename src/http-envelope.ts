@@ -5,6 +5,7 @@ const encoding = "ferricstore-json-v1";
 const bytesMarker = "$ferricstore_bytes";
 const mapMarker = "$ferricstore_map";
 const maxDepth = 64;
+const integerJSON = /^-?(?:0|[1-9][0-9]*)$/u;
 const bytesMarkerBaseBytes = Buffer.byteLength(bytesMarker) + 7;
 // {"$ferricstore_map":[]} is the smallest JSON representation of a map.
 // Keep this a lower bound: over-estimating here could reject a request whose
@@ -29,12 +30,24 @@ export function encodeHTTPCommands(
 export function decodeHTTPEnvelope(source: Buffer): Record<string, unknown> {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(source.toString("utf8"));
+    parsed = JSON.parse(source.toString("utf8"), preserveIntegerPrecision);
   } catch (error) {
     throw new TypeError("invalid HTTP command response JSON", { cause: error });
   }
   if (!isRecord(parsed)) throw new TypeError("HTTP command response must be an object");
   return decodePlainRecord(parsed, 0);
+}
+
+function preserveIntegerPrecision(
+  _key: string,
+  value: unknown,
+  context?: { readonly source: string }
+): unknown {
+  if (typeof value !== "number" || Number.isSafeInteger(value) || !Number.isInteger(value)) {
+    return value;
+  }
+  const literal = context?.source;
+  return literal != null && integerJSON.test(literal) ? BigInt(literal) : value;
 }
 
 function encodeValue(value: unknown, depth: number, budget: EncodeBudget): unknown {

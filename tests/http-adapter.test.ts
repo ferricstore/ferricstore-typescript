@@ -9,7 +9,7 @@ import {
   COMMAND_OPCODES,
   httpCommandDisposition
 } from "../src/index.js";
-import { encodeHTTPCommands } from "../src/http-envelope.js";
+import { decodeHTTPEnvelope, encodeHTTPCommands } from "../src/http-envelope.js";
 import { normalizeHTTPOptions } from "../src/http-options.js";
 import { HTTPTransport } from "../src/http-transport.js";
 
@@ -23,6 +23,16 @@ afterEach(async () => {
     if (!server.listening) return;
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }));
+});
+
+test("HTTP JSON decoding preserves integers outside JavaScript's safe range", () => {
+  const envelope = decodeHTTPEnvelope(Buffer.from(
+    '{"results":[{"status":"ok","value":9007199254740993},{"status":"ok","value":-9007199254740993}]}'
+  ));
+  expect(envelope.results).toEqual([
+    { status: "ok", value: 9_007_199_254_740_993n },
+    { status: "ok", value: -9_007_199_254_740_993n }
+  ]);
 });
 
 test("HTTP transport preserves binary values and the command API", async () => {
@@ -458,6 +468,7 @@ test("every native command has an explicit HTTP disposition and session commands
     }
     for (const command of [
       "ASKING", "AUTH", "CLIENT", "DISCARD", "EXEC", "HELLO", "MONITOR", "MULTI",
+      "FETCH_OR_COMPUTE", "FETCH_OR_COMPUTE_ERROR", "FETCH_OR_COMPUTE_RESULT",
       "PSUBSCRIBE", "PSYNC", "PUNSUBSCRIBE", "QUIT", "READONLY", "READWRITE", "REPLCONF",
       "RESET", "SANDBOX", "SELECT", "SSUBSCRIBE", "SUBSCRIBE", "SUNSUBSCRIBE", "SYNC",
       "UNSUBSCRIBE", "UNWATCH", "WATCH"

@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  FerricStoreClient,
   FlowQueryError,
   FlowProjection,
   JsonCodec,
   projectFlowQuery
 } from "../../src/index.js";
 import { registerFlowQueryConvenienceIntegrationTests } from "./live-query-convenience-cases.js";
-import { eventually, field, suffix, text, url } from "./live-support.js";
+import { eventually, field, integrationClient, suffix, text } from "./live-support.js";
 
 const PAGE_QUERY =
   "FROM runs WHERE partition_key = @partition AND type = @type AND state = @state " +
@@ -31,7 +30,7 @@ const INVALID_QUERY =
 
 describe("FerricStore 0.11 query planner integration", () => {
   it("covers pagination, count, explain, index status, diagnostics, and conveniences", async () => {
-    const client = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const client = await integrationClient({ codec: new JsonCodec() });
     const run = suffix();
     const partition = `ts-sdk:query:${run}:partition`;
     const type = `ts-sdk-query-${run}`;
