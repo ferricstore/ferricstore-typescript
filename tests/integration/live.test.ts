@@ -1027,7 +1027,9 @@ describe("FerricStore integration", () => {
       if (aclLoad != null) {
         await expect(waitForAclProjection(async () => await flow.aclWhoami())).resolves.toBe("default");
       }
-      await expectSupportedOrKnownServerError(flow.aclDelUser(`ts-sdk-${runId}`));
+      await expectSupportedOrKnownServerError(
+        waitForAclProjection(async () => await flow.aclDelUser(`ts-sdk-${runId}`))
+      );
       await expect(flow.auth("bad-password")).rejects.toThrow(/stable single connection/i);
       await expect(flow.clusterHealth()).resolves.toBeTypeOf("object");
       await expect(flow.clusterStats()).resolves.toBeTypeOf("object");
