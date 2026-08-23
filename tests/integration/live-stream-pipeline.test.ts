@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { FerricStoreClient } from "../../src/index.js";
-import { suffix, text, url } from "./live-support.js";
+import { integrationClient, suffix, text } from "./live-support.js";
 
 describe("FerricStore compact Stream pipeline integration", () => {
   it("spans multiple topics", async () => {
-    const client = await FerricStoreClient.fromUrl(url());
+    const client = await integrationClient();
     const prefix = `ts-sdk:stream-pipeline:${suffix()}:`;
     const first = `${prefix}{a}:first`;
     const second = `${prefix}{b}:second`;

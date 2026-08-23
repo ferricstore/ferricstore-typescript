@@ -18,8 +18,8 @@ Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is te
 
 ## Compatibility
 
-TypeScript SDK `0.11.10` requires FerricStore server `0.11.4` or newer. With
-FerricStore 0.11.10 it negotiates compact Stream mode 34 for homogeneous auto-ID
+TypeScript SDK `0.11.11` requires FerricStore server `0.11.4` or newer. With
+FerricStore 0.11.11 it negotiates compact Stream mode 34 for homogeneous auto-ID
 `XADD` pipelines and compact Pub/Sub mode 35 for homogeneous `PUBLISH`
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
 Capabilities and response-size limits are negotiated
@@ -44,7 +44,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  quay.io/ferricstore/ferricstore:0.11.10@sha256:3af390b7429ea3fea2983938eb7adcdd3e8005d06c67473f769f29ebd48e8ab3
+  quay.io/ferricstore/ferricstore:0.11.11@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5
 ```
 
 ## Query durable runs
@@ -129,6 +129,20 @@ are not auto-coalesced. Redirects intentionally retain authentication and custom
 headers across origins, so configure only endpoints and redirect targets you
 trust. Use `ferric://` or `ferrics://` whenever connection-local behavior is
 required.
+
+Run the complete HTTP-compatible integration surface through a real TLS
+listener with ACL authentication using:
+
+```bash
+FERRICSTORE_IMAGE=quay.io/ferricstore/ferricstore:0.11.11@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5 \
+  npm run test:integration:http
+```
+
+The runner creates a private CA, verifies that unauthenticated access and a
+restricted user's forbidden `SET` are rejected, and sets
+`FERRICSTORE_USERNAME`, `FERRICSTORE_PASSWORD`, and `FERRICSTORE_CA_FILE` for
+the tests. Native-only subscriptions, topology, and session controls stay in
+the native integration jobs.
 
 ## Cluster-aware client
 

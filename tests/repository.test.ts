@@ -3,10 +3,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.10";
+const testedServerVersion = "0.11.11";
 const testedServerImage =
-  "quay.io/ferricstore/ferricstore:0.11.10" +
-  "@sha256:3af390b7429ea3fea2983938eb7adcdd3e8005d06c67473f769f29ebd48e8ab3";
+  "quay.io/ferricstore/ferricstore:0.11.11" +
+  "@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -46,7 +46,9 @@ describe("release workflow", () => {
     ]) {
       expect(isolated).toContain(file);
     }
-    expect(npm).toMatch(/needs:\s*\[integration, authenticated-integration\]/u);
+    expect(npm).toMatch(
+      /needs:\s*\[integration, authenticated-integration, http-integration\]/u
+    );
     expect(npm).toContain("npm publish --provenance --access public");
   });
 
@@ -84,7 +86,7 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.11.10");
+    expect(metadata.version).toBe("0.11.11");
     expect(metadata.ferricstore).toEqual({
       minimumServerVersion: "0.11.4",
       nativeProtocolVersion: 1

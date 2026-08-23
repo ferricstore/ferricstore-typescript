@@ -20,8 +20,8 @@
 
 <p>Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is tested with Node 22, 24, and 26.</p>
 <h2 id="compatibility" class="tsd-anchor-link">Compatibility<a href="#compatibility" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
-<p>TypeScript SDK <code>0.11.10</code> requires FerricStore server <code>0.11.4</code> or newer. With
-FerricStore 0.11.10 it negotiates compact Stream mode 34 for homogeneous auto-ID
+<p>TypeScript SDK <code>0.11.11</code> requires FerricStore server <code>0.11.4</code> or newer. With
+FerricStore 0.11.11 it negotiates compact Stream mode 34 for homogeneous auto-ID
 <code>XADD</code> pipelines and compact Pub/Sub mode 35 for homogeneous <code>PUBLISH</code>
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
 Capabilities and response-size limits are negotiated
@@ -36,7 +36,7 @@ a server version table.</p>
 </code><button type="button">Copy</button></pre>
 
 <h2 id="run-ferricstore-locally" class="tsd-anchor-link">Run FerricStore Locally<a href="#run-ferricstore-locally" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
-<pre><code class="bash"><span class="hl-0">docker</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-5">-p</span><span class="hl-1"> </span><span class="hl-2">6388:6388</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-e</span><span class="hl-1"> </span><span class="hl-2">FERRICSTORE_PROTECTED_MODE=</span><span class="hl-5">false</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-v</span><span class="hl-1"> </span><span class="hl-2">ferricstore_data:/data</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-2">quay.io/ferricstore/ferricstore:0.11.10@sha256:3af390b7429ea3fea2983938eb7adcdd3e8005d06c67473f769f29ebd48e8ab3</span>
+<pre><code class="bash"><span class="hl-0">docker</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-5">-p</span><span class="hl-1"> </span><span class="hl-2">6388:6388</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-e</span><span class="hl-1"> </span><span class="hl-2">FERRICSTORE_PROTECTED_MODE=</span><span class="hl-5">false</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-5">-v</span><span class="hl-1"> </span><span class="hl-2">ferricstore_data:/data</span><span class="hl-1"> </span><span class="hl-7">\</span><br/><span class="hl-1">  </span><span class="hl-2">quay.io/ferricstore/ferricstore:0.11.11@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5</span>
 </code><button type="button">Copy</button></pre>
 
 <h2 id="query-durable-runs" class="tsd-anchor-link">Query durable runs<a href="#query-durable-runs" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
@@ -84,6 +84,16 @@ are not auto-coalesced. Redirects intentionally retain authentication and custom
 headers across origins, so configure only endpoints and redirect targets you
 trust. Use <code>ferric://</code> or <code>ferrics://</code> whenever connection-local behavior is
 required.</p>
+<p>Run the complete HTTP-compatible integration surface through a real TLS
+listener with ACL authentication using:</p>
+<pre><code class="bash"><span class="hl-4">FERRICSTORE_IMAGE</span><span class="hl-1">=</span><span class="hl-2">quay.io/ferricstore/ferricstore:0.11.11@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5</span><span class="hl-1"> </span><span class="hl-0">\</span><br/><span class="hl-1">  </span><span class="hl-2">npm</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-2">test:integration:http</span>
+</code><button type="button">Copy</button></pre>
+
+<p>The runner creates a private CA, verifies that unauthenticated access and a
+restricted user's forbidden <code>SET</code> are rejected, and sets
+<code>FERRICSTORE_USERNAME</code>, <code>FERRICSTORE_PASSWORD</code>, and <code>FERRICSTORE_CA_FILE</code> for
+the tests. Native-only subscriptions, topology, and session controls stay in
+the native integration jobs.</p>
 <h2 id="cluster-aware-client" class="tsd-anchor-link">Cluster-aware client<a href="#cluster-aware-client" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
 <p>For a single node, use <code>fromUrl</code>. For a FerricStore cluster, pass multiple seed URLs. The SDK fetches the server <code>SHARDS</code> topology, routes keyed commands to the current shard leader, and refuses learned hosts outside the seed-host trust set by default. The creation promise resolves only after startup and authentication succeed; cluster creation also waits for the initial topology, so connection failures reject the corresponding <code>await</code> directly.</p>
 <p>Cross-shard pipelines are grouped into one native pipeline per leader/lane and

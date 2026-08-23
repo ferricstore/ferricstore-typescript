@@ -6,6 +6,23 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.11.11] - 2026-08-23
+
+### Fixed
+
+- Preserve exact positive and negative JSON integers outside JavaScript's safe
+  integer range when decoding HTTP responses.
+- Reject `FETCH_OR_COMPUTE*` commands locally over HTTP because their ownership
+  lifecycle requires a persistent native session.
+- Keep authenticated HTTP integration isolated from connection-affine ACL and
+  session commands while exercising the complete compatible command surface.
+
+### Changed
+
+- Require the authenticated TLS HTTP suite in pull-request and publish gates,
+  document its private-CA setup, keep temporary TLS material in an owner-only
+  directory, and delete the CA key before the container starts.
+
 ## [0.11.10] - 2026-08-23
 
 ### Fixed

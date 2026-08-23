@@ -1,6 +1,6 @@
 {
   "name": "@ferricstore/ferricstore",
-  "version": "0.11.10",
+  "version": "0.11.11",
   "description": "TypeScript SDK for FerricStore and FerricFlow",
   "type": "module",
   "license": "Apache-2.0",
@@ -72,6 +72,7 @@
     "test": "vitest run tests/*.test.ts",
     "test:exports": "node scripts/check-package-exports.mjs",
     "test:integration": "vitest run tests/integration",
+    "test:integration:http": "scripts/run-http-integration.sh",
     "test:integration:isolated": "node scripts/run-isolated-integration.mjs",
     "test:integration:deployment": "vitest run tests/integration/deployment.test.ts",
     "typecheck": "tsc --noEmit",
