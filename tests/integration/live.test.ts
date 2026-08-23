@@ -60,7 +60,9 @@ const nativeProtocolCommands = new Set<string>(
     GETRANGE GETSET HDEL HELLO HEXISTS HEXPIRE HEXPIRETIME HGET HGETALL HGETDEL
     HGETEX HINCRBY HINCRBYFLOAT HKEYS HLEN HMGET HPERSIST HPEXPIRE HPTTL
     HRANDFIELD HSCAN HSET HSETEX HSETNX HSTRLEN HTTL HVALS INCR INCRBY
-    INCRBYFLOAT INFO KEY_INFO KEYS LASTSAVE LINDEX LINSERT LLEN LMOVE LOCK LOLWUT
+    INCRBYFLOAT INFO INVOCATION.CREATE INVOCATION.DEFINITION.GET
+    INVOCATION.DEFINITION.LIST INVOCATION.DEFINITION.PUT INVOCATION.GET
+    INVOCATION.PARTITION.LIST KEY_INFO KEYS LASTSAVE LINDEX LINSERT LLEN LMOVE LOCK LOLWUT
     LPOP LPOS LPUSH LPUSHX LRANGE LREM LSET LTRIM MEMORY MGET MODULE MSET MSETNX
     MULTI OBJECT PERSIST PEXPIRE PEXPIREAT PEXPIRETIME PFADD PFCOUNT PFMERGE PING
     PSETEX PSUBSCRIBE PTTL PUBLISH PUBSUB PUNSUBSCRIBE QUIT RANDOMKEY RATELIMIT.ADD
@@ -1045,9 +1047,9 @@ describe("FerricStore integration", () => {
       await expectSupportedOrKnownServerError(flow.invocationDefinitionPut({ name: `send-email-${runId}` }));
       await expectSupportedOrKnownServerError(flow.invocationDefinitionGet(`send-email-${runId}`));
       await expectSupportedOrKnownServerError(flow.invocationDefinitionList());
-      await expectSupportedOrKnownServerError(flow.invocationCreate(`send-email-${runId}`, { tenant: "acme" }));
+      await expectSupportedOrKnownServerError(flow.invocationCreate(`send-email-${runId}`, { source: "typescript-sdk-integration" }));
       await expectSupportedOrKnownServerError(flow.invocationGet(`invocation-${runId}`));
-      await expectSupportedOrKnownServerError(flow.invocationPartitionList(`send-email-${runId}`, { scope: "tenant:acme" }));
+      await expectSupportedOrKnownServerError(flow.invocationPartitionList(`send-email-${runId}`));
     } finally {
       await deletePrefixedKeys(flow, prefix);
       await flow.close();

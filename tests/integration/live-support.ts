@@ -109,7 +109,7 @@ export function ok(value: unknown): boolean {
 
 export async function expectSupportedOrKnownServerError<T>(
   promise: Promise<T>,
-  pattern = /unsupported|unknown|not supported|not enabled|invalid|password|cluster|no config file|shard index/i
+  pattern = /unsupported|unknown|not supported|not enabled|invalid|not[_ ]found|password|cluster|no config file|shard index/i
 ): Promise<T | undefined> {
   try {
     return await promise;
