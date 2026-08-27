@@ -1,8 +1,9 @@
 services:
   ferricstore:
-    image: ${FERRICSTORE_IMAGE:-ghcr.io/ferricstore/ferricstore:0.11.2@sha256:90758c3a2d191659928a728c5fb5e5f61d0ee910583e263f3bad543e5055bff8}
+    image: ${FERRICSTORE_IMAGE:-quay.io/ferricstore/ferricstore:0.11.11@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5}
     environment:
       FERRICSTORE_PROTECTED_MODE: "false"
+      FERRICSTORE_FLOW_SCHEDULER_ENABLED: "false"
       FERRICSTORE_NATIVE_ENABLED: "true"
       FERRICSTORE_NATIVE_BIND: "0.0.0.0"
       FERRICSTORE_NATIVE_PORT: "6388"

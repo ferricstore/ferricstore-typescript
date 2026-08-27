@@ -130,10 +130,14 @@ describe("native administration protocol codec", () => {
       payload: { attribute: "tenant", count: 10, type: "order" }
     });
     expect(buildProtocolCommand([
-      "FLOW.SCHEDULE.CREATE", "schedule-1", "KIND", "cron", "CRON", "*/5 * * * *", "OVERWRITE", true
+      "FLOW.SCHEDULE.CREATE", "schedule-1", "KIND", "interval", "EVERY_MS", 1_000,
+      "CATCHUP_POLICY", "fire_once", "OVERWRITE", true
     ])).toMatchObject({
       opcode: COMMAND_OPCODES["FLOW.SCHEDULE.CREATE"],
-      payload: { cron: "*/5 * * * *", id: "schedule-1", kind: "cron", overwrite: true }
+      payload: {
+        catchup_policy: "fire_once", every_ms: 1_000, id: "schedule-1",
+        kind: "interval", overwrite: true
+      }
     });
     expect(buildProtocolCommand([
       "FLOW.SCHEDULE.FIRE_DUE", "WORKER", "scheduler-1", "BLOCK", 50, "LIMIT", 10

@@ -15,7 +15,20 @@ export function snapshotClientOptions<T extends FerricStoreClientFromUrlOptions>
       : { backpressure: Object.freeze({ ...own.backpressure }) }),
     ...(typeof own.reconnect === "object" && own.reconnect != null
       ? { reconnect: Object.freeze({ ...own.reconnect }) }
-      : {})
+      : {}),
+    ...(own.httpOptions == null
+      ? {}
+      : {
+          httpOptions: Object.freeze({
+            ...own.httpOptions,
+            ...(own.httpOptions.headers == null
+              ? {}
+              : { headers: Object.freeze({ ...own.httpOptions.headers }) }),
+            ...(own.httpOptions.tlsOptions == null
+              ? {}
+              : { tlsOptions: Object.freeze({ ...own.httpOptions.tlsOptions }) })
+          })
+        })
   };
   return Object.freeze(snapshot);
 }

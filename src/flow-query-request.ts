@@ -7,10 +7,12 @@ export const FLOW_QUERY_REQUEST_CONTRACT = "ferric.flow.query.request/v1";
 export const FLOW_QUERY_MAX_BYTES = 16 * 1_024;
 export const FLOW_QUERY_MAX_PARAMETERS = 64;
 export const FLOW_QUERY_MAX_PARAMETER_NAME_BYTES = 128;
+export const FLOW_QUERY_MAX_PARAMETER_VALUE_BYTES = 65_535;
 
 const MIN_I64 = -(1n << 63n);
 const MAX_I64 = (1n << 63n) - 1n;
 const INDEX_ID = /^[A-Za-z0-9_.:-]{1,64}$/u;
+const PARAMETER_NAME = /^[A-Za-z0-9_.-]+$/u;
 
 export function flowQueryArgs(
   query: string,
@@ -72,10 +74,43 @@ export function validateFlowQueryIndexId(indexId: string): void {
 }
 
 export function hasFlowExplainPrefix(query: string): boolean {
-  const source = query.trimStart();
-  const prefix = source.slice(0, 7);
-  return prefix.toUpperCase() === "EXPLAIN" &&
-    (source.length === 7 || /[\t\n\r ]/u.test(source[7] ?? ""));
+  const source = trimFlowQueryAsciiWhitespaceStart(query);
+  return matchesFlowQueryAsciiKeyword(source, 0, "EXPLAIN") &&
+    (source.length === 7 || isFlowQueryAsciiWhitespaceCode(source.charCodeAt(7)));
+}
+
+export function matchesFlowQueryAsciiKeyword(
+  value: string,
+  offset: number,
+  keyword: string
+): boolean {
+  if (offset < 0 || offset + keyword.length > value.length) return false;
+  for (let index = 0; index < keyword.length; index += 1) {
+    let actual = value.charCodeAt(offset + index);
+    if (actual >= 0x61 && actual <= 0x7a) actual -= 0x20;
+    if (actual !== keyword.charCodeAt(index)) return false;
+  }
+  return true;
+}
+
+export function trimFlowQueryAsciiWhitespaceStart(value: string): string {
+  let start = 0;
+  while (start < value.length && isFlowQueryAsciiWhitespaceCode(value.charCodeAt(start))) {
+    start += 1;
+  }
+  return start === 0 ? value : value.slice(start);
+}
+
+export function trimFlowQueryAsciiWhitespace(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && isFlowQueryAsciiWhitespaceCode(value.charCodeAt(start))) start += 1;
+  while (end > start && isFlowQueryAsciiWhitespaceCode(value.charCodeAt(end - 1))) end -= 1;
+  return start === 0 && end === value.length ? value : value.slice(start, end);
+}
+
+export function isFlowQueryAsciiWhitespaceCode(code: number): boolean {
+  return code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d;
 }
 
 function flowQueryParameterEntries(
@@ -105,9 +140,14 @@ function flowQueryParameterEntries(
 function validateFlowQueryParameterName(name: string): void {
   validateUnicodeScalarText(name, "FLOW.QUERY parameter name");
   const size = Buffer.byteLength(name, "utf8");
-  if (size === 0 || size > FLOW_QUERY_MAX_PARAMETER_NAME_BYTES) {
+  if (
+    size === 0 ||
+    size > FLOW_QUERY_MAX_PARAMETER_NAME_BYTES ||
+    !PARAMETER_NAME.test(name)
+  ) {
     throw new TypeError(
-      `FLOW.QUERY parameter names must be 1..${FLOW_QUERY_MAX_PARAMETER_NAME_BYTES} bytes`
+      `FLOW.QUERY parameter names must be 1..${FLOW_QUERY_MAX_PARAMETER_NAME_BYTES} ` +
+      "ASCII letters, digits, '_', '.', or '-'"
     );
   }
 }
@@ -115,10 +155,17 @@ function validateFlowQueryParameterName(name: string): void {
 function normalizeFlowQueryParameter(value: unknown, name: string): FlowQueryParameter {
   if (typeof value === "string") {
     validateUnicodeScalarText(value, `FLOW.QUERY parameter ${JSON.stringify(name)}`);
+    validateParameterValueSize(Buffer.byteLength(value, "utf8"), name);
     return value;
   }
-  if (Buffer.isBuffer(value)) return value;
-  if (value instanceof Uint8Array) return Buffer.from(value);
+  if (Buffer.isBuffer(value)) {
+    validateParameterValueSize(value.byteLength, name);
+    return value;
+  }
+  if (value instanceof Uint8Array) {
+    validateParameterValueSize(value.byteLength, name);
+    return Buffer.from(value);
+  }
   if (typeof value === "boolean") return value;
   if (typeof value === "bigint" && value >= MIN_I64 && value <= MAX_I64) return value;
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -128,6 +175,15 @@ function normalizeFlowQueryParameter(value: unknown, name: string): FlowQueryPar
     `FLOW.QUERY parameter ${JSON.stringify(name)} must be text, bytes, boolean, ` +
     "a finite float, or a signed 64-bit integer"
   );
+}
+
+function validateParameterValueSize(size: number, name: string): void {
+  if (size > FLOW_QUERY_MAX_PARAMETER_VALUE_BYTES) {
+    throw new TypeError(
+      `FLOW.QUERY parameter ${JSON.stringify(name)} exceeds ` +
+      `${FLOW_QUERY_MAX_PARAMETER_VALUE_BYTES} bytes`
+    );
+  }
 }
 
 function commandText(value: unknown, context: string): string {

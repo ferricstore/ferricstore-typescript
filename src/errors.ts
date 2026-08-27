@@ -21,6 +21,18 @@ export class FerricStoreError extends Error {
   }
 }
 
+export class HTTPTransportError extends FerricStoreError {
+  override readonly code = "http_transport";
+  readonly statusCode: number | undefined;
+
+  constructor(message: string, options: ConstructorParameters<typeof FerricStoreError>[1] & {
+    statusCode?: number;
+  } = {}) {
+    super(message, options);
+    this.statusCode = options.statusCode;
+  }
+}
+
 export type RequestDisposition = "unsent" | "possibly_sent";
 /** @deprecated Use RequestDisposition; retained for source compatibility. */
 export type ConnectionRequestDisposition = RequestDisposition;

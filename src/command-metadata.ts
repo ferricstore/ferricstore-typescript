@@ -56,6 +56,7 @@ export const neverAutoBatchCommandPrefixes = new Set([
   "BLPOP",
   "BRPOP",
   "BRPOPLPUSH",
+  "BZMPOP",
   "BZPOPMAX",
   "BZPOPMIN",
   "CLIENT",
@@ -175,6 +176,9 @@ export const connectionBlockingCommands = new Set([
   "BLPOP",
   "BRPOP",
   "BRPOPLPUSH",
+  "BZMPOP",
+  "BZPOPMAX",
+  "BZPOPMIN",
   "XREAD",
   "XREADGROUP"
 ]);

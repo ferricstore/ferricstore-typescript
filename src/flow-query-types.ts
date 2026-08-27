@@ -11,10 +11,10 @@ export interface FlowQueryPage {
 }
 
 export interface FlowQueryQuality {
-  readonly exactness: string;
-  readonly freshness: string;
-  readonly coverage: string;
-  readonly pagination: string;
+  readonly exactness: "authoritative" | "projected_exact" | "exact" | "not_applicable";
+  readonly freshness: "current" | "projection_watermark" | "not_applicable";
+  readonly coverage: "complete" | "unavailable";
+  readonly pagination: "none" | "complete" | "authenticated_seek" | "live_seek";
 }
 
 export interface FlowQueryUsage {
@@ -92,13 +92,26 @@ export class FlowQueryError extends FerricStoreError {
   }
 }
 
+export interface FlowExplainCapabilities {
+  readonly requested: readonly string[];
+  readonly available: readonly string[];
+  readonly missing: readonly string[];
+  readonly raw: Readonly<Record<string, unknown>>;
+}
+
 export interface FlowExplainResult {
   readonly version: "ferric.flow.explain/v1";
   readonly queryFingerprint: string;
   readonly status: "planned" | "rejected" | "executed";
   readonly plan: Readonly<Record<string, unknown>>;
   readonly estimate: Readonly<Record<string, unknown>>;
+  readonly stats?: Readonly<Record<string, unknown>>;
+  readonly quality?: FlowQueryQuality;
   readonly bounds: Readonly<Record<string, unknown>>;
+  readonly pressure?: Readonly<Record<string, unknown>>;
+  readonly decision?: Readonly<Record<string, unknown>>;
+  readonly alternatives: readonly Readonly<Record<string, unknown>>[];
+  readonly capabilities?: FlowExplainCapabilities;
   readonly actual?: FlowQueryUsage;
   readonly diagnostic?: FlowQueryError;
   readonly raw: Readonly<Record<string, unknown>>;
@@ -107,6 +120,23 @@ export interface FlowExplainResult {
 export interface FlowQueryIndexRegistry {
   readonly epoch: FlowQueryInteger;
   readonly catalogVersion: FlowQueryInteger;
+}
+
+export type FlowQueryIndexServiceState = "ready" | "unavailable";
+
+export interface FlowQueryIndexServices {
+  readonly registry: FlowQueryIndexServiceState;
+  readonly lifecycleWorker: FlowQueryIndexServiceState;
+  readonly statisticsStore: FlowQueryIndexServiceState;
+  readonly statisticsWorker: FlowQueryIndexServiceState;
+  readonly raw: Readonly<Record<string, unknown>>;
+}
+
+export interface FlowQueryIndexField {
+  readonly name: string;
+  readonly direction: "asc" | "desc";
+  readonly encoding: "hashed" | "ordered";
+  readonly raw: Readonly<Record<string, unknown>>;
 }
 
 export interface FlowQueryIndexFormat {
@@ -118,23 +148,88 @@ export interface FlowQueryIndexFormat {
   readonly raw: Readonly<Record<string, unknown>>;
 }
 
+export interface FlowQueryIndexCoverage {
+  readonly completeShards: FlowQueryInteger;
+  readonly totalShards: FlowQueryInteger;
+  readonly validation: "pending" | "passed" | "failed";
+  readonly raw: Readonly<Record<string, unknown>>;
+}
+
+export interface FlowQueryIndexProgress {
+  readonly scope: "catalog_build";
+  readonly phaseCounts: Readonly<Record<string, FlowQueryInteger>>;
+  readonly currentPhases: readonly string[];
+  readonly completedShards: FlowQueryInteger;
+  readonly totalShards: FlowQueryInteger;
+  readonly raw: Readonly<Record<string, unknown>>;
+}
+
+export interface FlowQueryIndexBuild extends FlowQueryIndexProgress {
+  readonly scannedRecords: FlowQueryInteger;
+  readonly writtenEntries: FlowQueryInteger;
+  readonly writtenBytes: FlowQueryInteger;
+}
+
+export interface FlowQueryIndexValidation extends FlowQueryIndexProgress {
+  readonly status: "pending" | "passed" | "failed";
+  readonly checkedRecords: FlowQueryInteger;
+  readonly checkedEntries: FlowQueryInteger;
+  readonly mismatches: FlowQueryInteger;
+  readonly failureReason?: string;
+  readonly validatedAtMs?: FlowQueryInteger;
+}
+
+export interface FlowQueryIndexRetirement {
+  readonly status: "not_applicable" | "pending" | "complete";
+  readonly phaseCounts?: Readonly<Record<string, FlowQueryInteger>>;
+  readonly currentPhases?: readonly string[];
+  readonly completedShards?: FlowQueryInteger;
+  readonly totalShards?: FlowQueryInteger;
+  readonly deletedEntries?: FlowQueryInteger;
+  readonly deletedBytes?: FlowQueryInteger;
+  readonly rewrittenReverseRows?: FlowQueryInteger;
+  readonly raw: Readonly<Record<string, unknown>>;
+}
+
+export interface FlowQueryIndexStatistics {
+  readonly status: "fresh" | "stale" | "future" | "mixed" | "missing" | "unavailable";
+  readonly samples: FlowQueryInteger;
+  readonly freshSamples: FlowQueryInteger;
+  readonly staleSamples: FlowQueryInteger;
+  readonly futureSamples: FlowQueryInteger;
+  readonly oldestCollectedAtMs?: FlowQueryInteger;
+  readonly newestCollectedAtMs?: FlowQueryInteger;
+  readonly oldestAgeMs?: FlowQueryInteger;
+  readonly newestAgeMs?: FlowQueryInteger;
+  readonly raw: Readonly<Record<string, unknown>>;
+}
+
 export interface FlowQueryIndex {
   readonly id: string;
   readonly version: FlowQueryInteger;
   readonly buildId: string;
-  readonly state: string;
+  readonly source: "runs";
+  readonly state: "building" | "validating" | "active" | "retiring" | "failed";
   readonly queryable: boolean;
+  readonly fields: readonly FlowQueryIndexField[];
+  readonly workloads: readonly string[];
+  readonly countPrefixes: readonly number[];
   readonly coveringFields: readonly string[];
   readonly format: FlowQueryIndexFormat;
+  readonly coverage: FlowQueryIndexCoverage;
+  readonly build: FlowQueryIndexBuild;
+  readonly validation: FlowQueryIndexValidation;
+  readonly retirement: FlowQueryIndexRetirement;
+  readonly statistics: FlowQueryIndexStatistics;
   readonly raw: Readonly<Record<string, unknown>>;
 }
 
 export interface FlowQueryIndexStatus {
   readonly contractVersion: "ferric.flow.query.indexes/v1";
-  readonly observedAtMs: number;
-  readonly statisticsMaxAgeMs: number;
+  readonly observedAtMs: FlowQueryInteger;
+  readonly statisticsMaxAgeMs: FlowQueryInteger;
   readonly registry: FlowQueryIndexRegistry;
-  readonly services: Readonly<Record<string, unknown>>;
+  readonly services: FlowQueryIndexServices;
   readonly indexes: readonly FlowQueryIndex[];
   readonly raw: Readonly<Record<string, unknown>>;
 }

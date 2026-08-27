@@ -135,7 +135,28 @@ describe("compact FLOW.QUERY results", () => {
     const reserved = Buffer.from(valid);
     reserved.writeUInt32BE(reserved.readUInt32BE(103) | (1 << 20), 103);
 
-    for (const payload of [reserved, valid.subarray(0, valid.byteLength - 1), Buffer.concat([valid, Buffer.from([0])])]) {
+    const usageOutOfRange = Buffer.from(valid);
+    usageOutOfRange.writeBigUInt64BE(1n << 63n, 6);
+    const hydratedBeyondScan = Buffer.from(valid);
+    hydratedBeyondScan.writeBigUInt64BE(2n, 38);
+    const wrongRecords = Buffer.from(valid);
+    wrongRecords.writeBigUInt64BE(2n, 62);
+    const countUsageMismatch = countPayload(42n);
+    countUsageMismatch.writeBigUInt64BE(0n, 62);
+
+    for (const payload of [
+      reserved,
+      valid.subarray(0, valid.byteLength - 1),
+      Buffer.concat([valid, Buffer.from([0])]),
+      cursorPagePayload("fqc1_short"),
+      cursorPagePayload("other_cursor_token"),
+      cursorPagePayload(Buffer.concat([Buffer.from("fqc1_"), Buffer.alloc(11, 0xff)])),
+      usageOutOfRange,
+      hydratedBeyondScan,
+      wrongRecords,
+      countUsageMismatch,
+      countPayload(1n << 63n),
+    ]) {
       expect(() => decodeResponse(frame(OPCODES.flowQuery, payload), OPCODES.flowQuery, hints)).toThrow();
     }
   });
@@ -187,8 +208,24 @@ function countPayload(count: bigint): Buffer {
   return payload;
 }
 
+function cursorPagePayload(cursor: string | Buffer): Buffer {
+  const rawCursor = Buffer.isBuffer(cursor) ? cursor : Buffer.from(cursor);
+  const payload = Buffer.concat([
+    Buffer.from([0xa0, 0, 0, 0, 0, 2]),
+    usage(0),
+    Buffer.from([1]),
+    u32(rawCursor.byteLength),
+    rawCursor,
+    u32(0),
+  ]);
+  payload.writeBigUInt64BE(BigInt(payload.byteLength), 70);
+  return payload;
+}
+
 function usage(resultRecords: number): Buffer {
   const values = new Array<bigint>(11).fill(0n);
+  values[2] = BigInt(resultRecords);
+  values[4] = BigInt(resultRecords);
   values[7] = BigInt(resultRecords);
   return Buffer.concat(values.map(u64));
 }

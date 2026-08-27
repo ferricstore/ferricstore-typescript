@@ -6,6 +6,177 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-08-27
+
+### Fixed
+
+- Fence adapter state with native compare-and-swap commits, epoch-protected
+  LangGraph threads, CAS tombstones, and append-only validated indexes so an
+  expired writer cannot overwrite or hide newer data.
+- Honor global LangGraph checkpoint namespace filters and preserve nested
+  `invokeOptions` configuration, metadata, context, and intentional null input.
+- Make OpenAI Agents transaction digests independent of the worker locale while
+  continuing to accept receipts written by the original locale-ordered format.
+- Validate the release tag against the package version and checked-out commit,
+  include optional framework entry points in the generated API reference, and
+  link to a rendered package-hosted reference.
+
+## [0.12.0] - 2026-08-27
+
+### Added
+
+- Add a FerricStore-backed LangGraph.js checkpoint saver with pending writes,
+  checkpoint history, namespaces, and configurable durability behavior.
+- Add a LangGraph.js `BaseStore` for durable long-term memory and a
+  `LangGraphFlow` bridge for running graph handlers through FerricFlow.
+- Add an OpenAI Agents SDK `Session` with durable message history, atomic
+  rewrites, and idempotent mutations.
+- Publish the framework integrations from the existing package through the
+  `@ferricstore/ferricstore/langgraph` and
+  `@ferricstore/ferricstore/openai-agents` subpaths, with examples and usage
+  documentation.
+
+### Changed
+
+- Share snapshot and durability logic across the agent persistence adapters,
+  keep framework dependencies optional, and exercise the adapters in the
+  isolated live-integration release gate.
+
+## [0.11.11] - 2026-08-23
+
+### Fixed
+
+- Preserve exact positive and negative JSON integers outside JavaScript's safe
+  integer range when decoding HTTP responses.
+- Reject `FETCH_OR_COMPUTE*` commands locally over HTTP because their ownership
+  lifecycle requires a persistent native session.
+- Keep authenticated HTTP integration isolated from connection-affine ACL and
+  session commands while exercising the complete compatible command surface.
+
+### Changed
+
+- Require the authenticated TLS HTTP suite in pull-request and publish gates,
+  document its private-CA setup, keep temporary TLS material in an owner-only
+  directory, and delete the CA key before the container starts.
+
+## [0.11.10] - 2026-08-23
+
+### Fixed
+
+- Abort active and pool-queued HTTP work when the client closes, and retain
+  correct deadlines above Node's single-timer limit.
+- Queue HTTP/2 streams behind both client and peer concurrency limits, replace
+  GOAWAY sessions without stale cleanup races, and disable server push.
+- Enforce every declared native-only command locally, preserve binary command
+  names, bound request encoding before large intermediate allocations, and
+  harden response records and `Retry-After` metadata.
+- Keep single-request blocking list and stream reads available over HTTP while
+  reserving only connection-affine command families for native TCP.
+- Extend HTTP deadlines by finite server-block intervals, disable the response
+  deadline for zero-block requests, and cover `BZMPOP` and blocking sorted-set
+  variants in the shared transport metadata.
+- Keep `ASKING`, `PSYNC`, `REPLCONF`, and `SYNC` on native TCP because their
+  cluster or replication state cannot be represented by stateless HTTP calls.
+
+### Changed
+
+- Validate the unchanged native wire protocol v1, native TCP command and Flow
+  surfaces, and HTTP transport policy against the immutable multi-architecture
+  FerricStore 0.11.10 release while retaining FerricStore 0.11.4 as the minimum
+  compatible server.
+
+## [0.11.9] - 2026-08-22
+
+### Added
+
+- Add stateless HTTP and HTTPS transports behind the existing command, Flow,
+  and pipeline APIs while retaining native TCP as the default.
+- Reuse HTTP/1.1 keep-alive connections and multiplexed HTTP/2 sessions with
+  TLS authentication, retained redirect headers, bounded envelopes, and
+  whole-request deadlines.
+
+### Changed
+
+- Encode typed Flow commands through transport-neutral native descriptors,
+  reject connection-affine operations locally, and cover the exact 67-command
+  Flow surface against FerricStore HTTP and OSS 0.11.9.
+- Refresh compatible development dependencies while retaining the Node 22.22
+  runtime floor, FerricStore 0.11.4 native compatibility floor, and native wire
+  protocol v1.
+
+## [0.11.8] - 2026-08-22
+
+### Fixed
+
+- Wait for native query capabilities, healthy shards, and ACL projection
+  readiness across consecutive fresh connections before starting live tests.
+- Treat the fail-closed ACL catalog reconciliation window after `ACL LOAD` as
+  a bounded workflow transition without masking unrelated permission errors.
+
+## [0.11.7] - 2026-08-22
+
+### Changed
+
+- Validate the unchanged native protocol v1 and FerricStore 0.11.4
+  compatibility floor against FerricStore 0.11.8, including authenticated and
+  isolated integration coverage.
+- Keep the existing native TCP command, pipeline, topology, Pub/Sub, and Flow
+  query behavior unchanged while FerricStore adds transport-neutral gateway
+  support.
+
+## [0.11.6] - 2026-08-19
+
+### Changed
+
+- Validate the unchanged native protocol v1 and FerricStore 0.11.4
+  compatibility floor against FerricStore 0.11.6.
+- Move live integration from GHCR to the immutable FerricStore 0.11.6 image on
+  Quay.io.
+- Refresh transitive development dependencies to resolve the `brace-expansion`
+  and `nanoid` denial-of-service advisories enforced by the publish gate.
+
+## [0.11.5] - 2026-08-03
+
+### Changed
+
+- Negotiate FerricStore 0.11.5's compact Stream producer capability and encode
+  homogeneous `XADD key * field value...` pipelines with mode 34. Legacy
+  servers, explicit IDs, trimming, `NOMKSTREAM`, malformed pairs, and
+  unsupported values retain the generic pipeline path.
+- Negotiate compact Pub/Sub mode 35 and encode homogeneous `PUBLISH` pipelines
+  without typed command maps. Servers without the capability retain the generic
+  pipeline path.
+- Retain FerricStore 0.11.4 as the minimum server and native wire protocol v1.
+
+## [0.11.4] - 2026-07-28
+
+### Added
+
+- Decode and validate the complete durable-schedule recurrence response,
+  including creation time, interval period, cron expression, timezone, and
+  overlap retry configuration.
+
+### Changed
+
+- Require FerricStore 0.11.4 while retaining native wire protocol v1.
+
+## [0.5.2] - 2026-07-27
+
+### Added
+
+- Expose typed specialized-plan capabilities and the complete query-index
+  service, field, lifecycle, validation, retirement, and statistics status.
+
+### Changed
+
+- Propagate the client timeout into the server-side query deadline for direct
+  and pipelined native requests without adding another timer or payload copy.
+- Reject oversized or malformed query parameters, non-canonical compact
+  cursors, unsupported quality values, and inconsistent usage counters before
+  exposing a result.
+- Pin live integration and core parity to FerricStore 0.11.3 while retaining
+  FerricStore 0.11.0 as the minimum compatible server and native wire v1.
+
 ## [0.5.1] - 2026-07-26
 
 ### Changed

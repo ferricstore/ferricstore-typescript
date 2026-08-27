@@ -1,17 +1,16 @@
 import { Buffer } from "node:buffer";
 import { FerricStoreError } from "./errors.js";
 import { field } from "./internal.js";
+import { tryDecodeFlowQueryError } from "./flow-query-diagnostic-response.js";
 import {
-  boundedText,
   boundedInteger,
+  boundedText,
   decodeError,
   freezeMap,
   freezeMetadataMap,
   hasKey,
   nonNegativeInteger,
   optionalText,
-  positiveBoundedInteger,
-  positiveInteger,
   requiredBoolean,
   requiredBoundedText,
   requiredMap,
@@ -20,21 +19,23 @@ import {
 } from "./flow-query-response-validation.js";
 import {
   FlowQueryError,
+  type FlowExplainCapabilities,
   type FlowExplainResult,
-  type FlowQueryErrorPosition,
   type FlowQueryInteger,
-  type FlowQueryIndex,
-  type FlowQueryIndexFormat,
-  type FlowQueryIndexStatus,
   type FlowQueryPage,
   type FlowQueryQuality,
   type FlowQueryResult,
   type FlowQueryUsage
 } from "./flow-query-types.js";
 
+export {
+  decodeFlowQueryIndexStatus,
+  FLOW_QUERY_INDEXES_CONTRACT
+} from "./flow-query-index-response.js";
+export { tryDecodeFlowQueryError } from "./flow-query-diagnostic-response.js";
+
 export const FLOW_QUERY_RESULT_CONTRACT = "ferric.flow.query.result/v1";
 export const FLOW_EXPLAIN_CONTRACT = "ferric.flow.explain/v1";
-export const FLOW_QUERY_INDEXES_CONTRACT = "ferric.flow.query.indexes/v1";
 
 const USAGE_FIELDS = [
   ["range_seeks", "rangeSeeks"],
@@ -51,7 +52,12 @@ const USAGE_FIELDS = [
 ] as const;
 
 const MAX_SIGNED_64 = (1n << 63n) - 1n;
-const MAX_UNSIGNED_64 = (1n << 64n) - 1n;
+const QUALITY_VALUES = {
+  exactness: ["authoritative", "projected_exact", "exact", "not_applicable"],
+  freshness: ["current", "projection_watermark", "not_applicable"],
+  coverage: ["complete", "unavailable"],
+  pagination: ["none", "complete", "authenticated_seek", "live_seek"],
+} as const;
 
 type FlowQueryResponseMap = Map<unknown, unknown> | Record<string, unknown>;
 
@@ -144,8 +150,11 @@ function decodeFlowQueryResponse<TRecord>(
         index
       );
     }
-    if (usage.resultRecords !== records.length) {
-      throw decodeError("FLOW.QUERY usage result_records does not match records", value);
+    if (
+      usage.resultRecords !== records.length ||
+      usage.resultRecords > usage.scannedEntries
+    ) {
+      throw decodeError("FLOW.QUERY usage result_records is inconsistent with records", value);
     }
     return {
       kind: "records",
@@ -204,6 +213,46 @@ export function decodeFlowExplainResult(value: unknown): FlowExplainResult {
     requiredMap(field(mapping, "bounds"), "FLOW.QUERY explain bounds"),
     "FLOW.QUERY explain bounds"
   );
+  const capabilities = decodeExplainCapabilities(mapping);
+  const extendedFields = ["stats", "quality", "pressure", "decision", "alternatives"];
+  const extendedPresence = extendedFields.map((name) => hasKey(mapping, name));
+  const specialized = capabilities != null && !extendedPresence.some(Boolean);
+  let stats: Readonly<Record<string, unknown>> | undefined;
+  let quality: FlowQueryQuality | undefined;
+  let pressure: Readonly<Record<string, unknown>> | undefined;
+  let decision: Readonly<Record<string, unknown>> | undefined;
+  let alternatives: readonly Readonly<Record<string, unknown>>[];
+  if (specialized) {
+    if (status !== "planned") {
+      throw decodeError("FLOW.QUERY specialized explain must be planned", value);
+    }
+    if (hasKey(mapping, "actual") || hasKey(mapping, "diagnostic")) {
+      throw decodeError("FLOW.QUERY specialized explain has extended status fields", value);
+    }
+    alternatives = Object.freeze([]);
+  } else {
+    if (
+      !extendedPresence.every(Boolean) ||
+      !hasKey(mapping, "actual") ||
+      !hasKey(mapping, "diagnostic")
+    ) {
+      throw decodeError("FLOW.QUERY explain is missing required v1 fields", value);
+    }
+    stats = freezeMetadataMap(
+      requiredMap(field(mapping, "stats"), "FLOW.QUERY explain stats"),
+      "FLOW.QUERY explain stats"
+    );
+    quality = decodeQuality(field(mapping, "quality"));
+    pressure = freezeMetadataMap(
+      requiredMap(field(mapping, "pressure"), "FLOW.QUERY explain pressure"),
+      "FLOW.QUERY explain pressure"
+    );
+    decision = freezeMetadataMap(
+      requiredMap(field(mapping, "decision"), "FLOW.QUERY explain decision"),
+      "FLOW.QUERY explain decision"
+    );
+    alternatives = decodeExplainAlternatives(field(mapping, "alternatives"));
+  }
   const actualValue = field(mapping, "actual");
   let actual: FlowQueryUsage | undefined;
   if (status === "executed") {
@@ -232,175 +281,102 @@ export function decodeFlowExplainResult(value: unknown): FlowExplainResult {
     status,
     plan,
     estimate,
+    stats,
+    quality,
     bounds,
+    pressure,
+    decision,
+    alternatives,
+    capabilities,
     actual,
     diagnostic,
     raw: freezeMap(mapping)
   });
 }
 
-export function tryDecodeFlowQueryError(
-  value: unknown,
-  cause?: unknown
-): FlowQueryError | undefined {
-  try {
-    const mapping = requiredMap(value, "FLOW.QUERY diagnostic");
-    const contextValue = field(mapping, "context");
-    const context = contextValue == null
-      ? undefined
-      : freezeMetadataMap(
-        requiredMap(contextValue, "FLOW.QUERY diagnostic context"),
-        "FLOW.QUERY diagnostic context"
-      );
-    const position = decodePosition(field(mapping, "position"));
-    return new FlowQueryError({
-      code: requiredText(mapping, "code", "FLOW.QUERY diagnostic"),
-      message: requiredText(mapping, "message", "FLOW.QUERY diagnostic"),
-      detail: optionalText(mapping, "detail", "FLOW.QUERY diagnostic"),
-      hint: optionalText(mapping, "hint", "FLOW.QUERY diagnostic"),
-      retryable: requiredBoolean(mapping, "retryable", "FLOW.QUERY diagnostic"),
-      safeToRetry: requiredBoolean(mapping, "safe_to_retry", "FLOW.QUERY diagnostic"),
-      retryAfterMs: nonNegativeInteger(
-        field(mapping, "retry_after_ms"),
-        "FLOW.QUERY diagnostic retry_after_ms"
-      ),
-      position,
-      context,
-      raw: value,
-      cause
-    });
-  } catch (error) {
-    if (error instanceof FerricStoreError) return undefined;
-    throw error;
-  }
-}
-
-export function decodeFlowQueryIndexStatus(value: unknown): FlowQueryIndexStatus {
-  const mapping = requiredMap(value, "FLOW.QUERY.INDEXES");
-  requireContract(
-    mapping,
-    "contract_version",
-    FLOW_QUERY_INDEXES_CONTRACT,
-    "FLOW.QUERY.INDEXES"
+function decodeExplainCapabilities(
+  mapping: FlowQueryResponseMap
+): FlowExplainCapabilities | undefined {
+  if (!hasKey(mapping, "capabilities")) return undefined;
+  const value = requiredMap(
+    field(mapping, "capabilities"),
+    "FLOW.QUERY explain capabilities"
   );
-  const registry = requiredMap(field(mapping, "registry"), "FLOW.QUERY.INDEXES registry");
-  const services = freezeMetadataMap(
-    requiredMap(field(mapping, "services"), "FLOW.QUERY.INDEXES services"),
-    "FLOW.QUERY.INDEXES services"
-  );
-  const rawIndexes = field(mapping, "indexes");
-  if (!Array.isArray(rawIndexes) || rawIndexes.length > 32) {
-    throw decodeError("FLOW.QUERY.INDEXES indexes must contain at most 32 entries", value);
-  }
-  const indexes = new Array<FlowQueryIndex>(rawIndexes.length);
-  for (let index = 0; index < rawIndexes.length; index += 1) {
-    if (!Object.hasOwn(rawIndexes, index)) {
-      throw decodeError("FLOW.QUERY.INDEXES indexes must be a dense array", value);
-    }
-    indexes[index] = decodeIndex(rawIndexes[index], index);
-  }
   return Object.freeze({
-    contractVersion: FLOW_QUERY_INDEXES_CONTRACT,
-    observedAtMs: nonNegativeInteger(
-      field(mapping, "observed_at_ms"),
-      "FLOW.QUERY.INDEXES observed_at_ms"
-    ),
-    statisticsMaxAgeMs: nonNegativeInteger(
-      field(mapping, "statistics_max_age_ms"),
-      "FLOW.QUERY.INDEXES statistics_max_age_ms"
-    ),
-    registry: Object.freeze({
-      epoch: boundedInteger(
-        field(registry, "epoch"),
-        MAX_UNSIGNED_64,
-        "FLOW.QUERY.INDEXES epoch"
-      ),
-      catalogVersion: positiveBoundedInteger(
-        field(registry, "catalog_version"),
-        MAX_UNSIGNED_64,
-        "FLOW.QUERY.INDEXES catalog_version"
-      )
-    }),
-    services,
-    indexes: Object.freeze(indexes),
-    raw: freezeMap(mapping)
+    requested: decodeExplainCapabilityList(field(value, "requested"), "requested"),
+    available: decodeExplainCapabilityList(field(value, "available"), "available"),
+    missing: decodeExplainCapabilityList(field(value, "missing"), "missing"),
+    raw: freezeMetadataMap(value, "FLOW.QUERY explain capabilities")
   });
 }
 
-function decodeIndex(value: unknown, index: number): FlowQueryIndex {
-  const mapping = requiredMap(value, `FLOW.QUERY.INDEXES index ${index}`);
-  return Object.freeze({
-    id: requiredText(mapping, "id", "FLOW.QUERY.INDEXES index"),
-    version: positiveBoundedInteger(
-      field(mapping, "version"),
-      MAX_UNSIGNED_64,
-      "FLOW.QUERY.INDEXES index version"
-    ),
-    buildId: requiredText(mapping, "build_id", "FLOW.QUERY.INDEXES index"),
-    state: requiredText(mapping, "state", "FLOW.QUERY.INDEXES index"),
-    queryable: requiredBoolean(mapping, "queryable", "FLOW.QUERY.INDEXES index"),
-    coveringFields: decodeCoveringFields(mapping),
-    format: decodeIndexFormat(mapping),
-    raw: freezeMap(mapping)
-  });
-}
-
-function decodeCoveringFields(mapping: FlowQueryResponseMap): readonly string[] {
-  const raw = field(mapping, "covering_fields");
-  if (!Array.isArray(raw) || raw.length > 32) {
+function decodeExplainCapabilityList(value: unknown, name: string): readonly string[] {
+  if (!Array.isArray(value) || value.length > 64) {
     throw decodeError(
-      "FLOW.QUERY.INDEXES index covering_fields must contain at most 32 entries",
-      raw
+      `FLOW.QUERY explain capabilities ${name} must contain at most 64 entries`,
+      value
     );
   }
-  const fields = new Array<string>(raw.length);
+  const result = new Array<string>(value.length);
   const seen = new Set<string>();
-  for (let index = 0; index < raw.length; index += 1) {
-    if (!Object.hasOwn(raw, index)) {
-      throw decodeError("FLOW.QUERY.INDEXES index covering_fields must be dense", raw);
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index)) {
+      throw decodeError(`FLOW.QUERY explain capabilities ${name} must be dense`, value);
     }
-    const value = boundedText(
-      raw[index],
-      `FLOW.QUERY.INDEXES index covering_fields entry ${index}`,
-      512
+    const capability = boundedText(
+      value[index],
+      `FLOW.QUERY explain capabilities ${name} entry ${index}`,
+      128
     );
-    if (seen.has(value)) {
-      throw decodeError("FLOW.QUERY.INDEXES index covering_fields contains duplicates", raw);
+    if (seen.has(capability)) {
+      throw decodeError(
+        `FLOW.QUERY explain capabilities ${name} contains duplicates`,
+        value
+      );
     }
-    seen.add(value);
-    fields[index] = value;
+    seen.add(capability);
+    result[index] = capability;
   }
-  return Object.freeze(fields);
+  return Object.freeze(result);
 }
 
-function decodeIndexFormat(mapping: FlowQueryResponseMap): FlowQueryIndexFormat {
-  const raw = requiredMap(field(mapping, "format"), "FLOW.QUERY.INDEXES index format");
-  if (!hasKey(raw, "counter")) {
-    throw decodeError("FLOW.QUERY.INDEXES index format counter is missing", raw);
+function decodeExplainAlternatives(value: unknown): readonly Readonly<Record<string, unknown>>[] {
+  if (!Array.isArray(value) || value.length > 31) {
+    throw decodeError("FLOW.QUERY explain alternatives must be an array of at most 31 maps", value);
   }
-  const counterValue = field(raw, "counter");
-  const counter =
-    counterValue === null
-      ? undefined
-      : boundedText(counterValue, "FLOW.QUERY.INDEXES index format counter", 128);
-  return Object.freeze({
-    queryRow: requiredBoundedText(raw, "query_row", "FLOW.QUERY.INDEXES index format", 128),
-    key: requiredBoundedText(raw, "key", "FLOW.QUERY.INDEXES index format", 128),
-    entry: requiredBoundedText(raw, "entry", "FLOW.QUERY.INDEXES index format", 128),
-    reverse: requiredBoundedText(raw, "reverse", "FLOW.QUERY.INDEXES index format", 128),
-    counter,
-    raw: freezeMap(raw)
-  });
+  const alternatives = new Array<Readonly<Record<string, unknown>>>(value.length);
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index)) {
+      throw decodeError("FLOW.QUERY explain alternatives must be dense", value);
+    }
+    alternatives[index] = freezeMetadataMap(
+      requiredMap(value[index], `FLOW.QUERY explain alternative ${index}`),
+      `FLOW.QUERY explain alternative ${index}`
+    );
+  }
+  return Object.freeze(alternatives);
 }
 
 function decodeQuality(value: unknown): FlowQueryQuality {
   const mapping = requiredMap(value, "FLOW.QUERY quality");
   return Object.freeze({
-    exactness: requiredBoundedText(mapping, "exactness", "FLOW.QUERY quality", 64),
-    freshness: requiredBoundedText(mapping, "freshness", "FLOW.QUERY quality", 64),
-    coverage: requiredBoundedText(mapping, "coverage", "FLOW.QUERY quality", 64),
-    pagination: requiredBoundedText(mapping, "pagination", "FLOW.QUERY quality", 64)
+    exactness: decodeQualityValue(mapping, "exactness", QUALITY_VALUES.exactness),
+    freshness: decodeQualityValue(mapping, "freshness", QUALITY_VALUES.freshness),
+    coverage: decodeQualityValue(mapping, "coverage", QUALITY_VALUES.coverage),
+    pagination: decodeQualityValue(mapping, "pagination", QUALITY_VALUES.pagination),
   });
+}
+
+function decodeQualityValue<const T extends readonly string[]>(
+  mapping: FlowQueryResponseMap,
+  name: string,
+  allowed: T,
+): T[number] {
+  const value = requiredBoundedText(mapping, name, "FLOW.QUERY quality", 64);
+  if (!allowed.includes(value)) {
+    throw decodeError(`FLOW.QUERY quality ${name} is unsupported`, mapping);
+  }
+  return value;
 }
 
 function decodeUsage(value: unknown): FlowQueryUsage {
@@ -412,31 +388,32 @@ function decodeUsage(value: unknown): FlowQueryUsage {
       `FLOW.QUERY usage ${wireName}`
     );
   }
-  return Object.freeze(usage) as unknown as FlowQueryUsage;
+  const decoded = usage as unknown as FlowQueryUsage;
+  if (
+    decoded.hydratedRecords > decoded.scannedEntries ||
+    decoded.duplicateEntries > decoded.scannedEntries ||
+    decoded.rangePages > decoded.scannedEntries + decoded.rangeSeeks ||
+    decoded.residualChecks > decoded.scannedEntries * 12
+  ) {
+    throw decodeError("FLOW.QUERY usage counters are inconsistent", value);
+  }
+  return Object.freeze(decoded);
 }
 
 function decodePage(value: unknown): FlowQueryPage {
   const mapping = requiredMap(value, "FLOW.QUERY page");
   const hasMore = requiredBoolean(mapping, "has_more", "FLOW.QUERY page");
   const cursor = optionalText(mapping, "cursor", "FLOW.QUERY page");
-  if (cursor != null && (!cursor.startsWith("fqc1_") || Buffer.byteLength(cursor) > 4_096)) {
+  if (
+    cursor != null &&
+    (!cursor.startsWith("fqc1_") ||
+      Buffer.byteLength(cursor) < 16 ||
+      Buffer.byteLength(cursor) > 4_096)
+  ) {
     throw decodeError("FLOW.QUERY page cursor is invalid", value);
   }
   if (hasMore !== (cursor != null)) {
     throw decodeError("FLOW.QUERY page has_more and cursor are inconsistent", value);
   }
   return Object.freeze({ hasMore, ...(cursor == null ? {} : { cursor }) });
-}
-
-function decodePosition(value: unknown): FlowQueryErrorPosition | undefined {
-  if (value == null) return undefined;
-  const mapping = requiredMap(value, "FLOW.QUERY diagnostic position");
-  return Object.freeze({
-    byte: positiveInteger(field(mapping, "byte"), "FLOW.QUERY diagnostic position byte"),
-    line: positiveInteger(field(mapping, "line"), "FLOW.QUERY diagnostic position line"),
-    column: positiveInteger(
-      field(mapping, "column"),
-      "FLOW.QUERY diagnostic position column"
-    )
-  });
 }

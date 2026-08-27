@@ -58,7 +58,7 @@ export class FerricStoreFlowQueryClient extends FerricStoreManagementClient {
       args.push(indexId);
     }
     try {
-      return decodeFlowQueryIndexStatus(await this.commandArgs(args));
+      return decodeFlowQueryIndexStatus(await this.commandArgs(args), indexId);
     } catch (error) {
       this.throwFlowQueryError(error);
     }
@@ -144,7 +144,7 @@ export class FerricStoreFlowQueryClient extends FerricStoreManagementClient {
     if (hasFlowExplainPrefix(query)) {
       throw new TypeError("query already contains an EXPLAIN prefix");
     }
-    return decodeFlowExplainResult(await this.executeFlowQuery(prefix + query.trim(), params));
+    return decodeFlowExplainResult(await this.executeFlowQuery(prefix + query, params));
   }
 
   private throwFlowQueryError(error: unknown): never {

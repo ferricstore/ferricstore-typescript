@@ -1012,15 +1012,13 @@ describe("FerricStoreClient Flow and administration", () => {
     })).rejects.toThrow("exactly one of states or steps");
   });
 
-  it("exposes Flow statistics, attribute queries, and schedule administration", async () => {
+  it("exposes Flow statistics and attribute queries", async () => {
     const calls: unknown[][] = [];
     const executor: CommandExecutor = {
       async executeCommand(...args): Promise<unknown> {
         calls.push(args);
         if (args[0] === "FLOW.STATS") return { count: 3 };
-        if (args[0] === "FLOW.ATTRIBUTES" || args[0] === "FLOW.ATTRIBUTE_VALUES" || args[0] === "FLOW.SCHEDULE.LIST") return [];
-        if (args[0] === "FLOW.SCHEDULE.GET") return null;
-        return { id: "schedule-1", status: "active" };
+        return [];
       }
     };
     const client = new FerricStoreClient(executor);
@@ -1039,24 +1037,6 @@ describe("FerricStoreClient Flow and administration", () => {
     await expect(client.attributeValues("order", "tenant", {
       consistentProjection: true, count: 5, partitionKey: "tenant-a", state: "queued"
     })).resolves.toEqual([]);
-    await client.scheduleCreate("schedule-1", {
-      cron: "*/5 * * * *",
-      kind: "cron",
-      target: { type: "order" },
-      timezone: "UTC"
-    });
-    await expect(client.scheduleGet("schedule-1")).resolves.toBeNull();
-    await client.scheduleFire("schedule-1", { nowMs: 100 });
-    await client.schedulePause("schedule-1", { nowMs: 101 });
-    await client.scheduleResume("schedule-1", { nowMs: 102 });
-    await client.scheduleDelete("schedule-1", { nowMs: 103 });
-    await client.scheduleFireDue({ blockMs: 50, limit: 10, nowMs: 104, worker: "scheduler-1" });
-    await expect(client.scheduleList({ kind: "cron", count: 10 })).resolves.toEqual([]);
-
-    expect(calls[4]).toEqual([
-      "FLOW.SCHEDULE.CREATE", "schedule-1", "KIND", "cron", "CRON", "*/5 * * * *",
-      "TIMEZONE", "UTC", "TARGET", { type: "order" }
-    ]);
     expect(calls[0]).toEqual([
       "FLOW.STATS", "order", "STATE", "queued", "COUNT", 10, "PARTITION", "tenant-a",
       "ATTRIBUTE", "tenant", "tenant-a", "CONSISTENT_PROJECTION", "true"
@@ -1064,9 +1044,6 @@ describe("FerricStoreClient Flow and administration", () => {
     expect(calls[2]).toEqual([
       "FLOW.ATTRIBUTES", "order", "STATE", "queued", "PARTITION", "tenant-a", "COUNT", 10,
       "CONSISTENT_PROJECTION", "true"
-    ]);
-    expect(calls[10]).toEqual([
-      "FLOW.SCHEDULE.FIRE_DUE", "NOW", 104, "WORKER", "scheduler-1", "BLOCK", 50, "LIMIT", 10
     ]);
   });
 

@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.2";
+const testedServerVersion = "0.11.11";
+const testedServerImage =
+  "quay.io/ferricstore/ferricstore:0.11.11" +
+  "@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -37,13 +40,30 @@ describe("release workflow", () => {
     expect(isolated).toContain("npm, [\"run\", \"integration:down\"]");
     for (const file of [
       "tests/integration/live.test.ts",
+      "tests/integration/live-pubsub-pipeline.test.ts",
       "tests/integration/live-store-flow.test.ts",
       "tests/integration/live-governance-workflow.test.ts"
     ]) {
       expect(isolated).toContain(file);
     }
-    expect(npm).toMatch(/needs:\s*\[integration, authenticated-integration\]/u);
+    expect(npm).toMatch(
+      /needs:\s*\[integration, authenticated-integration, http-integration\]/u
+    );
+    expect(npm).toContain("Verify release tag and checkout");
+    expect(npm).toContain("package_version");
+    expect(npm).toContain("expected_tag");
+    expect(npm).toContain("GITHUB_REF_NAME");
+    expect(npm).toContain("GITHUB_SHA");
+    expect(npm).toContain("git rev-parse HEAD");
+    expect(npm).not.toContain(".verification.verified");
+    expect(npm).not.toContain("GPG");
     expect(npm).toContain("npm publish --provenance --access public");
+  });
+
+  it("links the adapter API to rendered package documentation", () => {
+    const readme = readFileSync(`${repositoryRoot}/README.md`, "utf8");
+    expect(readme).toContain("https://unpkg.com/@ferricstore/ferricstore/docs/agent-api/modules.html");
+    expect(readme).not.toContain("github.com/ferricstore/ferricstore-typescript/blob/main/docs/agent-api");
   });
 
   it("pins third-party actions and grants write permissions only to the job that needs them", () => {
@@ -80,9 +100,9 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.5.1");
+    expect(metadata.version).toBe("0.12.1");
     expect(metadata.ferricstore).toEqual({
-      minimumServerVersion: "0.11.0",
+      minimumServerVersion: "0.11.4",
       nativeProtocolVersion: 1
     });
     expect(manifest).toMatchObject({ magic: "FSNP", requestVersion: 1 });
@@ -99,9 +119,9 @@ describe("core compatibility CI", () => {
     );
 
     for (const source of [testWorkflow, releaseWorkflow]) {
-      expect(source).toContain("release-0.11.2");
+      expect(source).toContain("release-0.11.4");
       expect(source).toMatch(
-        /ghcr\.io\/ferricstore\/ferricstore:0\.11\.2@sha256:[0-9a-f]{64}/u
+        /ghcr\.io\/ferricstore\/ferricstore:0\.11\.4@sha256:[0-9a-f]{64}/u
       );
     }
   });
@@ -111,16 +131,22 @@ describe("core compatibility CI", () => {
       scripts?: Record<string, string>;
     };
     const guardPath = `${repositoryRoot}/scripts/check-generated-docs.mjs`;
+    const agentTypedoc = JSON.parse(readFileSync(`${repositoryRoot}/typedoc.agent.json`, "utf8")) as {
+      entryPoints?: string[];
+      out?: string;
+    };
 
-    expect(metadata.scripts?.["docs:check"]).toBe(
-      "typedoc --logLevel Warn && node scripts/check-generated-docs.mjs"
-    );
+    expect(metadata.scripts?.docs).toContain("typedoc.agent.json");
+    expect(metadata.scripts?.["docs:check"]).toContain("scripts/check-generated-docs.mjs");
     expect(existsSync(guardPath)).toBe(true);
+    expect(agentTypedoc.entryPoints).toEqual(["src/langgraph.ts", "src/openai-agents.ts"]);
+    expect(agentTypedoc.out).toBe("docs/agent-api");
     if (!existsSync(guardPath)) return;
 
     const guard = readFileSync(guardPath, "utf8");
     expect(guard).toContain("inflateSync");
     expect(guard).toContain("git show");
+    expect(guard).toContain("docs/agent-api");
     for (const asset of ["hierarchy.js", "navigation.js", "search.js"]) {
       expect(guard).toContain(asset);
     }
@@ -146,10 +172,10 @@ describe("core compatibility CI", () => {
   });
 
   it("pins parity and pinned-core integration to the reviewed OSS revision", () => {
-    const revision = "1f26dd855d875c5ff811511848aa9aa6296373dd";
+    const revision = "014997467189c292f7a15b7ca605d514adcd8df2";
     const image =
       `ghcr.io/ferricstore/ferricstore:ci-${revision}` +
-      "@sha256:b70605c7c9944937db11e337e2bc5882d4df8589d4afdc7892574fc91b4397e6";
+      "@sha256:2dc91388959a308947e762081bc447feaa2a5f6846d56de9e05aca17ce2f57f7";
     const testWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
     const releaseWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/release.yml`, "utf8");
 
@@ -166,14 +192,14 @@ describe("core compatibility CI", () => {
     const releaseIntegrationJob = workflowJob(releaseWorkflow, "integration");
     const compose = readFileSync(`${repositoryRoot}/docker-compose.yml`, "utf8");
     const coreRevision = /ref:\s*([0-9a-f]{40})/u.exec(parityJob)?.[1];
-    const immutableImage = /ghcr\.io\/ferricstore\/ferricstore:[^\s}"']+@sha256:[0-9a-f]{64}/gu;
+    const immutableImage = /quay\.io\/ferricstore\/ferricstore:[^\s}"']+@sha256:[0-9a-f]{64}/gu;
     const releaseImage = new RegExp(
-      `ghcr\\.io/ferricstore/ferricstore:${testedServerVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
+      `quay\\.io/ferricstore/ferricstore:${testedServerVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
       "u"
     ).exec(compose)?.[0];
 
-    expect(coreRevision).toBe("1f26dd855d875c5ff811511848aa9aa6296373dd");
-    expect(releaseImage).toBeDefined();
+    expect(coreRevision).toBe("014997467189c292f7a15b7ca605d514adcd8df2");
+    expect(releaseImage).toBe(testedServerImage);
     expect(compose).toMatch(immutableImage);
     expect(integrationJob).toMatch(immutableImage);
     expect(integrationJob).toContain(releaseImage ?? "missing-release-image");
@@ -189,6 +215,19 @@ describe("core compatibility CI", () => {
 
     expect(protocol).toContain('from "./native-protocol-manifest.json"');
     expect(readiness).toContain('from "../src/native-protocol-manifest.json"');
+  });
+
+  it("waits for the ACL catalog projection before starting integration tests", () => {
+    const readiness = readFileSync(`${repositoryRoot}/scripts/wait-for-ferricstore.mjs`, "utf8");
+
+    expect(readiness).toContain("const OP_COMMAND_EXEC = 0x0100");
+    expect(readiness).toContain("const OP_CLUSTER_HEALTH = 0x0301");
+    expect(readiness).toContain("const REQUIRED_READY_SAMPLES = 3");
+    expect(readiness).toContain('command: "ACL"');
+    expect(readiness).toContain('args: ["WHOAMI"]');
+    expect(readiness).toContain('sendRequest(socket, OP_CLUSTER_HEALTH');
+    expect(readiness).toContain('field(capabilities, "flow_query")');
+    expect(readiness).toContain('"ferric.flow.query.request/v1"');
   });
 
   it("grants native bootstrap controls to the scoped query integration user", () => {
@@ -215,12 +254,12 @@ describe("core compatibility CI", () => {
       "utf8"
     );
     const releaseImage = new RegExp(
-      `ghcr\\.io/ferricstore/ferricstore:${testedServerVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
+      `quay\\.io/ferricstore/ferricstore:${testedServerVersion.replaceAll(".", "\\.")}@sha256:[0-9a-f]{64}`,
       "u"
     ).exec(readFileSync(`${repositoryRoot}/docker-compose.yml`, "utf8"))?.[0];
 
     for (const authenticatedJob of [job, releaseJob]) {
-      expect(releaseImage).toBeDefined();
+      expect(releaseImage).toBe(testedServerImage);
       expect(authenticatedJob).toContain(releaseImage ?? "missing-release-image");
       expect(authenticatedJob).toContain("node scripts/bootstrap-integration-auth.mjs");
       expect(authenticatedJob).toContain("npm run test:integration:deployment");

@@ -10,6 +10,8 @@ export type {
 } from "./adapter-types.js";
 import { assertSafeVariadicDispatch } from "./variadic-dispatch.js";
 export { NativeAdapter } from "./native-adapter.js";
+export { HTTPAdapter } from "./http-adapter.js";
+export type { HTTPAdapterOptions } from "./http-options.js";
 export { snapshotCommandArguments } from "./command-snapshot.js";
 export {
   assertDensePipelineCommands,

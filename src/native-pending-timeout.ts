@@ -2,6 +2,7 @@ import { FerricStoreError, RequestTimeoutError } from "./errors.js";
 import { setLongTimeout } from "./internal.js";
 import type { PendingRequest } from "./native-pending-request.js";
 import type { ProtocolCommand } from "./protocol.js";
+import { serverResponseTimeoutMs } from "./server-response-timeout.js";
 
 interface NativePendingTimeoutOperations {
   readonly discardRequest: (requestId: bigint) => { readonly bytes: number; readonly frames: number };
@@ -51,8 +52,5 @@ export function nativeResponseTimeoutMs(
   command: ProtocolCommand,
   requestTimeoutMs: number
 ): number | undefined {
-  const blockMs = command.serverBlockMs;
-  if (blockMs == null) return requestTimeoutMs;
-  if (blockMs === 0) return undefined;
-  return Math.min(Number.MAX_SAFE_INTEGER, requestTimeoutMs + blockMs);
+  return serverResponseTimeoutMs(requestTimeoutMs, command.serverBlockMs);
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { FerricStoreClient, RawCodec } from '../dist/index.js';
+import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 
 const args = parseArgs(process.argv.slice(2));
@@ -18,10 +19,30 @@ const requestedRequests = optionalPositiveInteger(args, 'requests');
 const minThroughput = optionalNonNegativeNumber(args, 'min-throughput');
 const prefix = arg(args, 'prefix', `ts-kv-${Date.now()}`);
 const pretty = has(args, 'pretty');
+const httpTarget = /^https?:\/\//u.test(url);
+const http2 = has(args, 'http2');
+const httpMaxConnections = positiveInteger(args, 'http-max-connections', 100);
+const caFile = optionalArg(args, 'ca-file');
 
 const value = Buffer.alloc(valueBytes, 120);
 const clientOptions = {
   codec: new RawCodec(),
+  ...(httpTarget ? {
+    httpOptions: {
+      http2,
+      maxConnections: httpMaxConnections,
+      ...(process.env.FERRICSTORE_BEARER_TOKEN == null
+        ? {}
+        : { bearerToken: process.env.FERRICSTORE_BEARER_TOKEN }),
+      ...(process.env.FERRICSTORE_PASSWORD == null
+        ? {}
+        : {
+            password: process.env.FERRICSTORE_PASSWORD,
+            username: process.env.FERRICSTORE_USERNAME ?? 'default'
+          }),
+      ...(caFile == null ? {} : { tlsOptions: { ca: readFileSync(caFile) } })
+    }
+  } : {}),
   ...(requestMode === 'auto-batch' ? {
     autoBatch: {
       enabled: true,
@@ -49,6 +70,7 @@ try {
   });
   const output = {
     benchmark: 'typescript_protocol_kv',
+    transport: httpTarget ? (http2 ? 'http2' : 'http1') : 'native',
     url,
     command,
     request_mode: requestMode,
@@ -56,6 +78,7 @@ try {
     pipeline,
     inflight_batches: inflightBatches,
     clients,
+    http_max_connections: httpTarget ? httpMaxConnections : null,
     key_count: keyCount,
     value_bytes: valueBytes,
     requested_requests: requestedRequests ?? null,
@@ -189,6 +212,7 @@ function parseArgs(argv) {
   return out;
 }
 function arg(args, key, fallback) { return String(args.get(key) ?? fallback); }
+function optionalArg(args, key) { return has(args, key) ? String(args.get(key)) : undefined; }
 function has(args, key) { return args.has(key); }
 function numberArg(args, key, fallback) {
   const value = Number(args.get(key) ?? fallback);
