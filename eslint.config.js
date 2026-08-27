@@ -20,7 +20,7 @@ const tsRules = [
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "node_modules/**", "coverage/**", "docs/api/**"]
+    ignores: ["dist/**", "node_modules/**", "coverage/**", "docs/api/**", "docs/agent-api/**"]
   },
   {
     files: ["**/*.{js,mjs,cjs}"],

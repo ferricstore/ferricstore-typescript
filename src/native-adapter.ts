@@ -45,6 +45,7 @@ import { NativeRequestScheduler } from "./native-request-scheduler.js";
 import { NativeWriteQueue } from "./native-write-queue.js";
 import { NativeConnectionCapabilities } from "./native-connection-capabilities.js";
 import { nativeStartupPayload } from "./native-startup-payload.js";
+import { withFlowQueryDeadline } from "./flow-query-deadline.js";
 export class NativeAdapter implements CommandExecutor {
   private readonly socket: net.Socket | tls.TLSSocket;
   private readonly pending = new Map<bigint, PendingRequest>();
@@ -64,7 +65,6 @@ export class NativeAdapter implements CommandExecutor {
   private readonly timeoutMs: number;
   private draining = false;
   private readonly writeQueue: NativeWriteQueue;
-
   private constructor(
     socket: net.Socket | tls.TLSSocket,
     timeoutMs: number,
@@ -203,8 +203,8 @@ export class NativeAdapter implements CommandExecutor {
     options: ExecutePipelineOptions = {}
   ): Promise<unknown[] | undefined> {
     return await executeNativeFusedPipeline(
-      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes
-    );
+      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes,
+      this.capabilities.compactStreamXAdd, this.capabilities.compactPubSubPublish);
   }
 
   /** @internal Execute an ordered pipeline on a topology-selected lane. */
@@ -214,8 +214,8 @@ export class NativeAdapter implements CommandExecutor {
     options: ExecutePipelineOptions = {}
   ): Promise<unknown[]> {
     return await executeNativePipeline(
-      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes
-    );
+      this, commands, laneId, options, this.maxPipelineCommands, this.capabilities.requestFrameBytes,
+      this.capabilities.compactStreamXAdd, this.capabilities.compactPubSubPublish);
   }
 
   async close(): Promise<void> {
@@ -292,7 +292,11 @@ export class NativeAdapter implements CommandExecutor {
     let frame: Buffer;
     try {
       requestId = this.requestScheduler.nextRequestId();
-      frame = encodeRequest(command, requestId, this.capabilities.requestFrameBytes);
+      frame = encodeRequest(
+        withFlowQueryDeadline(command, timeoutMs),
+        requestId,
+        this.capabilities.requestFrameBytes
+      );
     } catch (error) {
       if (hasFlowControlCredit) this.flowControl.release(laneId);
       return Promise.reject(error instanceof Error ? error : new FerricStoreError(String(error), { raw: error }));

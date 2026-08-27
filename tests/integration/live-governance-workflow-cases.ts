@@ -1,6 +1,5 @@
 import { expect, it } from "vitest";
 import {
-  FerricStoreClient,
   JsonCodec,
   QueueClient,
   RawCodec,
@@ -11,15 +10,15 @@ import {
 import {
   deletePrefixedKeys,
   field,
+  integrationClient,
   isReadonlyArray,
   suffix,
   text,
-  url
 } from "./live-support.js";
 
 export function registerGovernanceWorkflowIntegrationTests(): void {
   it("covers fused Flow, schedule, query, and governance helpers", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const flow = await integrationClient({ codec: new JsonCodec() });
     const runId = suffix();
     const now = Date.now();
     const type = `ts-sdk-admin-${runId}`;
@@ -133,7 +132,57 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
       await expect(flow.scheduleResume(scheduleId, { nowMs: now + 9 })).resolves.toBeTypeOf("object");
       await expect(flow.scheduleList({ count: 10 })).resolves.toBeInstanceOf(Array);
       await expect(flow.scheduleFireDue({ limit: 1, nowMs: now + 10 })).resolves.toBeTypeOf("object");
-      await expect(flow.scheduleDelete(scheduleId, { nowMs: now + 11 })).resolves.toBeTypeOf("object");
+      await expect(flow.scheduleDelete(scheduleId, { nowMs: now + 11 })).resolves.toBeUndefined();
+
+      const catchupScheduleId = `ts-sdk:schedule-catchup:${runId}`;
+      const catchupDue = now + 800;
+      const catchupEvery = 5;
+      const catchupRecovery = catchupDue + 10 * catchupEvery;
+      const createdCatchup = await flow.scheduleCreate(catchupScheduleId, {
+        catchupPolicy: "fire_once",
+        everyMs: catchupEvery,
+        kind: "interval",
+        nowMs: now,
+        startAtMs: catchupDue,
+        target: {
+          id_prefix: `ts-sdk:scheduled-catchup:${runId}`,
+          partition_key: partitionKey,
+          state: "scheduled",
+          type
+        }
+      });
+      expect(createdCatchup.catchup_policy).toBe("fire_once");
+      expect(createdCatchup).toMatchObject({
+        created_at_ms: now,
+        cron: null,
+        every_ms: catchupEvery,
+        overlap_retry_ms: null,
+        timezone: null
+      });
+
+      const catchupSummary = await flow.scheduleFireDue({
+        limit: 100,
+        nowMs: catchupRecovery,
+        worker: "ts-sdk-catchup-scheduler"
+      });
+      expect(catchupSummary.fired).toBeGreaterThanOrEqual(1);
+      expect(catchupSummary.coalesced).toBeGreaterThanOrEqual(10);
+
+      const storedCatchup = await flow.scheduleGet(catchupScheduleId);
+      expect(storedCatchup).toMatchObject({
+        coalesced_count: 10,
+        fire_count: 1,
+        created_at_ms: now,
+        cron: null,
+        every_ms: catchupEvery,
+        last_catchup_at_ms: catchupRecovery,
+        last_coalesced_count: 10,
+        next_run_at_ms: catchupRecovery + catchupEvery,
+        overlap_retry_ms: null,
+        timezone: null
+      });
+      await expect(flow.scheduleDelete(catchupScheduleId, { nowMs: catchupRecovery + 1 }))
+        .resolves.toBeUndefined();
 
       const approvalId = `ts-sdk:approval:${runId}`;
       await expect(flow.approvalRequest(approvalId, {
@@ -187,7 +236,7 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
   }, 20_000);
 
   it("covers queue and workflow wrappers against the live server", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const flow = await integrationClient({ codec: new JsonCodec() });
     const runId = suffix();
     const now = Date.now();
 
@@ -375,7 +424,7 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
   }, 20_000);
 
   it("auto-batches concurrent safe API calls over the native protocol", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), {
+    const flow = await integrationClient({
       autoBatch: true,
       codec: new RawCodec()
     });

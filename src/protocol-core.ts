@@ -43,8 +43,10 @@ function serverBlockMetadata(args: readonly CommandArgument[]): { readonly serve
     serverBlockMs = blockDurationMs(args[3], 1_000);
   } else if (command === "BLMOVE" && args.length >= 6) {
     serverBlockMs = blockDurationMs(args[args.length - 1], 1_000);
-  } else if (command === "BLMPOP" && args.length >= 2) {
+  } else if ((command === "BLMPOP" || command === "BZMPOP") && args.length >= 2) {
     serverBlockMs = blockDurationMs(args[1], 1_000);
+  } else if ((command === "BZPOPMAX" || command === "BZPOPMIN") && args.length >= 3) {
+    serverBlockMs = blockDurationMs(args[args.length - 1], 1_000);
   } else if (command === "XREAD" || command === "XREADGROUP") {
     serverBlockMs = optionBlockDurationMs(args, ["BLOCK"], "STREAMS");
   } else if (command === "WAIT" && args.length === 3) {

@@ -1,4 +1,4 @@
-import { Buffer } from "node:buffer";
+import { Buffer, isUtf8 } from "node:buffer";
 import { FerricStoreError } from "./errors.js";
 import { detachDecodedBinary } from "./protocol-binary-detacher.js";
 import * as wire from "./protocol-constants.js";
@@ -11,7 +11,10 @@ import {
 
 const CONTRACT = "ferric.flow.query.result/v1";
 const MAX_RECORDS = 100;
+const MIN_CURSOR_BYTES = 16;
 const MAX_CURSOR_BYTES = 4_096;
+const CURSOR_PREFIX = Buffer.from("fqc1_");
+const MAX_SIGNED_64 = (1n << 63n) - 1n;
 export const RECORD_FIELDS = [
   "id",
   "type",
@@ -81,9 +84,13 @@ export function decodeCompactFlowQueryResult(
   const usage: Record<string, unknown> = {};
   for (const field of USAGE_FIELDS) {
     const read = readU64(data, offset);
+    if (BigInt(read.value) > MAX_SIGNED_64) {
+      throw new FerricStoreError("compact FLOW.QUERY usage exceeds signed 64-bit range");
+    }
     usage[field] = read.value;
     offset = read.offset;
   }
+  validateCompactUsage(usage);
 
   let result: Record<string, unknown>;
   if (kind === 0) {
@@ -93,6 +100,7 @@ export function decodeCompactFlowQueryResult(
     const count = data.readUInt32BE(offset);
     offset += 4;
     if (count > MAX_RECORDS) throw new FerricStoreError("compact FLOW.QUERY page exceeds 100 records");
+    validateCompactRecordUsage(usage, count);
     consumeDecodeItems(count, budget);
     const records = new Array<Record<string, unknown>>(count);
     for (let index = 0; index < count; index += 1) {
@@ -102,7 +110,13 @@ export function decodeCompactFlowQueryResult(
     }
     result = { version: Buffer.from(CONTRACT), records, page: page.value, quality, usage };
   } else if (kind === 1) {
+    if (usageInteger(usage, "result_records") !== 1n) {
+      throw new FerricStoreError("compact FLOW.QUERY count usage is inconsistent");
+    }
     const count = readU64(data, offset);
+    if (BigInt(count.value) > MAX_SIGNED_64) {
+      throw new FerricStoreError("compact FLOW.QUERY count exceeds signed 64-bit range");
+    }
     offset = count.offset;
     result = {
       version: Buffer.from(CONTRACT),
@@ -132,17 +146,56 @@ function readPage(
   if (hasMoreCode === 0 && size === wire.NULL_U32) {
     return { value: { has_more: false, cursor: null }, offset };
   }
-  if (hasMoreCode !== 1 || size === 0 || size === wire.NULL_U32 || size > MAX_CURSOR_BYTES) {
+  if (
+    hasMoreCode !== 1 ||
+    size < MIN_CURSOR_BYTES ||
+    size === wire.NULL_U32 ||
+    size > MAX_CURSOR_BYTES
+  ) {
     throw new FerricStoreError("invalid compact FLOW.QUERY page cursor");
   }
   requireAvailable(data, offset, size);
+  const cursor = data.subarray(offset, offset + size);
+  if (!cursor.subarray(0, CURSOR_PREFIX.byteLength).equals(CURSOR_PREFIX) || !isUtf8(cursor)) {
+    throw new FerricStoreError("invalid compact FLOW.QUERY page cursor");
+  }
   return {
     value: {
       has_more: true,
-      cursor: detachDecodedBinary(data.subarray(offset, offset + size), data.byteLength)
+      cursor: detachDecodedBinary(cursor, data.byteLength)
     },
     offset: offset + size
   };
+}
+
+function validateCompactUsage(usage: Record<string, unknown>): void {
+  const scanned = usageInteger(usage, "scanned_entries");
+  if (
+    usageInteger(usage, "hydrated_records") > scanned ||
+    usageInteger(usage, "duplicate_entries") > scanned ||
+    usageInteger(usage, "range_pages") >
+      scanned + usageInteger(usage, "range_seeks") ||
+    usageInteger(usage, "residual_checks") > scanned * 12n
+  ) {
+    throw new FerricStoreError("compact FLOW.QUERY usage counters are inconsistent");
+  }
+}
+
+function validateCompactRecordUsage(
+  usage: Record<string, unknown>,
+  count: number
+): void {
+  const resultRecords = usageInteger(usage, "result_records");
+  if (
+    resultRecords !== BigInt(count) ||
+    resultRecords > usageInteger(usage, "scanned_entries")
+  ) {
+    throw new FerricStoreError("compact FLOW.QUERY record usage is inconsistent");
+  }
+}
+
+function usageInteger(usage: Record<string, unknown>, field: string): bigint {
+  return BigInt(usage[field] as number | bigint);
 }
 
 function readRecord(

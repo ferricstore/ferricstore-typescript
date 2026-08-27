@@ -1,5 +1,6 @@
 import type { Codec } from "./codecs.js";
 import type { NativeClientOptions, ReconnectOptions } from "./adapters.js";
+import type { HTTPAdapterOptions } from "./http-options.js";
 import type { CommandArgument } from "./internal.js";
 import type {
   BackpressurePolicy,
@@ -31,8 +32,16 @@ export type {
   LimitListOptions,
   LimitReleaseOptions,
   ScheduleFireDueOptions,
+  ScheduleFireOptions,
+  ScheduleFireDueResult,
+  ScheduleFireResult,
   ScheduleListOptions,
-  ScheduleOptions
+  ScheduleOptions,
+  ScheduleRecord,
+  ScheduleCatchupPolicy,
+  ScheduleKind,
+  ScheduleOverlapPolicy,
+  ScheduleState
 } from "./client-admin-options.js";
 
 export interface FlowBatchCompletedItem {
@@ -65,6 +74,7 @@ export interface FerricStoreClientOptions {
 }
 
 export interface FerricStoreClientFromUrlOptions extends FerricStoreClientOptions {
+  httpOptions?: HTTPAdapterOptions;
   nativeOptions?: NativeClientOptions;
   reconnect?: boolean | ReconnectOptions;
 }

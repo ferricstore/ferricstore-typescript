@@ -86,7 +86,7 @@ describe("Flow query convenience response decoding", () => {
     );
 
     await expect(client.list("invoice", OPTIONS)).rejects.toThrow(
-      "result_records does not match records",
+      "usage result_records is inconsistent with records",
     );
     await expect(client.list("invoice", OPTIONS)).rejects.toThrow(
       "records must be a dense array",

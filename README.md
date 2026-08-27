@@ -16,12 +16,29 @@ npm install @ferricstore/ferricstore
 
 Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is tested with Node 22, 24, and 26.
 
+Agent framework adapters are optional:
+
+```bash
+npm install @ferricstore/ferricstore @langchain/langgraph @langchain/core
+# or
+npm install @ferricstore/ferricstore @openai/agents
+```
+
+Use `@ferricstore/ferricstore/langgraph` for a LangGraph.js checkpointer,
+long-term `BaseStore`, and FerricFlow handler bridge. Use
+`@ferricstore/ferricstore/openai-agents` for an atomic, idempotent OpenAI
+Agents SDK `Session`. See [docs/agent-frameworks.md](docs/agent-frameworks.md).
+The generated
+[agent framework API reference](https://unpkg.com/@ferricstore/ferricstore/docs/agent-api/modules.html)
+covers every public adapter class and option.
+
 ## Compatibility
 
-SDK `0.5.x` requires FerricStore server `0.11.0` or newer and is tested against
-FerricStore `0.11.2`. FerricStore 0.11 is a breaking beta API contract update,
-while the native wire protocol remains v1 (`FSNP` framing and existing opcode
-numbers are unchanged). Capabilities and response-size limits are negotiated
+TypeScript SDK `0.12.0` requires FerricStore server `0.11.4` or newer. With
+FerricStore 0.11.11 it negotiates compact Stream mode 34 for homogeneous auto-ID
+`XADD` pipelines and compact Pub/Sub mode 35 for homogeneous `PUBLISH`
+pipelines. Native wire protocol v1 and the generic fallback are unchanged.
+Capabilities and response-size limits are negotiated
 per connection from the HELLO-shaped startup response rather than inferred from
 a server version table.
 
@@ -43,7 +60,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  ghcr.io/ferricstore/ferricstore:0.11.2
+  quay.io/ferricstore/ferricstore:0.11.11@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5
 ```
 
 ## Query durable runs
@@ -88,6 +105,60 @@ const projected = projectFlowQuery(
 );
 const result = await client.query(projected, { partition: "partition-a", run: "run-1" });
 ```
+
+## HTTP transport
+
+`fromUrl` accepts `http://` and `https://` without changing the command API.
+HTTP/1.1 uses a persistent keep-alive pool. Set `http2: true` to use one
+multiplexed HTTP/2 session per origin:
+
+```ts
+const client = await FerricStoreClient.fromUrl(
+  "https://ferricstore-http.example.com",
+  {
+    httpOptions: {
+      username: "default",
+      password,
+      http2: true
+    }
+  }
+);
+
+await client.ping();
+```
+
+Use `bearerToken` for Bearer authentication. Basic username/password
+authentication requires HTTPS; omitting the username uses `default`. One SDK
+pipeline becomes one ordered HTTP request. `httpOptions` also bounds request
+and response bytes, batch items, HTTP/1.1 sockets or concurrent HTTP/2 streams,
+redirects, and the whole request deadline. HTTP/2 honors the peer's advertised
+stream limit and queues excess work locally within the same deadline.
+
+The HTTP endpoint is stateless. `AUTH`, `CLIENT`, transactions, Pub/Sub
+subscriptions, session state, and cluster/replication session controls require
+native TCP and fail before network I/O. Blocking list, sorted-set, and stream
+reads remain supported as long-lived HTTP requests, including inside an explicit
+ordered pipeline. Their declared server waits are added to the ordinary
+whole-request deadline; a zero block disables the SDK request deadline until the
+request completes or the client closes. Independently submitted blocking calls
+are not auto-coalesced. Redirects intentionally retain authentication and custom
+headers across origins, so configure only endpoints and redirect targets you
+trust. Use `ferric://` or `ferrics://` whenever connection-local behavior is
+required.
+
+Run the complete HTTP-compatible integration surface through a real TLS
+listener with ACL authentication using:
+
+```bash
+FERRICSTORE_IMAGE=quay.io/ferricstore/ferricstore:0.11.11@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5 \
+  npm run test:integration:http
+```
+
+The runner creates a private CA, verifies that unauthenticated access and a
+restricted user's forbidden `SET` are rejected, and sets
+`FERRICSTORE_USERNAME`, `FERRICSTORE_PASSWORD`, and `FERRICSTORE_CA_FILE` for
+the tests. Native-only subscriptions, topology, and session controls stay in
+the native integration jobs.
 
 ## Cluster-aware client
 
@@ -428,6 +499,45 @@ await flow.scheduleCreate("orders-every-five-minutes", {
 });
 ```
 
+Overdue interval schedules use bounded `fire_once` catch-up. Recovery creates
+one target, coalesces additional elapsed periods in constant time, and sets the
+next run one full interval after recovery:
+
+```ts
+const schedule = await flow.scheduleCreate("billing-sweep", {
+  catchupPolicy: "fire_once",
+  everyMs: 60_000,
+  kind: "interval",
+  overlapPolicy: "queue_after_previous",
+  target: { id_prefix: "billing-sweep", type: "billing" }
+});
+```
+
+`ScheduleRecord` exposes the complete recurrence configuration through
+`created_at_ms`, `every_ms`, `cron`, `timezone`, `overlap_policy`, and
+`overlap_retry_ms`, in addition to `catchup_policy`, `coalesced_count`,
+`last_coalesced_count`, `last_catchup_at_ms`, and `last_planning_error`, using
+the server's canonical field names. Non-applicable recurrence fields are
+`null`, not omitted. `scheduleFireDue()` returns
+`ScheduleFireDueResult`, including the
+batch `coalesced` total. Its `errors` entries correspond to claimed schedules;
+`claim_error` separately reports a failure to request a later wave after
+completed outcomes were preserved. Catch-up handles scheduler delay; overlap
+policy separately handles a previous target that is still active. `fire_once` is the
+default and only catch-up policy for intervals; other schedule kinds reject it.
+The built-in server scheduler normally owns due execution. Call
+`scheduleFireDue()` only for tests, administration, or a deployment that
+deliberately disables the built-in runner and supplies a custom one.
+
+Recurring targets reject a fixed `id`. Set `id_prefix` to choose their
+generated prefix, or omit it to use the schedule ID. `ScheduleState` includes
+the transient `"running"` state used while the server holds a due-execution
+lease. Bounded catch-up is interval-only; overdue cron schedules advance one
+matching occurrence per successful automatic fire.
+When planning fails, `state` is `"failed"`, `end_reason` is
+`"planning_failed"`, and `last_planning_error` contains the actionable error.
+`scheduleDelete()` resolves to `undefined` only after an `OK` server reply.
+
 FIFO Flow state policy is opt-in per state:
 
 ```ts
@@ -555,6 +665,8 @@ Runnable examples live in the `examples/` directory:
 - [signals.ts](examples/signals.ts)
 - [value-refs.ts](examples/value-refs.ts)
 - [kv-store.ts](examples/kv-store.ts)
+- [langgraph.ts](examples/langgraph.ts)
+- [openai-agents-session.ts](examples/openai-agents-session.ts)
 
 ## Codecs
 

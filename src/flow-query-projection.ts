@@ -1,6 +1,10 @@
 import { Buffer } from "node:buffer";
 import {
   FLOW_QUERY_MAX_BYTES,
+  isFlowQueryAsciiWhitespaceCode,
+  matchesFlowQueryAsciiKeyword,
+  trimFlowQueryAsciiWhitespace,
+  trimFlowQueryAsciiWhitespaceStart,
   validateFlowQueryText
 } from "./flow-query-request.js";
 
@@ -102,8 +106,7 @@ export function projectFlowQuery(
     throw new TypeError("Flow query already contains a RETURN clause");
   }
 
-  const trimmed = query.trim();
-  const base = trimmed.endsWith(";") ? trimmed.slice(0, -1).trimEnd() : trimmed;
+  const base = stripOptionalTerminator(query);
   const result = `${base} RETURN ${shape.toUpperCase()} (${selectors.join(", ")})`;
   if (Buffer.byteLength(result, "utf8") > FLOW_QUERY_MAX_BYTES) {
     throw new TypeError(`FLOW.QUERY query exceeds ${FLOW_QUERY_MAX_BYTES} bytes`);
@@ -111,12 +114,34 @@ export function projectFlowQuery(
   return result;
 }
 
+function stripOptionalTerminator(query: string): string {
+  const trimmed = trimFlowQueryAsciiWhitespace(query);
+  if (!trimmed.endsWith(";")) return trimmed;
+
+  const base = trimFlowQueryAsciiWhitespace(trimmed.slice(0, -1));
+  if (base.endsWith(";")) {
+    throw new TypeError("Flow query accepts at most one trailing semicolon");
+  }
+  return base;
+}
+
 function querySource(query: string): "runs" | "events" {
-  const match = /^\s*FROM\s+(runs|events)\b/iu.exec(query);
-  if (match?.[1] == null) {
+  const source = trimFlowQueryAsciiWhitespaceStart(query);
+  if (!matchesFlowQueryAsciiKeyword(source, 0, "FROM") ||
+      !isFlowQueryAsciiWhitespaceCode(source.charCodeAt(4))) {
     throw new TypeError("Projected Flow query must start with FROM runs or FROM events");
   }
-  return match[1].toLowerCase() as "runs" | "events";
+  let offset = 4;
+  while (isFlowQueryAsciiWhitespaceCode(source.charCodeAt(offset))) offset += 1;
+  for (const candidate of ["runs", "events"] as const) {
+    if (matchesFlowQueryAsciiKeyword(source, offset, candidate.toUpperCase())) {
+      const boundary = source[offset + candidate.length];
+      if (boundary == null || isFlowQueryAsciiWhitespaceCode(boundary.charCodeAt(0))) {
+        return candidate;
+      }
+    }
+  }
+  throw new TypeError("Projected Flow query must start with FROM runs or FROM events");
 }
 
 function containsReturnKeyword(query: string): boolean {
