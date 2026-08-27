@@ -99,13 +99,22 @@ export class LangGraphFlow<Input = unknown, Output = unknown> {
   }
 
   async config(flow: FerricFlowHandlerContext, graphContext?: unknown): Promise<LangGraphInvocationConfig> {
+    const invokeOptions = this.options.invokeOptions ?? {};
     const additional = await this.options.config?.(flow) ?? {};
+    const baseConfigurable = invokeOptions.configurable ?? {};
+    if (typeof baseConfigurable !== "object" || Array.isArray(baseConfigurable)) {
+      throw new TypeError("LangGraph invokeOptions configurable must be an object");
+    }
     const rawConfigurable = additional.configurable ?? {};
-    if (rawConfigurable == null || typeof rawConfigurable !== "object" || Array.isArray(rawConfigurable)) {
+    if (typeof rawConfigurable !== "object" || Array.isArray(rawConfigurable)) {
       throw new TypeError("LangGraph config configurable must be an object");
     }
+    const baseMetadata = invokeOptions.metadata ?? {};
+    if (typeof baseMetadata !== "object" || Array.isArray(baseMetadata)) {
+      throw new TypeError("LangGraph invokeOptions metadata must be an object");
+    }
     const rawMetadata = additional.metadata ?? {};
-    if (rawMetadata == null || typeof rawMetadata !== "object" || Array.isArray(rawMetadata)) {
+    if (typeof rawMetadata !== "object" || Array.isArray(rawMetadata)) {
       throw new TypeError("LangGraph config metadata must be an object");
     }
     const threadId = requireText(
@@ -119,16 +128,26 @@ export class LangGraphFlow<Input = unknown, Output = unknown> {
       true
     );
     const context = graphContext === undefined
-      ? this.options.context == null
-        ? new LangGraphFlowContext(flow, threadId, checkpointNs)
-        : await this.options.context(flow)
+      ? this.options.context != null
+        ? await this.options.context(flow)
+        : Object.hasOwn(additional, "context")
+          ? additional.context
+          : Object.hasOwn(invokeOptions, "context")
+            ? invokeOptions.context
+            : new LangGraphFlowContext(flow, threadId, checkpointNs)
       : graphContext;
     return {
-      ...this.options.invokeOptions,
+      ...invokeOptions,
       ...additional,
-      configurable: { ...rawConfigurable, checkpoint_ns: checkpointNs, thread_id: threadId },
+      configurable: {
+        ...baseConfigurable,
+        ...rawConfigurable,
+        checkpoint_ns: checkpointNs,
+        thread_id: threadId
+      },
       context,
       metadata: {
+        ...baseMetadata,
         ...rawMetadata,
         ferricflow_id: flow.id,
         ferricflow_state: flow.logicalState,
@@ -149,7 +168,11 @@ export class LangGraphFlow<Input = unknown, Output = unknown> {
       if ((this.options.recoverExisting ?? true) && this.graph.getState != null) {
         hasCheckpoint = snapshotHasCheckpoint(await this.graph.getState(config));
       }
-      input = hasCheckpoint ? null : await (this.options.input?.(flow) ?? flow.payload as Input);
+      input = hasCheckpoint
+        ? null
+        : this.options.input == null
+          ? flow.payload as Input
+          : await this.options.input(flow);
     }
     const value = await this.graph.invoke(input, config);
     const configurable = config.configurable;

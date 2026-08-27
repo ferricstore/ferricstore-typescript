@@ -1,7 +1,12 @@
+import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+
 import { describe, expect, it } from "vitest";
 import type { AgentInputItem } from "@openai/agents";
 
+import { encodeSnapshot, legacySnapshotDigest } from "../src/agent-persistence/snapshot.js";
 import { FerricStoreSession } from "../src/openai-agents.js";
+import type { CommandArgument } from "../src/internal.js";
 import { MemoryCommandClient } from "./agent-persistence-test-client.js";
 
 const item = (value: string): AgentInputItem => ({ role: "user", content: value });
@@ -100,5 +105,66 @@ describe("FerricStoreSession", () => {
       transaction: { items: [item("safe")], type: "append_items" }
     });
     expect(await first.getItems()).toEqual([item("one"), item("two"), item("safe")]);
+  });
+
+  it("accepts legacy locale-ordered transaction receipts during migration", async () => {
+    const client = new MemoryCommandClient();
+    const sessionId = "legacy-receipt";
+    const legacyItem = {
+      content: "legacy",
+      role: "user",
+      type: "message",
+      z: 1,
+      "ä": 2
+    } as unknown as AgentInputItem;
+    const transaction = { items: [legacyItem], type: "append_items" as const };
+    const sessionDigest = createHash("sha256").update(sessionId, "utf8").digest("hex");
+    await client.command(
+      "HSET",
+      `openai:agents:session:{oais:${sessionDigest}}:session`,
+      "state",
+      encodeSnapshot({
+        formatVersion: 1,
+        items: [legacyItem],
+        operations: { turn: legacySnapshotDigest(transaction, "sv") },
+        sessionId
+      })
+    );
+
+    const session = new FerricStoreSession(client, { legacyReceiptLocales: ["sv"], sessionId });
+    await expect(session.applyHistoryTransaction({ operationId: "turn", transaction })).resolves.toBeUndefined();
+    expect(await session.getItems()).toEqual([legacyItem]);
+  });
+
+  it("does not let an expired session writer overwrite a newer CAS state", async () => {
+    const storage = new MemoryCommandClient();
+    const seed = new FerricStoreSession(storage, { sessionId: "session-race" });
+    await seed.addItems([item("base")]);
+    let commitStarted = false;
+    const losingClient = {
+      async command(...args: CommandArgument[]): Promise<unknown> {
+        const command = typeof args[0] === "string" ? args[0].toUpperCase() : "";
+        if (command === "EXTEND" && commitStarted) return 0;
+        if (command === "CAS" && !commitStarted) {
+          commitStarted = true;
+          await delay(60);
+        }
+        return await storage.command(...args);
+      }
+    };
+    const lockOptions = { lockRetryMs: 2, lockTtlMs: 30, lockWaitMs: 500 };
+    const stale = new FerricStoreSession(losingClient, { ...lockOptions, sessionId: "session-race" });
+    const current = new FerricStoreSession(storage, { ...lockOptions, sessionId: "session-race" });
+    const staleWrite = stale.addItems([item("stale")]).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+
+    while (!commitStarted) await delay(1);
+    await delay(40);
+    await current.addItems([item("current")]);
+
+    expect(await staleWrite).toBeInstanceOf(Error);
+    expect(await current.getItems()).toEqual([item("base"), item("current")]);
   });
 });

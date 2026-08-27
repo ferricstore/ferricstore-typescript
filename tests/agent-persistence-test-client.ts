@@ -8,6 +8,7 @@ interface StoredMember {
 
 export class MemoryCommandClient {
   readonly calls: CommandArgument[][] = [];
+  private readonly strings = new Map<string, string | Buffer>();
   private readonly hashes = new Map<string, Map<string, unknown>>();
   private readonly sets = new Map<string, Map<string, string | Buffer>>();
   private readonly sortedSets = new Map<string, Map<string, StoredMember>>();
@@ -17,6 +18,9 @@ export class MemoryCommandClient {
     this.calls.push(args);
     const command = text(args[0]).toUpperCase();
     switch (command) {
+      case "GET": return clone(this.strings.get(text(args[1]))) ?? null;
+      case "SET": return this.setString(args);
+      case "CAS": return this.cas(args);
       case "LOCK": return this.lock(text(args[1]), text(args[2]), number(args[3]));
       case "EXTEND": return this.extend(text(args[1]), text(args[2]), number(args[3]));
       case "UNLOCK": return this.unlock(text(args[1]), text(args[2]));
@@ -73,6 +77,25 @@ export class MemoryCommandClient {
       hash.set(field, clone(args[index + 1]));
     }
     return added;
+  }
+
+  private setString(args: readonly CommandArgument[]): Buffer | null {
+    const key = text(args[1]);
+    const value = stringOrBuffer(args[2]);
+    const options = args.slice(3).map((item) => text(item).toUpperCase());
+    if (options.includes("NX") && this.strings.has(key)) return null;
+    if (options.includes("XX") && !this.strings.has(key)) return null;
+    this.strings.set(key, clone(value));
+    return Buffer.from("OK");
+  }
+
+  private cas(args: readonly CommandArgument[]): number | null {
+    const key = text(args[1]);
+    const current = this.strings.get(key);
+    if (current == null) return null;
+    if (!asBuffer(current).equals(asBuffer(stringOrBuffer(args[2])))) return 0;
+    this.strings.set(key, clone(stringOrBuffer(args[3])));
+    return 1;
   }
 
   private hsetnx(args: readonly CommandArgument[]): number {
@@ -149,6 +172,7 @@ export class MemoryCommandClient {
     let deleted = 0;
     for (const rawKey of args.slice(1)) {
       const key = text(rawKey);
+      deleted += Number(this.strings.delete(key));
       deleted += Number(this.hashes.delete(key));
       deleted += Number(this.sets.delete(key));
       deleted += Number(this.sortedSets.delete(key));

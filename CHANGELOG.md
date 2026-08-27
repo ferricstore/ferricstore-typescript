@@ -6,6 +6,21 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-08-27
+
+### Fixed
+
+- Fence adapter state with native compare-and-swap commits, epoch-protected
+  LangGraph threads, CAS tombstones, and append-only validated indexes so an
+  expired writer cannot overwrite or hide newer data.
+- Honor global LangGraph checkpoint namespace filters and preserve nested
+  `invokeOptions` configuration, metadata, context, and intentional null input.
+- Make OpenAI Agents transaction digests independent of the worker locale while
+  continuing to accept receipts written by the original locale-ordered format.
+- Bind GitHub-verified annotated release tags to the release name and checked-out
+  commit, include optional framework entry points in the generated API reference,
+  and link to a rendered package-hosted reference.
+
 ## [0.12.0] - 2026-08-27
 
 ### Added

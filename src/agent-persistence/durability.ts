@@ -18,6 +18,17 @@ export interface FerricStoreLockOptions {
   lockRetryMs?: number;
 }
 
+export interface FerricStoreMutationLease {
+  /** Aborted as soon as lock ownership is known to have been lost. */
+  readonly signal: AbortSignal;
+  /** Throw when this mutation no longer owns every requested lock. */
+  assertOwned(): void;
+  /** Publish an idempotent, add-only discovery entry before its CAS record. */
+  publish(...args: CommandArgument[]): Promise<unknown>;
+  /** Atomically replace a value only when its last-read bytes are still current. */
+  compareAndSet(key: string, expected: Buffer | undefined, value: Buffer): Promise<boolean>;
+}
+
 interface RequiredLockOptions {
   readonly lockRetryMs: number;
   readonly lockTtlMs: number;
@@ -80,20 +91,62 @@ export async function executeCommands(
   return await Promise.all(commands.map(async (command) => await client.command(...command)));
 }
 
+export async function readAtomicValue(
+  client: FerricStoreCommandClient,
+  key: string,
+  name: string
+): Promise<Buffer | undefined> {
+  const value = await client.command("GET", key);
+  if (value == null) return undefined;
+  if (typeof value === "string") return Buffer.from(value, "utf8");
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) return Buffer.from(value);
+  throw new TypeError(`FerricStore returned a non-binary ${name}`);
+}
+
+export async function compareAndSetAtomicValue(
+  client: FerricStoreCommandClient,
+  key: string,
+  expected: Buffer | undefined,
+  value: Buffer
+): Promise<boolean> {
+  if (expected == null) {
+    const response = await client.command("SET", key, value, "NX");
+    if (response == null || response === false) return false;
+    if (response === true) return true;
+    return textResponse(response, "SET NX response").toUpperCase() === "OK";
+  }
+  const response = await client.command("CAS", key, expected, value);
+  if (response == null || response === false) return false;
+  if (response === true) return true;
+  return integerResponse(response, "CAS response") === 1;
+}
+
 export async function withMutationLocks<T>(
   client: FerricStoreCommandClient,
   keys: readonly string[],
-  operation: () => Promise<T>,
+  operation: (lease: FerricStoreMutationLease) => Promise<T>,
   options: FerricStoreLockOptions = {}
 ): Promise<T> {
   const orderedKeys = [...new Set(keys)].sort();
-  if (orderedKeys.length === 0) return await operation();
+  if (orderedKeys.length === 0) {
+    const signal = new AbortController().signal;
+    return await operation({
+      signal,
+      assertOwned: () => undefined,
+      publish: async (...args) => await additiveCommand(client, args),
+      compareAndSet: async (key, expected, value) =>
+        await compareAndSetAtomicValue(client, key, expected, value)
+    });
+  }
 
   const normalized: RequiredLockOptions = {
     lockRetryMs: positiveInteger(options.lockRetryMs, DEFAULT_LOCK_OPTIONS.lockRetryMs, "lockRetryMs"),
     lockTtlMs: positiveInteger(options.lockTtlMs, DEFAULT_LOCK_OPTIONS.lockTtlMs, "lockTtlMs"),
     lockWaitMs: nonNegativeInteger(options.lockWaitMs, DEFAULT_LOCK_OPTIONS.lockWaitMs, "lockWaitMs")
   };
+  if (normalized.lockRetryMs >= normalized.lockTtlMs) {
+    throw new TypeError("lockRetryMs must be less than lockTtlMs");
+  }
   const owner = randomUUID();
   const acquired: string[] = [];
   const deadline = performance.now() + normalized.lockWaitMs;
@@ -102,7 +155,55 @@ export async function withMutationLocks<T>(
   let releaseError: unknown;
   let result: T | undefined;
   let operationCompleted = false;
+  let conditionalCommitCompleted = false;
   const heartbeatAbort = new AbortController();
+  const ownershipAbort = new AbortController();
+  const lastExtended = new Map<string, number>();
+  const loseOwnership = (error: unknown): Error => {
+    const normalizedError = errorObject(error);
+    heartbeatError ??= normalizedError;
+    if (!ownershipAbort.signal.aborted) ownershipAbort.abort(normalizedError);
+    return normalizedError;
+  };
+  const assertOwned = (): void => {
+    if (heartbeatError != null) throw errorObject(heartbeatError);
+    if (ownershipAbort.signal.aborted) throw errorObject(ownershipAbort.signal.reason);
+  };
+  const renewOwned = async (): Promise<void> => {
+    assertOwned();
+    for (const key of acquired) {
+      try {
+        const response = await client.command("EXTEND", key, owner, normalized.lockTtlMs);
+        if (integerResponse(response, "EXTEND response") !== 1) {
+          throw new Error(`lost FerricStore lock ${JSON.stringify(key)} while mutating data`);
+        }
+        lastExtended.set(key, performance.now());
+      } catch (error) {
+        throw loseOwnership(new Error(
+          `could not validate FerricStore lock ${JSON.stringify(key)} before mutating data`,
+          { cause: error }
+        ));
+      }
+    }
+    assertOwned();
+  };
+  const lease: FerricStoreMutationLease = {
+    signal: ownershipAbort.signal,
+    assertOwned,
+    publish: async (...args) => {
+      await renewOwned();
+      const response = await additiveCommand(client, args);
+      assertOwned();
+      return response;
+    },
+    compareAndSet: async (key, expected, value) => {
+      await renewOwned();
+      const committed = await compareAndSetAtomicValue(client, key, expected, value);
+      if (committed) conditionalCommitCompleted = true;
+      else assertOwned();
+      return committed;
+    }
+  };
 
   try {
     for (const key of orderedKeys) {
@@ -110,23 +211,27 @@ export async function withMutationLocks<T>(
         if (performance.now() >= deadline) {
           throw new Error(`timed out acquiring FerricStore lock ${JSON.stringify(key)}`);
         }
+        await extendAcquiredLocks(client, acquired, owner, normalized.lockTtlMs);
         await delay(normalized.lockRetryMs);
       }
       acquired.push(key);
     }
+    await extendAcquiredLocks(client, acquired, owner, normalized.lockTtlMs);
+    for (const key of acquired) lastExtended.set(key, performance.now());
 
     const heartbeat = renewLocks(
       client,
       acquired,
       owner,
       normalized.lockTtlMs,
+      lastExtended,
       heartbeatAbort.signal,
       (error) => {
-        heartbeatError ??= error;
+        loseOwnership(error);
       }
     );
     try {
-      result = await operation();
+      result = await operation(lease);
       operationCompleted = true;
     } catch (error) {
       primaryError = error;
@@ -147,10 +252,49 @@ export async function withMutationLocks<T>(
     }
   }
   if (primaryError != null) throw errorObject(primaryError);
-  if (heartbeatError != null) throw errorObject(heartbeatError);
-  if (releaseError != null) throw errorObject(releaseError);
+  if (heartbeatError != null && !conditionalCommitCompleted) throw errorObject(heartbeatError);
+  if (releaseError != null && !(heartbeatError != null && conditionalCommitCompleted)) {
+    throw errorObject(releaseError);
+  }
   if (!operationCompleted) throw new Error("FerricStore mutation did not complete");
   return result as T;
+}
+
+async function additiveCommand(
+  client: FerricStoreCommandClient,
+  args: readonly CommandArgument[]
+): Promise<unknown> {
+  const rawName = args[0];
+  const name = typeof rawName === "string"
+    ? rawName.toUpperCase()
+    : Buffer.isBuffer(rawName) || rawName instanceof Uint8Array
+      ? Buffer.from(rawName).toString("utf8").toUpperCase()
+      : "";
+  if (name !== "SADD" && name !== "ZADD") {
+    throw new TypeError("FerricStore mutation leases only publish add-only SADD or ZADD indexes");
+  }
+  if (name === "ZADD" && (
+    args.length < 4 ||
+    args.length % 2 !== 0 ||
+    args.slice(2).some((value, index) => index % 2 === 0 && Number(value) !== 0)
+  )) {
+    throw new TypeError("FerricStore mutation leases only publish zero-score ZADD indexes");
+  }
+  return await client.command(...args);
+}
+
+async function extendAcquiredLocks(
+  client: FerricStoreCommandClient,
+  keys: readonly string[],
+  owner: string,
+  ttlMs: number
+): Promise<void> {
+  for (const key of keys) {
+    const response = await client.command("EXTEND", key, owner, ttlMs);
+    if (integerResponse(response, "EXTEND response") !== 1) {
+      throw new Error(`lost FerricStore lock ${JSON.stringify(key)} before mutating data`);
+    }
+  }
 }
 
 async function tryAcquireLock(
@@ -173,12 +317,12 @@ async function renewLocks(
   keys: readonly string[],
   owner: string,
   ttlMs: number,
+  lastExtended: Map<string, number>,
   signal: AbortSignal,
   onError: (error: unknown) => void
 ): Promise<void> {
-  const intervalMs = Math.max(Math.floor(ttlMs / 3), 10);
-  const retryMs = Math.min(Math.max(Math.floor(intervalMs / 10), 10), 1_000);
-  const lastExtended = new Map(keys.map((key) => [key, performance.now()]));
+  const intervalMs = Math.max(Math.floor(ttlMs / 3), 1);
+  const retryMs = Math.min(Math.max(Math.floor(intervalMs / 10), 1), 1_000);
   let waitMs = intervalMs;
   while (!signal.aborted) {
     try {

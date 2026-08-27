@@ -106,6 +106,12 @@ outcomes; interrupts can transition to a chosen Flow state or use a custom
 outcome mapper. Call `resume(flowContext, value)` from a handler to send a
 LangGraph `Command({ resume: value })`.
 
+Static `invokeOptions` and values returned by the `config` callback are merged,
+including their nested `configurable` and `metadata` objects. Dynamic values
+override static values; the bridge always owns `thread_id`, `checkpoint_ns`, and
+the `ferricflow_*` metadata fields. An explicitly supplied runtime context is
+preserved.
+
 The graph checkpointer and FerricFlow solve different layers and are intended
 to be used together:
 
@@ -142,13 +148,19 @@ clear, compaction replacement, function-call history rewrites, and atomic
 `append_items` / `replace_suffix` transactions. A transaction stores its
 operation ID and history mutation in one atomic record. Repeating the same
 operation is a no-op; reusing its ID for different content or replacing a
-non-matching suffix fails without changing history.
+non-matching suffix fails without changing history. Versioned transaction
+digests are deterministic across worker locales, while receipts created by the
+original locale-ordered format remain valid during migration. When an existing
+deployment also changes locale, pass its previous locale tags through
+`legacyReceiptLocales` until its receipts have been replayed and upgraded.
 
-All session mutations use a renewable FerricStore lock. Reads see either the
-old or new complete session record, never a partial history. `clearSession()`
-also clears transaction receipts. Session persistence stores conversation
-history; put the overall agent run in FerricFlow when it also needs durable
-leases, retries, timers, signals, or multi-step business state.
+All session mutations use a renewable FerricStore lock for contention control
+and a native compare-and-swap commit for correctness. Reads see either the old
+or new complete session record, never a partial history, and a writer whose
+lock expires cannot overwrite a newer state. `clearSession()` also clears
+transaction receipts. Session persistence stores conversation history; put the
+overall agent run in FerricFlow when it also needs durable leases, retries,
+timers, signals, or multi-step business state.
 
 ## Operational options
 
@@ -156,4 +168,9 @@ All three adapters accept `keyPrefix`, `lockTtlMs`, `lockWaitMs`, and
 `lockRetryMs`. The saver and store also accept `scanCount`; the saver accepts a
 custom LangGraph serializer. Defaults are suitable for ordinary use. Give
 different applications or environments different prefixes when they share a
-FerricStore deployment.
+FerricStore deployment. `lockRetryMs` must be lower than `lockTtlMs`. Before
+publishing authoritative state, the adapters use FerricStore CAS. LangGraph
+checkpoint deletion advances a thread epoch, and BaseStore deletion writes a
+CAS tombstone; their discovery indexes are append-only and validated on reads.
+These rules make late commands from expired writers harmless even across
+processes.
