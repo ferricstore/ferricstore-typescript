@@ -1,15 +1,14 @@
 import { expect, it } from "vitest";
 import {
-  FerricStoreClient,
   JsonCodec,
   type FlowRecord
 } from "../../src/index.js";
 import { buildFlowListQuery } from "../../src/flow-query-builder.js";
-import { claimOne, eventually, suffix, url } from "./live-support.js";
+import { claimOne, eventually, integrationClient, suffix } from "./live-support.js";
 
 export function registerFlowQueryConvenienceIntegrationTests(): void {
   it("executes every typed collection convenience through live FQL", async () => {
-    const client = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const client = await integrationClient({ codec: new JsonCodec() });
     const run = suffix();
     const partitionKey = `ts-sdk:query-convenience:${run}:partition`;
     const type = `ts-sdk-query-convenience-${run}`;

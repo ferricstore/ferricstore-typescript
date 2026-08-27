@@ -1,13 +1,16 @@
 export {
   NativeAdapter,
+  HTTPAdapter,
   type CommandExecutor,
   type ExecutePipelineOptions,
   type NativeAdapterOptions,
   type NativeClientOptions,
   type NativeProtocolEvent,
+  type HTTPAdapterOptions,
   type ReconnectOptions,
   type TopologyNativeAdapterOptions
 } from "./adapters.js";
+export { httpCommandDisposition, type HTTPCommandDisposition } from "./http-command-policy.js";
 export {
   ReconnectingExecutor,
   isReconnectableClosedConnectionError
@@ -139,6 +142,7 @@ export {
 export {
   ConnectionClosedError,
   FerricStoreError,
+  HTTPTransportError,
   FlowAlreadyExistsError,
   FlowNotFoundError,
   FlowWrongStateError,

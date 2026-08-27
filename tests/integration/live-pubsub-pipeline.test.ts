@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { FerricStoreClient } from "../../src/index.js";
-import { suffix, url } from "./live-support.js";
+import { integrationClient, suffix } from "./live-support.js";
 
 describe("FerricStore compact Pub/Sub pipeline integration", () => {
   it("publishes to multiple channels in one physical pipeline", async () => {
-    const client = await FerricStoreClient.fromUrl(url());
+    const client = await integrationClient();
     const prefix = `ts-sdk:pubsub-pipeline:${suffix()}:`;
 
     try {
