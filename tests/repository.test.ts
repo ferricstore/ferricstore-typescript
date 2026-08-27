@@ -49,12 +49,14 @@ describe("release workflow", () => {
     expect(npm).toMatch(
       /needs:\s*\[integration, authenticated-integration, http-integration\]/u
     );
-    expect(npm).toContain("Verify annotated release tag signature");
-    expect(npm).toContain(".verification.verified");
-    expect(npm).toContain(".tag");
-    expect(npm).toContain(".object.sha");
+    expect(npm).toContain("Verify release tag and checkout");
+    expect(npm).toContain("package_version");
+    expect(npm).toContain("expected_tag");
+    expect(npm).toContain("GITHUB_REF_NAME");
     expect(npm).toContain("GITHUB_SHA");
     expect(npm).toContain("git rev-parse HEAD");
+    expect(npm).not.toContain(".verification.verified");
+    expect(npm).not.toContain("GPG");
     expect(npm).toContain("npm publish --provenance --access public");
   });
 
