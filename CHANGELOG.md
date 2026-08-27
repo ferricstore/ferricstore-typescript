@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-08-27
+
+### Changed
+
+- Update the ESLint toolchain while retaining the supported TypeScript 6 and
+  Node.js 22 type definitions.
+- Update the pinned GitHub Actions used for checkout, Node.js setup, CodeQL,
+  and GitHub release creation.
+
 ## [0.12.1] - 2026-08-27
 
 ### Fixed
