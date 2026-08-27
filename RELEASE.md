@@ -5,7 +5,6 @@ Releases are published to npm from GitHub Actions when a version tag is pushed.
 ## Prerequisites
 
 - Repository secret `NPM_TOKEN` is configured with publish access.
-- The release signer has a GPG or SSH signing key verified by GitHub.
 - `package.json` version and `CHANGELOG.md` are updated.
 - `npm run check` and `npm run pack:dry-run` pass locally.
 - The GitHub Actions `test` and `security` workflows pass on `main`.
@@ -15,16 +14,16 @@ Releases are published to npm from GitHub Actions when a version tag is pushed.
 1. Update `package.json` version.
 2. Move the changelog section from `Unreleased` to the release date.
 3. Commit the release change.
-4. Create a signed tag:
+4. Create the version tag:
 
    ```bash
-   git tag -s v0.12.0 -m "v0.12.0"
+   git tag v0.12.1
    git push origin main --tags
    ```
 
-5. GitHub Actions verifies the annotated tag signature, embedded tag name, and
-   target commit against the checked-out release through GitHub, then runs
-   `npm run check`, package dry-run, and `npm publish --provenance`.
+5. GitHub Actions verifies the tag matches the package version and checked-out
+   commit, then runs `npm run check`, package dry-run, and
+   `npm publish --provenance`.
 6. GitHub Actions creates a GitHub release with generated release notes from the tag.
 
 ## Dry Run
