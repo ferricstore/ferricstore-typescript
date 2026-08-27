@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { FerricStoreSaver, FerricStoreStore, LangGraphFlow } from "../../src/langgraph.js";
 import { FerricStoreSession } from "../../src/openai-agents.js";
-import { deletePrefixedKeys, integrationClient, suffix } from "./live-support.js";
+import { deletePrefixedKeys, eventually, integrationClient, suffix } from "./live-support.js";
 
 describe("live agent-framework persistence", () => {
   it("persists OpenAI sessions and a compiled LangGraph through the real server", async () => {
@@ -80,7 +80,12 @@ describe("live agent-framework persistence", () => {
       expect((await bridge.invoke(flow)).value).toEqual({ count: 8 });
       expect((await bridge.invoke(flow)).value).toEqual({ count: 8 });
       await saver.deleteThread("live-thread");
-      expect(await saver.getTuple(config)).toBeUndefined();
+      expect(await eventually(
+        async () => await saver.getTuple(config),
+        (tuple) => tuple == null,
+        "deleted LangGraph thread remained visible",
+        { timeoutMs: 5_000 }
+      )).toBeUndefined();
     } finally {
       await deletePrefixedKeys(client, prefix);
       await client.close();
