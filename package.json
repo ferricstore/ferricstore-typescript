@@ -1,6 +1,6 @@
 {
   "name": "@ferricstore/ferricstore",
-  "version": "0.11.11",
+  "version": "0.12.0",
   "description": "TypeScript SDK for FerricStore and FerricFlow",
   "type": "module",
   "license": "Apache-2.0",
@@ -52,6 +52,26 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./langgraph": {
+      "import": {
+        "types": "./dist/langgraph.d.ts",
+        "default": "./dist/langgraph.js"
+      },
+      "require": {
+        "types": "./dist/langgraph.d.cts",
+        "default": "./dist/langgraph.cjs"
+      }
+    },
+    "./openai-agents": {
+      "import": {
+        "types": "./dist/openai-agents.d.ts",
+        "default": "./dist/openai-agents.js"
+      },
+      "require": {
+        "types": "./dist/openai-agents.d.cts",
+        "default": "./dist/openai-agents.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -61,7 +81,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts --sourcemap --clean",
+    "build": "tsup src/index.ts src/langgraph.ts src/openai-agents.ts --format esm,cjs --dts --sourcemap --clean --splitting false",
     "check": "npm run typecheck && npm run lint && npm run test && npm run build && npm run test:exports && npm run docs:check",
     "docs": "typedoc",
     "docs:check": "typedoc --logLevel Warn && node scripts/check-generated-docs.mjs",
@@ -84,6 +104,9 @@
     "@emnapi/core": "^1.11.3",
     "@emnapi/runtime": "^1.11.3",
     "@eslint/js": "^10.0.1",
+    "@langchain/core": "^1.2.9",
+    "@langchain/langgraph": "^1.4.12",
+    "@openai/agents": "^0.17.0",
     "@types/node": "^22.20.1",
     "eslint": "^10.9.0",
     "tsup": "^8.5.1",
@@ -91,5 +114,21 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.67.0",
     "vitest": "^4.1.11"
+  },
+  "peerDependencies": {
+    "@langchain/core": ">=1.1.48 <2",
+    "@langchain/langgraph": ">=1.4.12 <2",
+    "@openai/agents": ">=0.17.0 <1"
+  },
+  "peerDependenciesMeta": {
+    "@langchain/core": {
+      "optional": true
+    },
+    "@langchain/langgraph": {
+      "optional": true
+    },
+    "@openai/agents": {
+      "optional": true
+    }
   }
 }
