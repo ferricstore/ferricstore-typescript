@@ -12,6 +12,7 @@ import type {
 
 import {
   normalizeKeyPrefix,
+  readAtomicValue,
   type FerricStoreCommandClient,
   type FerricStoreLockOptions,
   withMutationLocks
@@ -20,12 +21,14 @@ import {
   cloneSnapshot,
   decodeSnapshot,
   encodeSnapshot,
+  legacySnapshotDigest,
   snapshotDigest,
   snapshotsEqual
 } from "./agent-persistence/snapshot.js";
 
 const SESSION_FORMAT_VERSION = 1;
 const SESSION_STATE_FIELD = "state";
+const RECEIPT_DIGEST_VERSION = "v2:";
 
 interface StoredSessionState {
   readonly formatVersion: typeof SESSION_FORMAT_VERSION;
@@ -41,15 +44,18 @@ export interface FerricStoreSessionOptions extends FerricStoreLockOptions {
   initialItems?: AgentInputItem[];
   /** FerricStore key prefix. Defaults to `openai:agents:session`. */
   keyPrefix?: string;
+  /** Previous worker locales to accept when migrating unversioned operation receipts. */
+  legacyReceiptLocales?: string[];
 }
 
 /**
  * Durable OpenAI Agents SDK conversation history backed by FerricStore.
  *
- * Every mutation is serialized by an ownership-checked, renewable FerricStore
- * lock. History transactions and their operation receipts are persisted in one
- * atomic hash-field write, implementing the SDK's retry-safe transaction
- * capability in addition to its base Session contract.
+ * Renewable locks reduce contention, while compare-and-swap makes every state
+ * commit safe even if a writer's lease expires in flight. History transactions
+ * and their operation receipts are persisted in one atomic value, implementing
+ * the SDK's retry-safe transaction capability in addition to its base Session
+ * contract.
  */
 export class FerricStoreSession implements
   Session,
@@ -60,7 +66,9 @@ export class FerricStoreSession implements
   readonly keyPrefix: string;
   private readonly initialItems: AgentInputItem[];
   private readonly lockOptions: FerricStoreLockOptions;
+  private readonly legacyReceiptLocales: readonly string[];
   private readonly sessionKey: string;
+  private readonly stateKey: string;
   private readonly lockKey: string;
 
   constructor(client: FerricStoreCommandClient, options: FerricStoreSessionOptions = {}) {
@@ -76,8 +84,17 @@ export class FerricStoreSession implements
       lockTtlMs: options.lockTtlMs,
       lockWaitMs: options.lockWaitMs
     };
+    if (options.legacyReceiptLocales != null && !Array.isArray(options.legacyReceiptLocales)) {
+      throw new TypeError("legacyReceiptLocales must be an array");
+    }
+    try {
+      this.legacyReceiptLocales = Intl.getCanonicalLocales(options.legacyReceiptLocales ?? []);
+    } catch (error) {
+      throw new TypeError("legacyReceiptLocales contains an invalid locale", { cause: error });
+    }
     const digest = createHash("sha256").update(this.sessionId, "utf8").digest("hex");
     this.sessionKey = `${this.keyPrefix}:{oais:${digest}}:session`;
+    this.stateKey = `${this.sessionKey}:atomic-state`;
     this.lockKey = `${this.keyPrefix}:{oais:${digest}}:mutation-lock`;
   }
 
@@ -156,15 +173,21 @@ export class FerricStoreSession implements
 
   async applyHistoryTransaction(args: SessionHistoryTransactionArgs): Promise<void> {
     const { operationId, transaction } = snapshotTransactionArgs(args);
-    const digest = snapshotDigest(transaction);
+    const digest = `${RECEIPT_DIGEST_VERSION}${snapshotDigest(transaction)}`;
+    const legacyDigests = new Set([
+      snapshotDigest(transaction),
+      legacySnapshotDigest(transaction),
+      ...this.legacyReceiptLocales.map((locale) => legacySnapshotDigest(transaction, locale))
+    ]);
     await this.mutate(async (state) => {
       const existing = Object.getOwnPropertyDescriptor(state.operations, operationId)?.value as unknown;
       if (existing != null) {
         if (typeof existing !== "string") throw new Error("corrupt session history operation receipt");
-        if (existing !== digest) {
+        if (existing === digest) return state;
+        if (!legacyDigests.has(existing)) {
           throw new Error("session history operation was already applied with a different transaction");
         }
-        return state;
+        return { ...state, operations: { ...state.operations, [operationId]: digest } };
       }
 
       let items: AgentInputItem[];
@@ -189,16 +212,25 @@ export class FerricStoreSession implements
   private async mutate(
     operation: (state: StoredSessionState) => Promise<StoredSessionState>
   ): Promise<void> {
-    await withMutationLocks(this.client, [this.lockKey], async () => {
-      const current = await this.readState();
-      const next = await operation(current);
-      await this.client.command("HSET", this.sessionKey, SESSION_STATE_FIELD, encodeSnapshot(next));
+    await withMutationLocks(this.client, [this.lockKey], async (lease) => {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        lease.assertOwned();
+        const snapshot = await this.readMutationState();
+        const next = await operation(snapshot.state);
+        if (await lease.compareAndSet(this.stateKey, snapshot.expected, encodeSnapshot(next))) return;
+      }
+      throw new Error("concurrent FerricStore OpenAI Agents session mutation did not converge");
     }, this.lockOptions);
   }
 
   private async readState(): Promise<StoredSessionState> {
-    const value = await this.client.command("HGET", this.sessionKey, SESSION_STATE_FIELD);
-    if (value == null) return this.emptyState();
+    return (await this.readMutationState()).state;
+  }
+
+  private async readMutationState(): Promise<{ expected: Buffer | undefined; state: StoredSessionState }> {
+    const expected = await readAtomicValue(this.client, this.stateKey, "OpenAI Agents atomic session state");
+    const value = expected ?? await this.client.command("HGET", this.sessionKey, SESSION_STATE_FIELD);
+    if (value == null) return { expected, state: this.emptyState() };
     const state = decodeSnapshot<StoredSessionState>(value, "OpenAI Agents session state");
     if (
       state == null ||
@@ -213,7 +245,7 @@ export class FerricStoreSession implements
     ) {
       throw new Error("unsupported or corrupt FerricStore OpenAI Agents session state");
     }
-    return state;
+    return { expected, state };
   }
 
   private emptyState(): StoredSessionState {

@@ -48,6 +48,43 @@ describe("LangGraphFlow", () => {
     const interruptOutcome = await interrupted.handle(flow);
     expect(interruptOutcome).toMatchObject({ kind: "transition", toState: "waiting_approval" });
   });
+
+  it("deep-merges invocation options and preserves an intentional null input", async () => {
+    const flow = workflowContext();
+    const invocations: { input: unknown; options: Record<string, unknown> }[] = [];
+    const baseContext = { source: "invokeOptions" };
+    const bridge = new LangGraphFlow({
+      async invoke(input: unknown, options?: Record<string, unknown>): Promise<Record<string, unknown>> {
+        invocations.push({ input, options: options ?? {} });
+        return {};
+      }
+    }, {
+      config: () => ({
+        configurable: { dynamic: "config" },
+        metadata: { dynamic: "metadata" }
+      }),
+      input: () => null,
+      invokeOptions: {
+        configurable: { base: "config" },
+        context: baseContext,
+        metadata: { base: "metadata" }
+      }
+    });
+
+    await bridge.invoke(flow);
+    expect(invocations[0]?.input).toBeNull();
+    expect(invocations[0]?.options.context).toBe(baseContext);
+    expect(invocations[0]?.options.configurable).toMatchObject({
+      base: "config",
+      checkpoint_ns: "",
+      dynamic: "config"
+    });
+    expect(invocations[0]?.options.metadata).toMatchObject({
+      base: "metadata",
+      dynamic: "metadata",
+      ferricflow_id: "flow-1"
+    });
+  });
 });
 
 function workflowContext(): WorkflowContext {

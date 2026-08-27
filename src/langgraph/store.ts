@@ -16,13 +16,16 @@ import {
   arrayResponse,
   normalizeKeyPrefix,
   positiveInteger,
+  readAtomicValue,
   type FerricStoreCommandClient,
   type FerricStoreLockOptions,
+  type FerricStoreMutationLease,
   withMutationLocks
 } from "../agent-persistence/durability.js";
 
 const FORMAT_VERSION = 1;
 const ITEM_FIELD_PREFIX = "item:";
+const DELETED_ITEM = Buffer.from("ferricstore:langgraph:item:deleted:v2", "utf8");
 type SearchItem = Item & { score?: number };
 
 interface StoredItem {
@@ -45,9 +48,9 @@ export interface FerricStoreStoreOptions extends FerricStoreLockOptions {
  * LangGraph.js long-term memory store backed by FerricStore.
  *
  * It implements hierarchical namespaces, exact/comparison filters, ordered
- * pagination, batching, and failure-safe indexes. Vector search is deliberately
- * rejected until a semantic index is configured rather than silently returning
- * an unranked result.
+ * pagination, batching, CAS-protected item commits, and append-only discovery
+ * indexes. Vector search is deliberately rejected until a semantic index is
+ * configured rather than silently returning an unranked result.
  */
 export class FerricStoreStore extends BaseStore {
   readonly client: FerricStoreCommandClient;
@@ -76,7 +79,7 @@ export class FerricStoreStore extends BaseStore {
         return this.itemLockKey(operation.namespace, operation.key);
       });
 
-    return await withMutationLocks(this.client, lockKeys, async () => {
+    return await withMutationLocks(this.client, lockKeys, async (lease) => {
       const results: unknown[] = [];
       const puts = new Map<string, PutOperation>();
       for (const operation of operations) {
@@ -93,7 +96,7 @@ export class FerricStoreStore extends BaseStore {
           throw new TypeError("unsupported LangGraph store operation");
         }
       }
-      for (const operation of puts.values()) await this.putOperation(operation);
+      for (const operation of puts.values()) await this.putOperation(operation, lease);
       return results as OperationResults<Op>;
     }, this.lockOptions);
   }
@@ -107,54 +110,50 @@ export class FerricStoreStore extends BaseStore {
   }
 
   private itemLockKey(namespace: readonly string[], key: string): string {
-    const keyBytes = Buffer.from(key, "utf8");
-    return `${this.keyPrefix}:{lgsi:${sha256(Buffer.concat([
-      namespaceIdentity(namespace),
-      uint64(keyBytes.length),
-      keyBytes
-    ]))}}:mutation-lock`;
+    return `${this.keyPrefix}:{lgsi:${itemIdentityDigest(namespace, key)}}:mutation-lock`;
+  }
+
+  private itemDataKey(namespace: readonly string[], key: string): string {
+    return `${this.keyPrefix}:{lgsi:${itemIdentityDigest(namespace, key)}}:atomic-item`;
   }
 
   private async getOperation(operation: GetOperation): Promise<Item | null> {
     validateNamespace(operation.namespace);
     if (typeof operation.key !== "string") throw new TypeError("store key must be text");
-    const value = await this.client.command(
-      "HGET",
-      this.namespaceKey(operation.namespace),
-      itemField(operation.key)
-    );
-    return value == null ? null : decodeItem(value);
+    const snapshot = await this.readItemSnapshot(operation.namespace, operation.key);
+    return snapshot.record == null ? null : itemFromRecord(snapshot.record);
   }
 
-  private async putOperation(operation: PutOperation): Promise<void> {
+  private async putOperation(operation: PutOperation, lease: FerricStoreMutationLease): Promise<void> {
     validatePut(operation);
-    const namespaceKey = this.namespaceKey(operation.namespace);
-    const field = itemField(operation.key);
+    const dataKey = this.itemDataKey(operation.namespace, operation.key);
     const locator = catalogMember(operation.namespace, operation.key);
     if (operation.value == null) {
-      // Hide the item first. A failed ZREM leaves only a locator that readers
-      // validate and skip; retries safely finish the cleanup.
-      await this.client.command("HDEL", namespaceKey, field);
-      await this.client.command("ZREM", this.catalogKey(), locator);
-      return;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const snapshot = await this.readItemSnapshot(operation.namespace, operation.key);
+        if (snapshot.expected?.equals(DELETED_ITEM) === true) return;
+        if (await lease.compareAndSet(dataKey, snapshot.expected, DELETED_ITEM)) return;
+      }
+      throw new Error("concurrent FerricStore LangGraph store deletion did not converge");
     }
     const storedValue = snapshotJsonValue(operation.value);
-
-    const existing = await this.client.command("HGET", namespaceKey, field);
-    const now = new Date().toISOString();
-    const createdAt = existing == null ? now : decodeItemRecord(existing).createdAt;
-    const record: StoredItem = {
-      createdAt,
-      formatVersion: FORMAT_VERSION,
-      key: operation.key,
-      namespace: [...operation.namespace],
-      updatedAt: now,
-      value: storedValue
-    };
-    // Publish the locator before the record. Search/list operations validate
-    // records, so partial publication is invisible and retryable.
-    await this.client.command("ZADD", this.catalogKey(), 0, locator);
-    await this.client.command("HSET", namespaceKey, field, encodeItem(record));
+    // The catalog is append-only. Readers validate the current CAS-protected
+    // item, so a stale or interrupted publication cannot hide a newer value.
+    await lease.publish("ZADD", this.catalogKey(), 0, locator);
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const snapshot = await this.readItemSnapshot(operation.namespace, operation.key);
+      const now = new Date().toISOString();
+      const record: StoredItem = {
+        createdAt: snapshot.record?.createdAt ?? now,
+        formatVersion: FORMAT_VERSION,
+        key: operation.key,
+        namespace: [...operation.namespace],
+        updatedAt: now,
+        value: storedValue
+      };
+      if (await lease.compareAndSet(dataKey, snapshot.expected, encodeItem(record))) return;
+    }
+    throw new Error("concurrent FerricStore LangGraph store mutation did not converge");
   }
 
   private async searchOperation(operation: SearchOperation): Promise<SearchItem[]> {
@@ -199,8 +198,27 @@ export class FerricStoreStore extends BaseStore {
   }
 
   private async readCatalogItem(namespace: string[], key: string): Promise<Item | null> {
-    const value = await this.client.command("HGET", this.namespaceKey(namespace), itemField(key));
-    return value == null ? null : decodeItem(value);
+    const snapshot = await this.readItemSnapshot(namespace, key);
+    return snapshot.record == null ? null : itemFromRecord(snapshot.record);
+  }
+
+  private async readItemSnapshot(
+    namespace: readonly string[],
+    key: string
+  ): Promise<{ expected: Buffer | undefined; record: StoredItem | null }> {
+    const expected = await readAtomicValue(
+      this.client,
+      this.itemDataKey(namespace, key),
+      "LangGraph atomic store item"
+    );
+    if (expected != null) {
+      return {
+        expected,
+        record: expected.equals(DELETED_ITEM) ? null : decodeItemRecord(expected)
+      };
+    }
+    const legacy = await this.client.command("HGET", this.namespaceKey(namespace), itemField(key));
+    return { expected, record: legacy == null ? null : decodeItemRecord(legacy) };
   }
 
   private async *catalogLocators(): AsyncGenerator<{ key: string; namespace: string[] }> {
@@ -315,8 +333,7 @@ function encodeItem(record: StoredItem): Buffer {
   return Buffer.from(JSON.stringify(record), "utf8");
 }
 
-function decodeItem(value: unknown): Item {
-  const record = decodeItemRecord(value);
+function itemFromRecord(record: StoredItem): Item {
   return {
     createdAt: new Date(record.createdAt),
     key: record.key,
@@ -324,6 +341,15 @@ function decodeItem(value: unknown): Item {
     updatedAt: new Date(record.updatedAt),
     value: record.value
   };
+}
+
+function itemIdentityDigest(namespace: readonly string[], key: string): string {
+  const keyBytes = Buffer.from(key, "utf8");
+  return sha256(Buffer.concat([
+    namespaceIdentity(namespace),
+    uint64(keyBytes.length),
+    keyBytes
+  ]));
 }
 
 function decodeItemRecord(value: unknown): StoredItem {

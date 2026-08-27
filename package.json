@@ -1,6 +1,6 @@
 {
   "name": "@ferricstore/ferricstore",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "TypeScript SDK for FerricStore and FerricFlow",
   "type": "module",
   "license": "Apache-2.0",
@@ -83,8 +83,8 @@
   "scripts": {
     "build": "tsup src/index.ts src/langgraph.ts src/openai-agents.ts --format esm,cjs --dts --sourcemap --clean --splitting false",
     "check": "npm run typecheck && npm run lint && npm run test && npm run build && npm run test:exports && npm run docs:check",
-    "docs": "typedoc",
-    "docs:check": "typedoc --logLevel Warn && node scripts/check-generated-docs.mjs",
+    "docs": "typedoc --logLevel Warn && typedoc --options typedoc.agent.json --logLevel Warn",
+    "docs:check": "npm run docs && node scripts/check-generated-docs.mjs",
     "integration:down": "docker compose down -v",
     "integration:up": "docker compose up -d ferricstore && node scripts/wait-for-ferricstore.mjs",
     "lint": "eslint .",

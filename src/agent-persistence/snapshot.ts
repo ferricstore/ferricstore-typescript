@@ -11,7 +11,7 @@ type EncodedSnapshot =
   | ["undefined"];
 
 export function encodeSnapshot(value: unknown): Buffer {
-  return Buffer.from(JSON.stringify(snapshot(value, new WeakSet())), "utf8");
+  return encodeSnapshotWith(value, defaultKeyComparator);
 }
 
 export function decodeSnapshot<T>(value: unknown, name: string): T {
@@ -29,6 +29,13 @@ export function snapshotDigest(value: unknown): string {
   return createHash("sha256").update(encodeSnapshot(value)).digest("hex");
 }
 
+/** @internal Compatibility digest for receipts written before deterministic key ordering. */
+export function legacySnapshotDigest(value: unknown, locale?: string): string {
+  return createHash("sha256")
+    .update(encodeSnapshotWith(value, (left, right) => left.localeCompare(right, locale)))
+    .digest("hex");
+}
+
 export function cloneSnapshot<T>(value: T): T {
   return decodeSnapshot<T>(encodeSnapshot(value), "snapshot");
 }
@@ -37,7 +44,19 @@ export function snapshotsEqual(left: unknown, right: unknown): boolean {
   return encodeSnapshot(left).equals(encodeSnapshot(right));
 }
 
-function snapshot(value: unknown, ancestors: WeakSet<object>): EncodedSnapshot {
+function encodeSnapshotWith(value: unknown, compareKeys: (left: string, right: string) => number): Buffer {
+  return Buffer.from(JSON.stringify(snapshot(value, new WeakSet(), compareKeys)), "utf8");
+}
+
+function defaultKeyComparator(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function snapshot(
+  value: unknown,
+  ancestors: WeakSet<object>,
+  compareKeys: (left: string, right: string) => number
+): EncodedSnapshot {
   if (value === null) return ["null"];
   if (value === undefined) return ["undefined"];
   if (typeof value === "string") return ["string", value];
@@ -77,7 +96,7 @@ function snapshot(value: unknown, ancestors: WeakSet<object>): EncodedSnapshot {
         if (descriptor == null || !descriptor.enumerable || !("value" in descriptor)) {
           throw new TypeError("session history contains an unsupported array item");
         }
-        items.push(snapshot(descriptor.value as unknown, ancestors));
+        items.push(snapshot(descriptor.value as unknown, ancestors, compareKeys));
       }
       return ["array", items];
     }
@@ -90,12 +109,12 @@ function snapshot(value: unknown, ancestors: WeakSet<object>): EncodedSnapshot {
       throw new TypeError("session history contains a symbol property");
     }
     const entries: [string, EncodedSnapshot][] = [];
-    for (const key of (keys as string[]).sort((left, right) => left.localeCompare(right))) {
+    for (const key of (keys as string[]).sort(compareKeys)) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (descriptor == null || !descriptor.enumerable || !("value" in descriptor)) {
         throw new TypeError("session history contains an unsupported property");
       }
-      entries.push([key, snapshot(descriptor.value as unknown, ancestors)]);
+      entries.push([key, snapshot(descriptor.value as unknown, ancestors, compareKeys)]);
     }
     return ["object", entries];
   } finally {

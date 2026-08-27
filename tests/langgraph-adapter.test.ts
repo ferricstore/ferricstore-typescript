@@ -1,7 +1,11 @@
+import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+
 import { Annotation, END, START, StateGraph, type Checkpoint, type CheckpointMetadata } from "@langchain/langgraph";
 import { describe, expect, it } from "vitest";
 
 import { FerricStoreSaver, FerricStoreStore } from "../src/langgraph.js";
+import type { CommandArgument } from "../src/internal.js";
 import { MemoryCommandClient } from "./agent-persistence-test-client.js";
 
 describe("FerricStoreSaver", () => {
@@ -59,6 +63,126 @@ describe("FerricStoreSaver", () => {
     expect(persisted?.checkpoint.channel_values.count).toBe(3);
     expect((await collect(saver.list(config))).length).toBeGreaterThan(0);
   });
+
+  it("applies a checkpoint namespace filter during global listing", async () => {
+    const saver = new FerricStoreSaver(new MemoryCommandClient());
+    await saver.put(
+      { configurable: { checkpoint_ns: "wanted", thread_id: "thread-1" } },
+      checkpoint("001", 1),
+      metadata(0, "loop", "acme"),
+      {}
+    );
+    await saver.put(
+      { configurable: { checkpoint_ns: "other", thread_id: "thread-2" } },
+      checkpoint("002", 2),
+      metadata(0, "loop", "acme"),
+      {}
+    );
+
+    const matches = await collect(saver.list({ configurable: { checkpoint_ns: "wanted" } }));
+    expect(matches.map((entry) => {
+      const namespace: unknown = entry.config.configurable?.checkpoint_ns;
+      return typeof namespace === "string" ? namespace : undefined;
+    })).toEqual(["wanted"]);
+  });
+
+  it("keeps a newer checkpoint when an expired writer finishes late", async () => {
+    const storage = new MemoryCommandClient();
+    const config = { configurable: { checkpoint_ns: "race", thread_id: "thread-race" } };
+    await new FerricStoreSaver(storage).put(config, checkpoint("001", 1), metadata(0, "loop", "acme"), {});
+    let commitStarted = false;
+    const losingClient = {
+      async command(...args: CommandArgument[]): Promise<unknown> {
+        const command = typeof args[0] === "string" ? args[0].toUpperCase() : "";
+        const key = typeof args[1] === "string" ? args[1] : "";
+        if (command === "EXTEND" && commitStarted) return 0;
+        if ((command === "SET" || command === "CAS") && key.includes(":checkpoint:") && !commitStarted) {
+          commitStarted = true;
+          await delay(60);
+        }
+        return await storage.command(...args);
+      }
+    };
+    const options = { lockRetryMs: 2, lockTtlMs: 30, lockWaitMs: 500 };
+    const stale = new FerricStoreSaver(losingClient, options);
+    const current = new FerricStoreSaver(storage, options);
+    const staleWrite = stale.put(config, checkpoint("002", 2), metadata(1, "loop", "acme"), {})
+      .then(() => undefined, (error: unknown) => error);
+
+    while (!commitStarted) await delay(1);
+    await delay(40);
+    const exact = await current.put(config, checkpoint("002", 9), metadata(2, "loop", "acme"), {});
+
+    expect(await staleWrite).toBeInstanceOf(Error);
+    expect((await current.getTuple(exact))?.checkpoint.channel_values.count).toBe(9);
+  });
+
+  it("reads legacy hash checkpoints, migrates on write, and fences them on deletion", async () => {
+    const client = new MemoryCommandClient();
+    const saver = new FerricStoreSaver(client, { keyPrefix: "migration:checkpoint" });
+    const threadId = "legacy-thread";
+    const checkpointNs = "legacy-ns";
+    const legacy = checkpoint("001", 1);
+    const threadKey = legacyThreadKey("migration:checkpoint", threadId, checkpointNs);
+    const record = {
+      checkpoint: legacy,
+      checkpointId: legacy.id,
+      checkpointNs,
+      formatVersion: 1,
+      metadata: metadata(0, "loop", "acme"),
+      threadId
+    };
+    const [type, data] = await saver.serde.dumpsTyped(record);
+    await client.command(
+      "HSET",
+      threadKey,
+      `checkpoint:${Buffer.from(legacy.id).toString("base64url")}`,
+      typedSnapshot(type, data)
+    );
+    const exact = { configurable: { checkpoint_id: legacy.id, checkpoint_ns: checkpointNs, thread_id: threadId } };
+
+    expect((await saver.getTuple(exact))?.checkpoint).toEqual(legacy);
+    await saver.put(
+      { configurable: { checkpoint_ns: checkpointNs, thread_id: threadId } },
+      checkpoint("002", 2),
+      metadata(1, "loop", "acme"),
+      {}
+    );
+    expect((await saver.getTuple(exact))?.checkpoint).toEqual(legacy);
+    await saver.deleteThread(threadId);
+    expect(await saver.getTuple(exact)).toBeUndefined();
+  });
+
+  it("makes an in-flight pre-deletion checkpoint invisible and reports the lost epoch", async () => {
+    const storage = new MemoryCommandClient();
+    const config = { configurable: { checkpoint_ns: "delete-race", thread_id: "delete-race" } };
+    const current = new FerricStoreSaver(storage, { lockRetryMs: 2, lockTtlMs: 30, lockWaitMs: 500 });
+    await current.put(config, checkpoint("001", 1), metadata(0, "loop", "acme"), {});
+    let commitStarted = false;
+    const losingClient = {
+      async command(...args: CommandArgument[]): Promise<unknown> {
+        const command = typeof args[0] === "string" ? args[0].toUpperCase() : "";
+        const key = typeof args[1] === "string" ? args[1] : "";
+        if (command === "EXTEND" && commitStarted) return 0;
+        if (command === "SET" && key.includes(":checkpoint:") && !commitStarted) {
+          commitStarted = true;
+          await delay(60);
+        }
+        return await storage.command(...args);
+      }
+    };
+    const stale = new FerricStoreSaver(losingClient, { lockRetryMs: 2, lockTtlMs: 30, lockWaitMs: 500 });
+    const staleWrite = stale.put(config, checkpoint("002", 2), metadata(1, "loop", "acme"), {})
+      .then(() => undefined, (error: unknown) => error);
+
+    while (!commitStarted) await delay(1);
+    await delay(40);
+    await current.deleteThread("delete-race");
+
+    expect(await staleWrite).toBeInstanceOf(Error);
+    expect(await current.getTuple(config)).toBeUndefined();
+    expect(await collect(current.list({}))).toEqual([]);
+  });
 });
 
 describe("FerricStoreStore", () => {
@@ -94,6 +218,67 @@ describe("FerricStoreStore", () => {
     await expect(store.search(["users"], { query: "semantic request" })).rejects.toThrow(/not configured/u);
     await expect(store.put(["users"], "invalid", { missing: undefined })).rejects.toThrow(/undefined/u);
   });
+
+  it("keeps a newer store item when an expired writer finishes late", async () => {
+    const storage = new MemoryCommandClient();
+    const seed = new FerricStoreStore(storage);
+    await seed.put(["users", "race"], "profile", { value: "base" });
+    let commitStarted = false;
+    const losingClient = {
+      async command(...args: CommandArgument[]): Promise<unknown> {
+        const command = typeof args[0] === "string" ? args[0].toUpperCase() : "";
+        const key = typeof args[1] === "string" ? args[1] : "";
+        if (command === "EXTEND" && commitStarted) return 0;
+        if (command === "CAS" && key.endsWith(":atomic-item") && !commitStarted) {
+          commitStarted = true;
+          await delay(60);
+        }
+        return await storage.command(...args);
+      }
+    };
+    const options = { lockRetryMs: 2, lockTtlMs: 30, lockWaitMs: 500 };
+    const stale = new FerricStoreStore(losingClient, options);
+    const current = new FerricStoreStore(storage, options);
+    const staleWrite = stale.put(["users", "race"], "profile", { value: "stale" })
+      .then(() => undefined, (error: unknown) => error);
+
+    while (!commitStarted) await delay(1);
+    await delay(40);
+    await current.put(["users", "race"], "profile", { value: "current" });
+
+    expect(await staleWrite).toBeInstanceOf(Error);
+    expect((await current.get(["users", "race"], "profile"))?.value).toEqual({ value: "current" });
+  });
+
+  it("reads and atomically migrates legacy hash store items", async () => {
+    const client = new MemoryCommandClient();
+    const keyPrefix = "migration:store";
+    const namespace = ["users", "legacy"];
+    const key = "profile";
+    const createdAt = "2026-01-01T00:00:00.000Z";
+    await client.command(
+      "HSET",
+      legacyNamespaceKey(keyPrefix, namespace),
+      `item:${Buffer.from(key).toString("base64url")}`,
+      Buffer.from(JSON.stringify({
+        createdAt,
+        formatVersion: 1,
+        key,
+        namespace,
+        updatedAt: createdAt,
+        value: { source: "legacy" }
+      }))
+    );
+    const store = new FerricStoreStore(client, { keyPrefix });
+
+    expect((await store.get(namespace, key))?.value).toEqual({ source: "legacy" });
+    await store.put(namespace, key, { source: "atomic" });
+    const migrated = await store.get(namespace, key);
+    expect(migrated?.createdAt.toISOString()).toBe(createdAt);
+    expect(migrated?.value).toEqual({ source: "atomic" });
+    await store.delete(namespace, key);
+    expect(await store.get(namespace, key)).toBeNull();
+  });
 });
 
 function checkpoint(id: string, count: number): Checkpoint {
@@ -119,4 +304,30 @@ async function collect<T>(values: AsyncIterable<T>): Promise<T[]> {
   const result: T[] = [];
   for await (const value of values) result.push(value);
   return result;
+}
+
+function legacyThreadKey(keyPrefix: string, threadId: string, checkpointNs: string): string {
+  const digest = createHash("sha256").update(lengthPrefixed([threadId, checkpointNs])).digest("hex");
+  return `${keyPrefix}:{lg:${digest}}:thread`;
+}
+
+function legacyNamespaceKey(keyPrefix: string, namespace: readonly string[]): string {
+  const digest = createHash("sha256").update(lengthPrefixed(namespace)).digest("hex");
+  return `${keyPrefix}:{lgs:${digest}}:namespace`;
+}
+
+function lengthPrefixed(values: readonly string[]): Buffer {
+  return Buffer.concat(values.flatMap((value) => {
+    const bytes = Buffer.from(value);
+    const length = Buffer.allocUnsafe(8);
+    length.writeBigUInt64BE(BigInt(bytes.length));
+    return [length, bytes];
+  }));
+}
+
+function typedSnapshot(type: string, data: string | Uint8Array): Buffer {
+  const typeBytes = Buffer.from(type);
+  const header = Buffer.allocUnsafe(2);
+  header.writeUInt16BE(typeBytes.length);
+  return Buffer.concat([header, typeBytes, Buffer.from(data)]);
 }

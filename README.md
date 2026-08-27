@@ -28,6 +28,9 @@ Use `@ferricstore/ferricstore/langgraph` for a LangGraph.js checkpointer,
 long-term `BaseStore`, and FerricFlow handler bridge. Use
 `@ferricstore/ferricstore/openai-agents` for an atomic, idempotent OpenAI
 Agents SDK `Session`. See [docs/agent-frameworks.md](docs/agent-frameworks.md).
+The generated
+[agent framework API reference](https://unpkg.com/@ferricstore/ferricstore/docs/agent-api/modules.html)
+covers every public adapter class and option.
 
 ## Compatibility
 
