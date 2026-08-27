@@ -18,6 +18,7 @@ import {
   DEFAULT_MAX_FRAME_BYTES,
   encodeValue,
   MAX_I64,
+  MAX_U64,
   OPCODES
 } from "../src/protocol.js";
 import { responseFrameFromBody } from "./adapter-test-support.js";
@@ -67,9 +68,11 @@ describe("third ten-pass review regressions", () => {
   });
 
   it("rejects out-of-range native bigints before frame allocation or compact writes", () => {
-    const tooLarge = MAX_I64 + 1n;
+    const unsigned = MAX_I64 + 1n;
+    const tooLarge = MAX_U64 + 1n;
 
-    expect(() => encodeValue(tooLarge)).toThrow("signed 64-bit");
+    expect(() => encodeValue(unsigned)).not.toThrow();
+    expect(() => encodeValue(tooLarge)).toThrow("signed or unsigned 64-bit");
     expect(() => buildProtocolCommand([
       "FLOW.COMPLETE_MANY",
       "partition",
@@ -78,7 +81,7 @@ describe("third ten-pass review regressions", () => {
       "ITEMS",
       "flow",
       Buffer.from("lease"),
-      tooLarge
+      unsigned
     ])).toThrow("signed 64-bit");
   });
 

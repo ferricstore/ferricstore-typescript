@@ -23,10 +23,7 @@ import type {
   LimitAmountOptions,
   LimitLeaseOptions,
   LimitListOptions,
-  LimitReleaseOptions,
-  ScheduleFireDueOptions,
-  ScheduleListOptions,
-  ScheduleOptions
+  LimitReleaseOptions
 } from "./client-options.js";
 import {
   adminListArgs,
@@ -35,14 +32,13 @@ import {
   appendAttributeQueryOptions,
   appendAttributes,
   approvalListArgs,
-  okLike,
   optionalAdminRecord
 } from "./client-helpers.js";
-import { FerricStoreClientCore } from "./client-core.js";
+import { FerricStoreScheduleClient } from "./client-schedules.js";
 import { snapshotOwnStringArray } from "./string-array-snapshot.js";
 
 /** @internal Administrative and governance commands kept off the primary Flow client surface. */
-export class FerricStoreManagementClient extends FerricStoreClientCore {
+export class FerricStoreManagementClient extends FerricStoreScheduleClient {
   async stats(type: string, options: FlowStatsOptions = {}): Promise<FlowAdminRecord> {
     const args: CommandArgument[] = ["FLOW.STATS", type];
     append(args, "STATE", options.state);
@@ -77,80 +73,6 @@ export class FerricStoreManagementClient extends FerricStoreClientCore {
     const args: CommandArgument[] = ["FLOW.ATTRIBUTE_VALUES", type, attribute];
     appendAttributeQueryOptions(args, options);
     return adminRecordList(await this.commandArgs(args), "FLOW.ATTRIBUTE_VALUES");
-  }
-
-  async scheduleCreate(id: string, options: ScheduleOptions): Promise<FlowAdminRecord> {
-    const args: CommandArgument[] = ["FLOW.SCHEDULE.CREATE", id];
-    append(args, "KIND", options.kind);
-    append(args, "AT_MS", options.atMs);
-    append(args, "DELAY_MS", options.delayMs);
-    append(args, "START_AT_MS", options.startAtMs);
-    append(args, "EVERY_MS", options.everyMs);
-    append(args, "CRON", options.cron);
-    append(args, "TIMEZONE", options.timezone);
-    append(args, "TARGET", options.target);
-    append(args, "OVERLAP_POLICY", options.overlapPolicy);
-    append(args, "OVERLAP_RETRY_MS", options.overlapRetryMs);
-    append(args, "MAX_FIRES", options.maxFires);
-    append(args, "END_AT_MS", options.endAtMs);
-    appendBool(args, "OVERWRITE", options.overwrite);
-    append(args, "NOW", options.nowMs);
-    for (const [name, value] of Object.entries(options.extraOptions ?? {})) {
-      args.push(name.toUpperCase(), value);
-    }
-    return adminRecordResponse(await this.commandArgs(args), "FLOW.SCHEDULE.CREATE");
-  }
-
-  async scheduleGet(id: string, options: { nowMs?: number } = {}): Promise<FlowAdminRecord | null> {
-    const args: CommandArgument[] = ["FLOW.SCHEDULE.GET", id];
-    append(args, "NOW", options.nowMs);
-    return optionalAdminRecord(await this.commandArgs(args), "FLOW.SCHEDULE.GET");
-  }
-
-  async scheduleFire(id: string, options: { nowMs?: number } = {}): Promise<FlowAdminRecord> {
-    return await this.scheduleStatus("FLOW.SCHEDULE.FIRE", id, options.nowMs);
-  }
-
-  async schedulePause(id: string, options: { nowMs?: number } = {}): Promise<FlowAdminRecord> {
-    return await this.scheduleStatus("FLOW.SCHEDULE.PAUSE", id, options.nowMs);
-  }
-
-  async scheduleResume(id: string, options: { nowMs?: number } = {}): Promise<FlowAdminRecord> {
-    return await this.scheduleStatus("FLOW.SCHEDULE.RESUME", id, options.nowMs);
-  }
-
-  async scheduleDelete(id: string, options: { nowMs?: number } = {}): Promise<FlowAdminRecord> {
-    return await this.scheduleStatus("FLOW.SCHEDULE.DELETE", id, options.nowMs);
-  }
-
-  async scheduleFireDue(options: ScheduleFireDueOptions = {}): Promise<FlowAdminRecord> {
-    const args: CommandArgument[] = ["FLOW.SCHEDULE.FIRE_DUE"];
-    append(args, "NOW", options.nowMs);
-    append(args, "WORKER", options.worker);
-    append(args, "BLOCK", options.blockMs);
-    append(args, "LIMIT", options.limit);
-    return adminRecordResponse(await this.commandArgs(args), "FLOW.SCHEDULE.FIRE_DUE");
-  }
-
-  async scheduleList(options: ScheduleListOptions = {}): Promise<FlowAdminRecord[]> {
-    const args: CommandArgument[] = ["FLOW.SCHEDULE.LIST"];
-    append(args, "KIND", options.kind);
-    append(args, "STATE", options.state);
-    append(args, "TIMEZONE", options.timezone);
-    append(args, "TARGET_TYPE", options.targetType);
-    append(args, "FROM_MS", options.fromMs);
-    append(args, "TO_MS", options.toMs);
-    append(args, "COUNT", options.count);
-    appendBool(args, "REV", options.rev);
-    return adminRecordList(await this.commandArgs(args), "FLOW.SCHEDULE.LIST");
-  }
-
-  private async scheduleStatus(command: string, id: string, now: number | undefined): Promise<FlowAdminRecord> {
-    const args: CommandArgument[] = [command, id];
-    append(args, "NOW", now);
-    const response = await this.commandArgs(args);
-    if (okLike(response)) return { id, status: "deleted" };
-    return adminRecordResponse(response, command);
   }
 
   async effectReserve(

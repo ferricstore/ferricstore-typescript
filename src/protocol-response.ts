@@ -3,6 +3,7 @@ import { FerricStoreError, classifyServerError } from "./errors.js";
 import { asText } from "./protocol-core.js";
 import * as wire from "./protocol-constants.js";
 import { tryDecodeCompactResponse } from "./protocol-compact-response.js";
+import { protocolErrorMessage } from "./protocol-error-message.js";
 import { decodeValue } from "./protocol-value.js";
 
 export function decodeResponse(
@@ -24,9 +25,16 @@ export function decodeResponse(
   }
   const status = frame.body.readUInt16BE(0);
   const body = frame.body.subarray(2);
-  const value = decodeResponseValue(frame.opcode, body, hints);
+  const customPayload = (frame.flags & wire.FLAG_CUSTOM_PAYLOAD) !== 0;
+  const value = decodeResponseValue(
+    frame.opcode,
+    body,
+    hints,
+    status === wire.STATUS_OK,
+    customPayload
+  );
   if (status === wire.STATUS_OK) return value;
-  const message = errorMessage(status, value);
+  const message = protocolErrorMessage(status, value);
   throw classifyServerError(message, value, undefined, status);
 }
 
@@ -73,7 +81,7 @@ export function unwrapPipelineResponse(
           continue;
         }
         const error = classifyServerError(
-          errorMessage(status === "busy" ? 4 : 1, payload),
+          protocolErrorMessage(status === "busy" ? 4 : 1, payload),
           payload,
           undefined,
           status
@@ -94,22 +102,23 @@ function pipelineStatus(value: unknown): "busy" | "error" | "ok" | null {
   return status === "ok" || status === "busy" || status === "error" ? status : null;
 }
 
-function decodeResponseValue(opcode: number, body: Buffer, hints: wire.ResponseDecodeHints): unknown {
-  const compact = tryDecodeCompactResponse(opcode, body, hints);
-  if (compact.found) return compact.value;
+function decodeResponseValue(
+  opcode: number,
+  body: Buffer,
+  hints: wire.ResponseDecodeHints,
+  allowCompact: boolean,
+  customPayload: boolean
+): unknown {
+  if (customPayload && allowCompact) {
+    const compact = tryDecodeCompactResponse(opcode, body, hints);
+    if (compact.found) return compact.value;
+  }
+  if (customPayload) {
+    throw new FerricStoreError("unsupported or malformed custom protocol response", { raw: body });
+  }
   const decoded = decodeValue(body);
   if (decoded.offset !== body.byteLength) {
     throw new FerricStoreError("native protocol response has trailing bytes", { raw: body });
   }
   return decoded.value;
-}
-
-function errorMessage(status: number | string, value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Buffer.isBuffer(value)) return value.toString("utf8");
-  if (typeof value === "object" && value != null && Object.hasOwn(value, "message")) {
-    const message = (value as Record<string, unknown>).message;
-    return typeof message === "string" ? message : String(message);
-  }
-  return `ERR native request failed status=${status}: ${String(value)}`;
 }

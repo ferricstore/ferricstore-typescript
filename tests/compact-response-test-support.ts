@@ -4,16 +4,11 @@ import { COMMAND_OPCODES, type ResponseDecodeHints } from "../src/protocol.js";
 export const compactResponseHints: ResponseDecodeHints = {
   compactResponseOpcodes: new Map<string, ReadonlySet<number>>([
     ["flow_claim_jobs_v1", new Set([COMMAND_OPCODES["FLOW.CLAIM_DUE"]])],
-    ["flow_record_list_v1", new Set([
-      COMMAND_OPCODES["FLOW.LIST"],
-      COMMAND_OPCODES["FLOW.TERMINALS"],
-      COMMAND_OPCODES["FLOW.FAILURES"],
-      COMMAND_OPCODES["FLOW.BY_PARENT"],
-      COMMAND_OPCODES["FLOW.BY_ROOT"],
-      COMMAND_OPCODES["FLOW.BY_CORRELATION"],
-      COMMAND_OPCODES["FLOW.STUCK"]
-    ])],
     ["flow_record_v1", new Set([COMMAND_OPCODES["FLOW.GET"]])],
+    ["flow_query_result_v1", new Set([
+      COMMAND_OPCODES.COMMAND_EXEC,
+      COMMAND_OPCODES["FLOW.QUERY"]
+    ])],
     ["kv_get_v1", new Set([COMMAND_OPCODES.GET])],
     ["kv_mget_v1", new Set([COMMAND_OPCODES.MGET, COMMAND_OPCODES["FLOW.VALUE.MGET"]])],
     ["ok_list_v1", new Set([

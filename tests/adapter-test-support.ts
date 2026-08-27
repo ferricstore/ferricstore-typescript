@@ -12,7 +12,7 @@ import {
   OPCODES,
   RESPONSE_VERSION,
   decodeValue,
-  encodeValue
+  encodeValue,
 } from "../src/protocol.js";
 
 export const servers: net.Server[] = [];
@@ -23,12 +23,18 @@ export function chunkAssemblerInternals(adapter: NativeAdapter): {
   chunks: Map<string, Buffer[]>;
   keysByRequest: Map<bigint, Set<string>>;
 } {
-  const assembler = (adapter as unknown as { chunkAssembler: NativeChunkAssembler }).chunkAssembler;
+  const assembler = (
+    adapter as unknown as { chunkAssembler: NativeChunkAssembler }
+  ).chunkAssembler;
   const internals = assembler as unknown as {
     chunks: Map<string, Buffer[]>;
     keysByRequest: Map<bigint, Set<string>>;
   };
-  return { assembler, chunks: internals.chunks, keysByRequest: internals.keysByRequest };
+  return {
+    assembler,
+    chunks: internals.chunks,
+    keysByRequest: internals.keysByRequest,
+  };
 }
 
 afterEach(async () => {
@@ -36,7 +42,9 @@ afterEach(async () => {
   servers.length = 0;
 });
 
-export async function startFragmentingServer(options: { chunkOnlyPing?: boolean } = {}): Promise<net.Server> {
+export async function startFragmentingServer(
+  options: { chunkOnlyPing?: boolean } = {},
+): Promise<net.Server> {
   const server = net.createServer((socket) => handleSocket(socket, options));
   servers.push(server);
   await new Promise<void>((resolve, reject) => {
@@ -53,37 +61,55 @@ export function twoShardTopology(lowPort: number, highPort: number): unknown {
   return {
     ranges: [
       {
-        endpoint: { host: "127.0.0.1", native_port: lowPort, node: "low@local" },
+        endpoint: {
+          host: "127.0.0.1",
+          native_port: lowPort,
+          node: "low@local",
+        },
         first_slot: 0,
         lane_id: 2,
         last_slot: 511,
-        shard: 0
+        shard: 0,
       },
       {
-        endpoint: { host: "127.0.0.1", native_port: highPort, node: "high@local" },
+        endpoint: {
+          host: "127.0.0.1",
+          native_port: highPort,
+          node: "high@local",
+        },
         first_slot: 512,
         lane_id: 3,
         last_slot: 1023,
-        shard: 1
-      }
+        shard: 1,
+      },
     ],
     route_epoch: 1,
-    shard_count: 2
+    shard_count: 2,
   };
 }
 
-export function keyForSlot(predicate: (slot: number) => boolean, prefix: string): string {
-  const key = Array.from({ length: 20_000 }, (_, index) => `${prefix}-${index}`).find((candidate) =>
-    predicate(RoutingTopology.slotForKey(candidate))
-  );
+export function keyForSlot(
+  predicate: (slot: number) => boolean,
+  prefix: string,
+): string {
+  const key = Array.from(
+    { length: 20_000 },
+    (_, index) => `${prefix}-${index}`,
+  ).find((candidate) => predicate(RoutingTopology.slotForKey(candidate)));
   if (key == null) {
     throw new Error(`no key found for ${prefix}`);
   }
   return key;
 }
 
-export function flowPartitionForSlot(predicate: (slot: number) => boolean, prefix: string): string {
-  const partition = Array.from({ length: 20_000 }, (_, index) => `${prefix}-${index}`).find((candidate) => {
+export function flowPartitionForSlot(
+  predicate: (slot: number) => boolean,
+  prefix: string,
+): string {
+  const partition = Array.from(
+    { length: 20_000 },
+    (_, index) => `${prefix}-${index}`,
+  ).find((candidate) => {
     const digest = createHash("sha256").update(candidate).digest("base64url");
     return predicate(RoutingTopology.slotForKey(`f:{f:${digest}}:route`));
   });
@@ -95,29 +121,38 @@ export function flowPartitionForSlot(predicate: (slot: number) => boolean, prefi
 
 export async function startCountingServer(
   onRequest: (request: TestRequest, socket: Socket) => unknown,
-  options: { fragmentResponses?: boolean; host?: string } = {}
+  options: { fragmentResponses?: boolean; host?: string } = {},
 ): Promise<net.Server> {
-  const server = net.createServer((socket) => handleSocket(socket, {
-    fragmentResponses: options.fragmentResponses,
-    onRequest
-  }));
+  const server = net.createServer((socket) =>
+    handleSocket(socket, {
+      fragmentResponses: options.fragmentResponses,
+      onRequest,
+    }),
+  );
   servers.push(server);
   await listen(server, options.host);
   return server;
 }
 
-export async function startStartupClosingServer(): Promise<net.Server & { connectionCount: number }> {
+export async function startStartupClosingServer(): Promise<
+  net.Server & { connectionCount: number }
+> {
   const server = net.createServer() as net.Server & {
     connectionCount: number;
   };
-  server.on("connection", (socket) => handleStartupClosingSocket(socket, server));
+  server.on("connection", (socket) =>
+    handleStartupClosingSocket(socket, server),
+  );
   server.connectionCount = 0;
   servers.push(server);
   await listen(server);
   return server;
 }
 
-export async function listen(server: net.Server, host = "127.0.0.1"): Promise<void> {
+export async function listen(
+  server: net.Server,
+  host = "127.0.0.1",
+): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, host, () => {
@@ -135,13 +170,66 @@ export interface TestRequest {
   readonly requestId: bigint;
 }
 
+export function v010Startup(value: unknown = {}): Record<string, unknown> {
+  const source = isRecord(value) ? value : {};
+  const rawCapabilities = isRecord(source.capabilities)
+    ? source.capabilities
+    : {};
+  const rawSchemas = isRecord(rawCapabilities.schemas)
+    ? rawCapabilities.schemas
+    : {};
+  return {
+    ...source,
+    auth_required: source.auth_required === true,
+    capabilities: {
+      ...rawCapabilities,
+      schemas: {
+        ...rawSchemas,
+        "FLOW.QUERY": {
+          required: ["version", "query"],
+          fields: ["version", "query", "params", "deadline_ms"],
+        },
+      },
+      flow_query: {
+        request_contract: "ferric.flow.query.request/v1",
+        result_contract: "ferric.flow.query.result/v1",
+        explain_contract: "ferric.flow.explain/v1",
+        index_status_contract: "ferric.flow.query.indexes/v1",
+        language_versions: ["FQL1"],
+        capabilities: [
+          "flow_query_v1",
+          "flow_query_result_projection_v1",
+          "flow_explain_v1",
+          "flow_explain_analyze_v1",
+          "flow_composite_index_v1",
+          "flow_query_index_status_v1",
+        ],
+        shapes: [
+          "runs_by_run_id_record",
+          "runs_by_partition_and_run_id_record",
+          "runs_by_partition_predicates_ordered_records",
+          "runs_by_partition_type_state_ordered_records",
+          "runs_by_partition_type_terminals_ordered_records",
+          "runs_by_partition_metadata_ordered_records",
+          "runs_by_partition_type_running_lease_deadline_ordered_records",
+          "runs_by_partition_parent_ordered_records",
+          "runs_by_partition_root_ordered_records",
+          "runs_by_partition_correlation_ordered_records",
+          "runs_by_partition_predicates_count",
+          "events_by_run_id_ordered_records",
+        ],
+      },
+    },
+  };
+}
+
 export function handleSocket(
   socket: Socket,
   options: {
     chunkOnlyPing?: boolean;
     fragmentResponses?: boolean;
     onRequest?: (request: TestRequest, socket: Socket) => unknown;
-  }
+  },
 ): void {
   let input: Buffer = Buffer.alloc(0);
   socket.on("error", () => undefined);
@@ -157,19 +245,48 @@ export function handleSocket(
       if (override === NO_RESPONSE) {
         continue;
       }
-      const value = override ?? (request.opcode === OPCODES.ping ? "PONG" : "OK");
+      const value =
+        request.opcode === OPCODES.startup
+          ? v010Startup(override)
+          : (override ?? (request.opcode === OPCODES.ping ? "PONG" : "OK"));
       if (options.chunkOnlyPing === true && request.opcode === OPCODES.ping) {
-        socket.write(responseFrame(request.opcode, request.laneId, request.requestId, "partial-response", 0x20));
+        socket.write(
+          responseFrame(
+            request.opcode,
+            request.laneId,
+            request.requestId,
+            "partial-response",
+            0x20,
+          ),
+        );
       } else if (options.fragmentResponses === false) {
-        socket.write(responseFrame(request.opcode, request.laneId, request.requestId, value));
+        socket.write(
+          responseFrame(
+            request.opcode,
+            request.laneId,
+            request.requestId,
+            value,
+          ),
+        );
       } else {
-        writeFragmented(socket, responseFrame(request.opcode, request.laneId, request.requestId, value));
+        writeFragmented(
+          socket,
+          responseFrame(
+            request.opcode,
+            request.laneId,
+            request.requestId,
+            value,
+          ),
+        );
       }
     }
   });
 }
 
-export function handleStartupClosingSocket(socket: Socket, server: net.Server & { connectionCount: number }): void {
+export function handleStartupClosingSocket(
+  socket: Socket,
+  server: net.Server & { connectionCount: number },
+): void {
   server.connectionCount++;
   socket.on("error", () => undefined);
   const connectionNumber = server.connectionCount;
@@ -182,7 +299,16 @@ export function handleStartupClosingSocket(socket: Socket, server: net.Server & 
         return;
       }
       input = request.rest;
-      const frame = responseFrame(request.opcode, request.laneId, request.requestId, request.opcode === OPCODES.ping ? "PONG" : "OK");
+      const frame = responseFrame(
+        request.opcode,
+        request.laneId,
+        request.requestId,
+        request.opcode === OPCODES.startup
+          ? v010Startup()
+          : request.opcode === OPCODES.ping
+            ? "PONG"
+            : "OK",
+      );
       if (connectionNumber === 1 && request.opcode === OPCODES.startup) {
         socket.write(frame, () => socket.end());
       } else {
@@ -192,7 +318,19 @@ export function handleStartupClosingSocket(socket: Socket, server: net.Server & 
   });
 }
 
-export function readRequest(input: Buffer): (TestRequest & { readonly rest: Buffer }) | null {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value != null &&
+    !Array.isArray(value) &&
+    !Buffer.isBuffer(value) &&
+    !(value instanceof Uint8Array)
+  );
+}
+
+export function readRequest(
+  input: Buffer,
+): (TestRequest & { readonly rest: Buffer }) | null {
   if (input.byteLength < HEADER_SIZE) {
     return null;
   }
@@ -213,7 +351,7 @@ export function readRequest(input: Buffer): (TestRequest & { readonly rest: Buff
         ? input.subarray(HEADER_SIZE, frameLength)
         : decodeValue(input.subarray(HEADER_SIZE, frameLength)).value,
     requestId: input.readBigUInt64BE(12),
-    rest: input.subarray(frameLength)
+    rest: input.subarray(frameLength),
   };
 }
 
@@ -224,17 +362,37 @@ export function commandExecName(request: TestRequest): string | undefined {
   const payload = request.payload;
   if (payload instanceof Map) {
     const command = (payload as Map<unknown, unknown>).get("command");
-    return typeof command === "string" ? command : Buffer.isBuffer(command) ? command.toString("utf8") : undefined;
+    return typeof command === "string"
+      ? command
+      : Buffer.isBuffer(command)
+        ? command.toString("utf8")
+        : undefined;
   }
   if (typeof payload === "object" && payload != null && "command" in payload) {
     const command = (payload as { readonly command?: unknown }).command;
-    return typeof command === "string" ? command : Buffer.isBuffer(command) ? command.toString("utf8") : undefined;
+    return typeof command === "string"
+      ? command
+      : Buffer.isBuffer(command)
+        ? command.toString("utf8")
+        : undefined;
   }
   return undefined;
 }
 
-export function responseFrame(opcode: number, laneId: number, requestId: bigint, value: unknown, flags = 0): Buffer {
-  return responseFrameFromBody(opcode, laneId, requestId, encodedResponseBody(value), flags);
+export function responseFrame(
+  opcode: number,
+  laneId: number,
+  requestId: bigint,
+  value: unknown,
+  flags = 0,
+): Buffer {
+  return responseFrameFromBody(
+    opcode,
+    laneId,
+    requestId,
+    encodedResponseBody(value),
+    flags,
+  );
 }
 
 export function encodedResponseBody(value: unknown): Buffer {
@@ -250,7 +408,7 @@ export function responseFrameFromBody(
   laneId: number,
   requestId: bigint,
   body: Buffer,
-  flags = 0
+  flags = 0,
 ): Buffer {
   const frame = Buffer.allocUnsafe(HEADER_SIZE + body.byteLength);
   frame.write(MAGIC, 0, "ascii");
@@ -273,7 +431,11 @@ export function writeFragmented(socket: Socket, frame: Buffer): void {
   });
 }
 
-export function writeIncrementalFragments(socket: Socket, frame: Buffer, chunkBytes: number): void {
+export function writeIncrementalFragments(
+  socket: Socket,
+  frame: Buffer,
+  chunkBytes: number,
+): void {
   let offset = 0;
   const writeNext = (): void => {
     const end = Math.min(frame.byteLength, offset + chunkBytes);
@@ -284,27 +446,29 @@ export function writeIncrementalFragments(socket: Socket, frame: Buffer, chunkBy
   writeNext();
 }
 
-export function validTopologyRange(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+export function validTopologyRange(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     endpoint: { host: "node-a.local", native_port: 6388, node: "a@cluster" },
     first_slot: 0,
     lane_id: 1,
     last_slot: 1023,
     shard: 0,
-    ...overrides
+    ...overrides,
   };
 }
 
 export function validTopologyPayload(
   rangeOverrides: Record<string, unknown> = {},
-  payloadOverrides: Record<string, unknown> = {}
+  payloadOverrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
     ranges: [validTopologyRange(rangeOverrides)],
     route_epoch: 1,
     shard_count: 1,
     slots: 1024,
-    ...payloadOverrides
+    ...payloadOverrides,
   };
 }
 
@@ -331,7 +495,7 @@ export function directNativeAdapter(
   socket: BackpressureSocket,
   maxQueuedWriteBytes: number,
   timeoutMs = 20,
-  maxChunkBytes = 64 * 1024 * 1024
+  maxChunkBytes = 64 * 1024 * 1024,
 ): NativeAdapter {
   const AdapterConstructor = NativeAdapter as unknown as new (
     socket: Socket,
@@ -345,7 +509,7 @@ export function directNativeAdapter(
     maxQueuedRequests: number,
     heartbeatIntervalMs: number,
     onEvent: undefined,
-    maxQueuedWriteBytes: number
+    maxQueuedWriteBytes: number,
   ) => NativeAdapter;
   return new AdapterConstructor(
     socket as unknown as Socket,
@@ -359,7 +523,7 @@ export function directNativeAdapter(
     65_536,
     0,
     undefined,
-    maxQueuedWriteBytes
+    maxQueuedWriteBytes,
   );
 }
 
@@ -381,7 +545,10 @@ export async function activeConnections(server: net.Server): Promise<number> {
   });
 }
 
-export async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 1_000): Promise<void> {
+export async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 1_000,
+): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (await predicate()) {

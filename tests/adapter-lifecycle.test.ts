@@ -20,8 +20,40 @@ import {
   responseFrameFromBody,
   servers,
   startCountingServer,
+  v010Startup,
   waitFor
 } from "./adapter-test-support.js";
+
+test("NativeAdapter stamps FLOW.QUERY deadlines from the remaining response budget", async () => {
+  let queryPayload: Record<string, unknown> | undefined;
+  const server = await startCountingServer((request) => {
+    if (request.opcode === OPCODES.flowQuery) {
+      queryPayload = request.payload as Record<string, unknown>;
+    }
+    return undefined;
+  }, { fragmentResponses: false });
+  const address = server.address() as AddressInfo;
+  const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`, {
+    timeoutMs: 500
+  });
+  const startedAtMs = Date.now();
+
+  try {
+    await adapter.executeCommand(
+      "FLOW.QUERY",
+      "FQL1",
+      "FROM runs WHERE run_id = @run RETURN RECORDS",
+      "run",
+      "run-1"
+    );
+    const deadlineMs = queryPayload?.deadline_ms;
+    expect(deadlineMs).toBeTypeOf("number");
+    expect(deadlineMs as number).toBeGreaterThanOrEqual(startedAtMs + 450);
+    expect(deadlineMs as number).toBeLessThanOrEqual(Date.now() + 500);
+  } finally {
+    await adapter.close();
+  }
+});
 
 test("NativeAdapter can keep idle sockets active with heartbeat pings", async () => {
   let pingCount = 0;
@@ -54,7 +86,7 @@ test("NativeAdapter starts heartbeats only after STARTUP and AUTH complete", asy
           request.opcode,
           request.laneId,
           request.requestId,
-          { auth_required: true }
+          v010Startup({ auth_required: true })
         ));
       }, 25);
       return NO_RESPONSE;

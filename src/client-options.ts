@@ -1,5 +1,6 @@
 import type { Codec } from "./codecs.js";
 import type { NativeClientOptions, ReconnectOptions } from "./adapters.js";
+import type { HTTPAdapterOptions } from "./http-options.js";
 import type { CommandArgument } from "./internal.js";
 import type {
   BackpressurePolicy,
@@ -31,8 +32,16 @@ export type {
   LimitListOptions,
   LimitReleaseOptions,
   ScheduleFireDueOptions,
+  ScheduleFireOptions,
+  ScheduleFireDueResult,
+  ScheduleFireResult,
   ScheduleListOptions,
-  ScheduleOptions
+  ScheduleOptions,
+  ScheduleRecord,
+  ScheduleCatchupPolicy,
+  ScheduleKind,
+  ScheduleOverlapPolicy,
+  ScheduleState
 } from "./client-admin-options.js";
 
 export interface FlowBatchCompletedItem {
@@ -65,6 +74,7 @@ export interface FerricStoreClientOptions {
 }
 
 export interface FerricStoreClientFromUrlOptions extends FerricStoreClientOptions {
+  httpOptions?: HTTPAdapterOptions;
   nativeOptions?: NativeClientOptions;
   reconnect?: boolean | ReconnectOptions;
 }
@@ -199,7 +209,7 @@ export interface FlowPolicyOptions {
   retentionTtlMs?: number;
   /** Type-level maximum active lifetime for newly created Flows. */
   maxActiveMs?: MaxActiveMs;
-  /** Type-level attribute names projected for FLOW.SEARCH. An empty array clears the index list. */
+  /** Type-level attribute names projected for Flow queries. An empty array clears the index list. */
   indexedAttributes?: readonly string[];
   indexedStateMeta?: string;
 }
@@ -305,15 +315,17 @@ export interface CancelOptions extends Omit<MutateOptions, "payload"> {
 }
 
 export interface ReadOptions {
-  partitionKey?: string;
+  partitionKey: string;
   count?: number;
   fromMs?: number;
   toMs?: number;
+  /** Newest-first when true. Flow query conveniences default to true. */
   rev?: boolean;
   state?: string;
   terminalOnly?: boolean;
   includeCold?: boolean;
   consistentProjection?: boolean;
+  attributes?: Record<string, CommandArgument>;
 }
 
 export interface HistoryOptions {

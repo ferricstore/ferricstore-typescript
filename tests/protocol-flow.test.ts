@@ -545,82 +545,24 @@ describe("native Flow protocol codec", () => {
     }
   });
 
-  it("builds direct native FLOW.SEARCH with attributes and state metadata", () => {
+  it("builds direct native FLOW.QUERY with a prototype-shaped parameter name safely", () => {
     const command = buildProtocolCommand([
-      "FLOW.SEARCH",
-      "email",
-      "STATE",
-      "queued",
-      "COUNT",
-      10,
-      "ATTRIBUTE",
-      "tenant",
-      "INDEXED_STATE_META",
-      "STATE_META",
-      "queued",
-      { version: 3 },
-      "TERMINAL_ONLY",
-      "true"
+      "FLOW.QUERY",
+      "FQL1",
+      "FROM runs WHERE partition_key = @partition RETURN COUNT",
+      "__proto__",
+      "safe"
     ]);
 
-    expect(command).toMatchObject({
-      opcode: OPCODES.flowSearch,
-      payload: {
-        attributes: { tenant: "INDEXED_STATE_META" },
-        count: 10,
-        state: "queued",
-        state_meta: { queued: { version: 3 } },
-        terminal_only: true,
-        type: "email"
-      }
-    });
-
-    expect(buildProtocolCommand([
-      "FLOW.SEARCH",
-      "email",
-      "STATE",
-      "queued",
-      "STATE_META",
-      "version",
-      3
-    ])).toMatchObject({
-      opcode: OPCODES.flowSearch,
-      payload: {
-        state_meta: { queued: { version: 3 } }
-      }
-    });
-  });
-
-  it("keeps invalid FLOW.SEARCH boolean tokens on the server-validated command path", () => {
-    const args: readonly CommandArgument[] = ["FLOW.SEARCH", "email", "REV", "definitely"];
-
-    expect(buildProtocolCommand(args)).toMatchObject({
-      opcode: OPCODES.commandExec,
-      payload: {
-        args: args.slice(1),
-        command: "FLOW.SEARCH"
-      }
-    });
-  });
-
-  it("does not validate command-only FLOW.SEARCH grammar on the client", () => {
-    const args: readonly CommandArgument[] = [
-      "FLOW.SEARCH",
-      "email",
-      "INDEXED_STATE_META",
-      "version",
-      "STATE_META",
-      "version",
-      3
-    ];
-
-    expect(buildProtocolCommand(args)).toEqual({
-      opcode: OPCODES.commandExec,
-      payload: {
-        args: args.slice(1),
-        command: "FLOW.SEARCH"
-      }
-    });
+    expect(command.opcode).toBe(OPCODES.flowQuery);
+    const payload = command.payload as {
+      params: Record<string, unknown>;
+      version: string;
+    };
+    expect(payload.version).toBe("FQL1");
+    expect(Object.getPrototypeOf(payload.params)).toBeNull();
+    expect(Object.hasOwn(payload.params, "__proto__")).toBe(true);
+    expect(payload.params.__proto__).toBe("safe");
   });
 
   it("validates integer FLOW.SIGNAL options before native dispatch", () => {
@@ -636,21 +578,6 @@ describe("native Flow protocol codec", () => {
     ];
 
     expect(() => buildProtocolCommand(args)).toThrow("integer command argument must be an integer");
-  });
-
-  it("preserves prototype-shaped attribute names in native command maps", () => {
-    const command = buildProtocolCommand([
-      "FLOW.SEARCH",
-      "email",
-      "ATTRIBUTE",
-      "__proto__",
-      "safe"
-    ]);
-    const attributes = (command.payload as { attributes: Record<string, unknown> }).attributes;
-
-    expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);
-    expect(Object.hasOwn(attributes, "__proto__")).toBe(true);
-    expect(attributes.__proto__).toBe("safe");
   });
 
   it("builds direct native FLOW.COMPLETE for simple claimed completions", () => {
@@ -1105,7 +1032,14 @@ describe("native Flow protocol codec", () => {
 });
 
 function responseFrame(opcode: number, body: Buffer): ResponseFrame {
-  return { body, bodyLength: body.byteLength, flags: 0, laneId: opcode < 0x0100 ? 0 : 1, opcode, requestId: 1n };
+  return {
+    body,
+    bodyLength: body.byteLength,
+    flags: FLAG_CUSTOM_PAYLOAD,
+    laneId: opcode < 0x0100 ? 0 : 1,
+    opcode,
+    requestId: 1n
+  };
 }
 
 function compactClaimReclaimExpired(body: Buffer): boolean {

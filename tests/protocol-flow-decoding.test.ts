@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import {
-  COMMAND_OPCODES,
+  FLAG_CUSTOM_PAYLOAD,
   OPCODES,
   buildProtocolCommand,
   decodeResponse,
@@ -30,11 +30,13 @@ describe("native Flow protocol decoding limits", () => {
     const recordBody = Buffer.concat([Buffer.from([0, 0, 0x84]), u32(0)]);
     const recordListBody = Buffer.concat([Buffer.from([0, 0, 0x85]), u32(0)]);
     expect(decodeResponse(
-      responseFrame(OPCODES.flowGet, recordBody), OPCODES.flowGet, compactResponseHints
+      responseFrame(OPCODES.flowGet, recordBody, FLAG_CUSTOM_PAYLOAD),
+      OPCODES.flowGet,
+      compactResponseHints
     )).toEqual({});
     expect(decodeResponse(
-      responseFrame(COMMAND_OPCODES["FLOW.LIST"], recordListBody),
-      COMMAND_OPCODES["FLOW.LIST"],
+      responseFrame(OPCODES.pipeline, recordListBody, FLAG_CUSTOM_PAYLOAD),
+      OPCODES.pipeline,
       compactResponseHints
     )).toEqual([]);
   });
@@ -54,7 +56,9 @@ describe("native Flow protocol decoding limits", () => {
     ]);
 
     expect(decodeResponse(
-      responseFrame(OPCODES.flowClaimDue, body), OPCODES.flowClaimDue, compactResponseHints
+      responseFrame(OPCODES.flowClaimDue, body, FLAG_CUSTOM_PAYLOAD),
+      OPCODES.flowClaimDue,
+      compactResponseHints
     )).toEqual([
       [id, partition, lease, unsafe]
     ]);
@@ -90,6 +94,14 @@ describe("native Flow protocol decoding limits", () => {
     expect(decodeValue(encodeValue(positive)).value).toBe(positive);
     expect(decodeValue(encodeValue(negative)).value).toBe(negative);
     expect(decodeValue(encodeValue(Number.MAX_SAFE_INTEGER)).value).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it("preserves the full unsigned 64-bit native integer domain", () => {
+    const maximum = 18_446_744_073_709_551_615n;
+    const encoded = encodeValue(maximum);
+
+    expect(encoded.readUInt8(0)).toBe(8);
+    expect(decodeValue(encoded).value).toBe(maximum);
   });
 
   it("rejects unsafe integer numbers and accepts bigint instead", () => {
@@ -170,7 +182,9 @@ describe("native Flow protocol decoding limits", () => {
     ]);
 
     expect(() => decodeResponse(
-      responseFrame(OPCODES.flowGet, body), OPCODES.flowGet, compactResponseHints
+      responseFrame(OPCODES.flowGet, body, FLAG_CUSTOM_PAYLOAD),
+      OPCODES.flowGet,
+      compactResponseHints
     )).toThrow(
       "total items exceed max items"
     );
@@ -180,15 +194,24 @@ describe("native Flow protocol decoding limits", () => {
     const body = Buffer.concat([Buffer.from([0, 0, 0x81]), u32(100_001)]);
 
     expect(() => decodeResponse(
-      responseFrame(OPCODES.pipeline, body), OPCODES.pipeline, compactResponseHints
+      responseFrame(OPCODES.pipeline, body, FLAG_CUSTOM_PAYLOAD),
+      OPCODES.pipeline,
+      compactResponseHints
     )).toThrow(
       "exceeds max items"
     );
   });
 });
 
-function responseFrame(opcode: number, body: Buffer): ResponseFrame {
-  return { body, bodyLength: body.byteLength, flags: 0, laneId: opcode < 0x0100 ? 0 : 1, opcode, requestId: 1n };
+function responseFrame(opcode: number, body: Buffer, flags = 0): ResponseFrame {
+  return {
+    body,
+    bodyLength: body.byteLength,
+    flags,
+    laneId: opcode < 0x0100 ? 0 : 1,
+    opcode,
+    requestId: 1n
+  };
 }
 
 function u32(value: number): Buffer {

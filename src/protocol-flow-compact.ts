@@ -406,6 +406,7 @@ export function compactFlowRetryManyPayload(
     offset += 8;
   }
   return {
+    compactResponseItems: count,
     flags: wire.FLAG_CUSTOM_PAYLOAD,
     opcode: wire.COMMAND_OPCODES["FLOW.CANCEL_MANY"],
     payload: out

@@ -1,13 +1,16 @@
 export {
   NativeAdapter,
+  HTTPAdapter,
   type CommandExecutor,
   type ExecutePipelineOptions,
   type NativeAdapterOptions,
   type NativeClientOptions,
   type NativeProtocolEvent,
+  type HTTPAdapterOptions,
   type ReconnectOptions,
   type TopologyNativeAdapterOptions
 } from "./adapters.js";
+export { httpCommandDisposition, type HTTPCommandDisposition } from "./http-command-policy.js";
 export {
   ReconnectingExecutor,
   isReconnectableClosedConnectionError
@@ -73,8 +76,16 @@ export {
   type RunStepsItem,
   type RunStepsManyOptions,
   type ScheduleFireDueOptions,
+  type ScheduleFireDueResult,
+  type ScheduleFireOptions,
+  type ScheduleFireResult,
   type ScheduleListOptions,
   type ScheduleOptions,
+  type ScheduleRecord,
+  type ScheduleCatchupPolicy,
+  type ScheduleKind,
+  type ScheduleOverlapPolicy,
+  type ScheduleState,
   type SearchOptions,
   type SearchStateMeta,
   type StartAndClaimOptions,
@@ -82,6 +93,43 @@ export {
   type TransitionOptions
 } from "./client.js";
 export { JsonCodec, RawCodec, type Codec } from "./codecs.js";
+export {
+  FlowQueryError,
+  type FlowExplainCapabilities,
+  type FlowExplainResult,
+  type FlowQueryCountResult,
+  type FlowQueryErrorPosition,
+  type FlowQueryIndex,
+  type FlowQueryIndexBuild,
+  type FlowQueryIndexCoverage,
+  type FlowQueryIndexField,
+  type FlowQueryIndexFormat,
+  type FlowQueryInteger,
+  type FlowQueryIndexProgress,
+  type FlowQueryIndexRegistry,
+  type FlowQueryIndexRetirement,
+  type FlowQueryIndexServices,
+  type FlowQueryIndexServiceState,
+  type FlowQueryIndexStatistics,
+  type FlowQueryIndexStatus,
+  type FlowQueryIndexValidation,
+  type FlowQueryPage,
+  type FlowQueryParameter,
+  type FlowQueryParameters,
+  type FlowQueryQuality,
+  type FlowQueryRecord,
+  type FlowQueryRecordsResult,
+  type FlowQueryResult,
+  type FlowQueryUsage
+} from "./flow-query-types.js";
+export {
+  FlowProjection,
+  projectFlowQuery,
+  type FlowEventProjectionField,
+  type FlowProjectionField,
+  type FlowProjectionShape,
+  type FlowRunProjectionField
+} from "./flow-query-projection.js";
 export {
   MAX_FLOW_POLICY_GENERATION,
   type FlowPolicyBackoffKind,
@@ -94,6 +142,7 @@ export {
 export {
   ConnectionClosedError,
   FerricStoreError,
+  HTTPTransportError,
   FlowAlreadyExistsError,
   FlowNotFoundError,
   FlowWrongStateError,

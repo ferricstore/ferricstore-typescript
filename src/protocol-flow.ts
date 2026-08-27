@@ -3,11 +3,7 @@ import { splitFlowValueMGetArguments } from "./command-grammar.js";
 import { denseCommandArgumentTail } from "./protocol-array-validation.js";
 import * as core from "./protocol-core.js";
 import * as wire from "./protocol-constants.js";
-import {
-  normalizeFlowSearchStateMeta,
-  optionMap,
-  parseFlowOptions
-} from "./protocol-flow-options.js";
+import { parseFlowOptions } from "./protocol-flow-options.js";
 export * from "./protocol-flow-options.js";
 export * from "./protocol-flow-admin.js";
 import {
@@ -27,7 +23,7 @@ export {
   compactManyRequestTag
 } from "./protocol-flow-compact.js";
 import { compactFlowValueMGetPayload } from "./protocol-flow-compact-single.js";
-export { compactFlowListPayload, compactFlowValueMGetPayload } from "./protocol-flow-compact-single.js";
+export { compactFlowValueMGetPayload } from "./protocol-flow-compact-single.js";
 import {
   findItemToken,
   parseFlowCreateItemsExt,
@@ -40,16 +36,6 @@ import {
   withFlowPartitionRouting
 } from "./protocol-flow-routing.js";
 export * from "./protocol-flow-routing.js";
-
-export function hasFlowCommandOnlyOption(command: string, args: readonly CommandArgument[]): boolean {
-  if (command !== "FLOW.SEARCH") return false;
-  for (let index = 1; index < args.length; ) {
-    const token = core.asText(args[index]).toUpperCase();
-    if (token === "INDEXED_STATE_META") return true;
-    index += token === "ATTRIBUTE" || token === "STATE_META" ? 3 : 2;
-  }
-  return false;
-}
 
 export function flowCreatePayload(args: readonly CommandArgument[]): wire.ProtocolCommand | undefined {
   if (args.length < 7) return undefined;
@@ -114,9 +100,9 @@ export function flowValueMGetPayload(
   }
   if (allowCompact) {
     const compact = compactFlowValueMGetPayload(refs, payload.max_bytes, maxBodyBytes);
-    if (compact != null) return compact;
+    if (compact != null) return { ...compact, compactResponseItems: refs.length };
   }
-  return { opcode: wire.OPCODES.flowValueMGet, payload };
+  return { compactResponseItems: refs.length, opcode: wire.OPCODES.flowValueMGet, payload };
 }
 
 export function flowCreateManyPayload(
@@ -149,7 +135,7 @@ export function flowCreateManyPayload(
     if (items == null) return undefined;
     const payload: Record<string, unknown> = { ...options, items };
     if (!auto && !mixed) payload.partition_key = partition;
-    return { opcode: wire.OPCODES.flowCreateMany, payload };
+    return { compactResponseItems: items.length, opcode: wire.OPCODES.flowCreateMany, payload };
   }
 
   const rawItems = denseCommandArgumentTail(args, itemsIndex + 1, "ITEMS");
@@ -165,7 +151,9 @@ export function flowCreateManyPayload(
       options,
       maxBodyBytes
     );
-    if (compact != null) return compact;
+    if (compact != null) {
+      return { ...compact, compactResponseItems: rawItems.length / width };
+    }
   }
 
   const items: unknown[][] = [];
@@ -179,7 +167,7 @@ export function flowCreateManyPayload(
 
   const payload: Record<string, unknown> = { ...options, items };
   if (!auto && !mixed) payload.partition_key = partition;
-  return { opcode: wire.OPCODES.flowCreateMany, payload };
+  return { compactResponseItems: items.length, opcode: wire.OPCODES.flowCreateMany, payload };
 }
 
 export function flowClaimDuePayload(
@@ -330,7 +318,9 @@ export function flowClaimedManyPayload(
     const compact = command === "FLOW.RETRY_MANY"
       ? compactFlowRetryManyPayload(partition, rawItems, mixed, auto, options, maxBodyBytes)
       : compactFlowCompleteManyPayload(opcode, partition, rawItems, mixed, auto, options, maxBodyBytes);
-    if (compact != null) return compact;
+    if (compact != null) {
+      return { ...compact, compactResponseItems: rawItems.length / width };
+    }
   }
 
   const items: unknown[][] = [];
@@ -344,7 +334,7 @@ export function flowClaimedManyPayload(
 
   const payload: Record<string, unknown> = { ...options, items };
   if (!auto && !mixed) payload.partition_key = partition;
-  return { opcode, payload };
+  return { compactResponseItems: items.length, opcode, payload };
 }
 
 export function flowTransitionManyPayload(
@@ -384,7 +374,9 @@ export function flowTransitionManyPayload(
           maxBodyBytes
       )
       : undefined;
-    if (compact != null) return compact;
+    if (compact != null) {
+      return { ...compact, compactResponseItems: rawItems.length / width };
+    }
   }
   const items: Record<string, unknown>[] = [];
   for (let index = 0; index < rawItems.length; index += width) {
@@ -405,7 +397,11 @@ export function flowTransitionManyPayload(
     items
   };
   if (!mixed) payload.partition_key = args[0];
-  return { opcode: wire.OPCODES.flowTransitionMany, payload };
+  return {
+    compactResponseItems: items.length,
+    opcode: wire.OPCODES.flowTransitionMany,
+    payload
+  };
 }
 
 export function flowSpawnChildrenPayload(args: readonly CommandArgument[]): wire.ProtocolCommand | undefined {
@@ -436,12 +432,4 @@ export function flowSpawnChildrenPayload(args: readonly CommandArgument[]): wire
     opcode: wire.OPCODES.flowSpawnChildren,
     payload: { id: args[0], ...options, children }
   };
-}
-
-export function flowSearchPayload(args: readonly CommandArgument[]): wire.ProtocolCommand | undefined {
-  if (args.length < 1) return undefined;
-  const payload = optionMap(args.slice(1));
-  if (payload == null) return undefined;
-  normalizeFlowSearchStateMeta(payload);
-  return { opcode: wire.OPCODES.flowSearch, payload: { type: args[0], ...payload } };
 }

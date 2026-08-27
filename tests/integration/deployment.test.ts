@@ -130,7 +130,91 @@ describe.skipIf(authUrl == null)("live authenticated deployment", () => {
       await client.close();
     }
   }, 15_000);
+
+  it("enforces query command and partition ACLs without exposing index metadata", async () => {
+    if (authUrl == null) throw new Error("FERRICSTORE_AUTH_URL is required");
+    const target = new URL(authUrl);
+    const adminUsername = process.env.FERRICSTORE_AUTH_USERNAME ??
+      (decodeURIComponent(target.username) || "default");
+    const adminPassword = process.env.FERRICSTORE_AUTH_PASSWORD ?? decodeURIComponent(target.password);
+    if (adminPassword.length === 0) {
+      throw new Error("set FERRICSTORE_AUTH_PASSWORD or include a password in FERRICSTORE_AUTH_URL");
+    }
+    target.username = "";
+    target.password = "";
+
+    const run = randomUUID();
+    const username = `ts-query-${run}`;
+    const password = `secret-${run}`;
+    const prefix = `ts-sdk:security:${run}`;
+    const partition = `${prefix}:partition`;
+    const type = `ts-sdk-security-query-${run}`;
+    const query =
+      "FROM runs WHERE partition_key = @partition AND type = @type AND state = @state " +
+      "ORDER BY updated_at_ms ASC LIMIT 10 RETURN RECORDS";
+    const params = { partition, state: "ready", type };
+    const admin = await FerricStoreClient.fromUrl(target.toString(), {
+      nativeOptions: { password: adminPassword, username: adminUsername },
+      reconnect: false
+    });
+    let limited: FerricStoreClient | undefined;
+
+    try {
+      await admin.aclSetUser(username, [
+        "on",
+        `>${password}`,
+        `~${prefix}*`,
+        "-@all",
+        "+ping",
+        "+shards",
+        "+subscribe_events",
+        "+flow.query",
+        "+flow.query.explain"
+      ]);
+      await admin.create(`${prefix}:flow`, {
+        idempotent: true,
+        nowMs: Date.now(),
+        partitionKey: partition,
+        state: "ready",
+        type
+      });
+
+      limited = await FerricStoreClient.fromUrl(target.toString(), {
+        nativeOptions: { password, username },
+        reconnect: false
+      });
+      const result = await waitForAclQuery(limited, query, params);
+      expect(result.kind).toBe("records");
+      if (result.kind !== "records") throw new Error("expected records query result");
+      expect(result.records).toHaveLength(1);
+      await expect(limited.explain(query, params)).resolves.toMatchObject({ status: "planned" });
+
+      const deniedParams = { ...params, partition: `ts-sdk:security-denied:${run}` };
+      await expect(limited.query(query, deniedParams)).rejects.toThrow(/NOPERM|permission|ACL/i);
+      await expect(limited.explain(query, deniedParams)).rejects.toThrow(/NOPERM|permission|ACL/i);
+      await expect(limited.queryIndexes()).rejects.toThrow(/NOPERM|permission|ACL/i);
+    } finally {
+      await limited?.close();
+      await admin.aclDelUser(username).catch(() => undefined);
+      await admin.close();
+    }
+  }, 35_000);
 });
+
+async function waitForAclQuery(
+  client: FerricStoreClient,
+  query: string,
+  params: Readonly<Record<string, string>>
+): Promise<Awaited<ReturnType<FerricStoreClient["query"]>>> {
+  const deadline = Date.now() + 20_000;
+  let lastResult: Awaited<ReturnType<FerricStoreClient["query"]>> | undefined;
+  while (Date.now() < deadline) {
+    lastResult = await client.query(query, params);
+    if (lastResult.kind === "records" && lastResult.records.length === 1) return lastResult;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("FLOW.QUERY ACL projection did not become ready", { cause: lastResult });
+}
 
 function splitUrls(value: string | undefined): string[] {
   return value?.split(",").map((item) => item.trim()).filter((item) => item.length > 0) ?? [];

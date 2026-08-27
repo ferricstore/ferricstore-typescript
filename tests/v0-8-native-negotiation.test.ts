@@ -13,6 +13,7 @@ import {
   COMPACT_KV_MGET,
   COMPACT_KV_MGET_FIXED,
   COMPACT_OK_LIST,
+  FLAG_CUSTOM_PAYLOAD,
   FLAG_MORE_CHUNKS,
   OPCODES,
   type ResponseFrame,
@@ -27,7 +28,14 @@ import {
 } from "./adapter-test-support.js";
 
 function response(opcode: number, body: Buffer): ResponseFrame {
-  return { body, bodyLength: body.byteLength, flags: 0, laneId: 1, opcode, requestId: 1n };
+  return {
+    body,
+    bodyLength: body.byteLength,
+    flags: FLAG_CUSTOM_PAYLOAD,
+    laneId: 1,
+    opcode,
+    requestId: 1n
+  };
 }
 
 function compactGet(value: Buffer): Buffer {
@@ -164,7 +172,8 @@ describe("FerricStore 0.8 HELLO negotiation", () => {
           request.opcode,
           request.laneId,
           request.requestId,
-          compactGet(Buffer.from("value"))
+          compactGet(Buffer.from("value")),
+          FLAG_CUSTOM_PAYLOAD
         ));
         return NO_RESPONSE;
       }
@@ -190,7 +199,8 @@ describe("FerricStore 0.8 HELLO negotiation", () => {
           request.opcode,
           request.laneId,
           request.requestId,
-          compactGet(Buffer.from("value"))
+          compactGet(Buffer.from("value")),
+          FLAG_CUSTOM_PAYLOAD
         ));
         return NO_RESPONSE;
       }
@@ -216,10 +226,18 @@ describe("FerricStore 0.8 HELLO negotiation", () => {
       if (request.opcode === OPCODES.get) {
         const middle = Math.floor(body.byteLength / 2);
         socket.write(responseFrameFromBody(
-          request.opcode, request.laneId, request.requestId, body.subarray(0, middle), FLAG_MORE_CHUNKS
+          request.opcode,
+          request.laneId,
+          request.requestId,
+          body.subarray(0, middle),
+          FLAG_MORE_CHUNKS | FLAG_CUSTOM_PAYLOAD
         ));
         socket.write(responseFrameFromBody(
-          request.opcode, request.laneId, request.requestId, body.subarray(middle)
+          request.opcode,
+          request.laneId,
+          request.requestId,
+          body.subarray(middle),
+          FLAG_CUSTOM_PAYLOAD
         ));
         return NO_RESPONSE;
       }
@@ -258,10 +276,18 @@ describe("FerricStore 0.8 HELLO negotiation", () => {
       if (request.opcode === OPCODES.mget || request.opcode === OPCODES.flowValueMGet) {
         const middle = 7;
         socket.write(responseFrameFromBody(
-          request.opcode, request.laneId, request.requestId, body.subarray(0, middle), FLAG_MORE_CHUNKS
+          request.opcode,
+          request.laneId,
+          request.requestId,
+          body.subarray(0, middle),
+          FLAG_MORE_CHUNKS | FLAG_CUSTOM_PAYLOAD
         ));
         socket.write(responseFrameFromBody(
-          request.opcode, request.laneId, request.requestId, body.subarray(middle)
+          request.opcode,
+          request.laneId,
+          request.requestId,
+          body.subarray(middle),
+          FLAG_CUSTOM_PAYLOAD
         ));
         return NO_RESPONSE;
       }

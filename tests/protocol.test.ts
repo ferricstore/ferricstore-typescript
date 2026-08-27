@@ -30,9 +30,9 @@ describe("native protocol codec", () => {
 
   it("exports the latest native command opcode table", () => {
     expect(COMMAND_OPCODES.OPTIONS).toBe(0x000b);
-    expect(COMMAND_OPCODES["FLOW.SEARCH"]).toBe(0x0230);
+    expect(COMMAND_OPCODES["FLOW.QUERY"]).toBe(0x0231);
     expect(COMMAND_OPCODES["FLOW.BUDGET.RELEASE"]).toBe(0x0258);
-    expect(OPCODES.flowSearch).toBe(COMMAND_OPCODES["FLOW.SEARCH"]);
+    expect(OPCODES.flowQuery).toBe(COMMAND_OPCODES["FLOW.QUERY"]);
   });
 
   it("encodes request frames with FerricStore native header", () => {
@@ -350,6 +350,9 @@ describe("native protocol codec", () => {
     expect(buildProtocolCommand(["BLMOVE", "source", "target", "LEFT", "RIGHT", 3]).serverBlockMs).toBe(3_000);
     expect(buildProtocolCommand(["BRPOPLPUSH", "source", "target", 4]).serverBlockMs).toBe(4_000);
     expect(buildProtocolCommand(["BLMPOP", 0.25, 1, "queue", "LEFT"]).serverBlockMs).toBe(250);
+    expect(buildProtocolCommand(["BZMPOP", 0.5, 1, "scores", "MIN"]).serverBlockMs).toBe(500);
+    expect(buildProtocolCommand(["BZPOPMAX", "scores", 0.75]).serverBlockMs).toBe(750);
+    expect(buildProtocolCommand(["BZPOPMIN", "scores", 1.25]).serverBlockMs).toBe(1_250);
     expect(buildProtocolCommand(["XREAD", "COUNT", 1, "BLOCK", 400, "STREAMS", "events", "$"]).serverBlockMs).toBe(400);
     expect(buildProtocolCommand([
       "XREADGROUP",
@@ -403,6 +406,9 @@ describe("native protocol codec", () => {
       ["BRPOPLPUSH", "source", "target", 1],
       ["BLMOVE", "source", "target", "LEFT", "RIGHT", 1],
       ["BLMPOP", 1, 1, "queue", "LEFT"],
+      ["BZMPOP", 1, 1, "scores", "MIN"],
+      ["BZPOPMAX", "scores", 1],
+      ["BZPOPMIN", "scores", 1],
       ["XREAD", "BLOCK", 100, "STREAMS", "events", "$"],
       ["XREADGROUP", "GROUP", "workers", "worker-1", "BLOCK", 100, "STREAMS", "events", ">"]
     ] as const;
@@ -584,42 +590,26 @@ describe("native protocol codec", () => {
     });
   });
 
-  it("builds compact FLOW.LIST requests for the server-supported filter subset", () => {
+  it("builds typed FLOW.QUERY requests for the bounded FQL contract", () => {
     const command = buildProtocolCommand([
-      "FLOW.LIST",
-      "email",
-      "STATE",
-      "queued",
-      "COUNT",
-      500,
-      "RETURN",
-      "META"
+      "FLOW.QUERY",
+      "FQL1",
+      "FROM runs WHERE partition_key = @partition RETURN COUNT",
+      "partition",
+      "tenant-a"
     ]);
 
-    expect(command).toMatchObject({
-      flags: FLAG_CUSTOM_PAYLOAD,
-      opcode: COMMAND_OPCODES["FLOW.LIST"]
+    expect(command).toEqual({
+      opcode: COMMAND_OPCODES["FLOW.QUERY"],
+      payload: {
+        version: "FQL1",
+        query: "FROM runs WHERE partition_key = @partition RETURN COUNT",
+        params: { partition: "tenant-a" }
+      }
     });
-    expect(command.payload).toEqual(Buffer.concat([
-      Buffer.from([0x9f]),
-      binary(Buffer.from("email")),
-      binary(Buffer.from("queued")),
-      i64(500n),
-      Buffer.from([1])
-    ]));
-
-    const defaults = buildProtocolCommand(["FLOW.LIST", "email"]);
-    expect(defaults.payload).toEqual(Buffer.concat([
-      Buffer.from([0x9f]),
-      binary(Buffer.from("email")),
-      u32(0xffff_ffff),
-      i64(100n),
-      Buffer.from([0])
-    ]));
   });
 
   it("keeps unsupported compact Flow request shapes on their generic paths", () => {
-    const list = buildProtocolCommand(["FLOW.LIST", "email", "PARTITION", "tenant-a"]);
     const cancel = buildProtocolCommand([
       "FLOW.CANCEL_MANY",
       "tenant-a",
@@ -646,13 +636,11 @@ describe("native protocol codec", () => {
       Buffer.from("lease")
     ]);
 
-    expect(list).toMatchObject({ opcode: OPCODES.commandExec });
     expect(cancel).toMatchObject({ opcode: OPCODES.commandExec });
     expect(transition).toMatchObject({
       opcode: COMMAND_OPCODES["FLOW.TRANSITION_MANY"],
       payload: { payload: Buffer.from("payload") }
     });
-    expect(list.flags).toBeUndefined();
     expect(cancel.flags).toBeUndefined();
     expect(transition.flags).toBeUndefined();
   });
@@ -973,7 +961,7 @@ describe("native protocol codec", () => {
     ]);
 
     expect(decodeResponse(
-      responseFrame(COMMAND_OPCODES["FLOW.VALUE.MGET"], body),
+      responseFrame(COMMAND_OPCODES["FLOW.VALUE.MGET"], body, FLAG_CUSTOM_PAYLOAD),
       COMMAND_OPCODES["FLOW.VALUE.MGET"],
       compactResponseHints
     )).toEqual([storedNull, null]);
@@ -987,7 +975,7 @@ describe("native protocol codec", () => {
     ]);
 
     expect(decodeResponse(
-      responseFrame(OPCODES.mget, body), OPCODES.mget, compactResponseHints
+      responseFrame(OPCODES.mget, body, FLAG_CUSTOM_PAYLOAD), OPCODES.mget, compactResponseHints
     )).toEqual([
       Buffer.alloc(0),
       Buffer.alloc(0),
@@ -1137,8 +1125,8 @@ describe("native protocol codec", () => {
 
 });
 
-function responseFrame(opcode: number, body: Buffer): ResponseFrame {
-  return { body, bodyLength: body.byteLength, flags: 0, laneId: opcode < 0x0100 ? 0 : 1, opcode, requestId: 1n };
+function responseFrame(opcode: number, body: Buffer, flags = 0): ResponseFrame {
+  return { body, bodyLength: body.byteLength, flags, laneId: opcode < 0x0100 ? 0 : 1, opcode, requestId: 1n };
 }
 
 function u32(value: number): Buffer {

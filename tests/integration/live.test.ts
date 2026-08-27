@@ -14,14 +14,19 @@ import {
   createAndClaim,
   createManyAndClaim,
   deletePrefixedKeys,
+  eventually,
   expectStateMeta,
   expectSupportedOrKnownServerError,
   fenced,
   field,
   isReadonlyArray,
+  httpIntegration,
+  integrationClient,
+  integrationExecutor,
   suffix,
   text,
-  url
+  url,
+  waitForAclProjection
 } from "./live-support.js";
 
 const nativeProtocolCommands = new Set<string>(
@@ -40,25 +45,27 @@ const nativeProtocolCommands = new Set<string>(
     FLOW.APPROVAL.APPROVE FLOW.APPROVAL.GET FLOW.APPROVAL.LIST FLOW.APPROVAL.REJECT
     FLOW.APPROVAL.REQUEST FLOW.ATTRIBUTES FLOW.ATTRIBUTE_VALUES FLOW.BUDGET.COMMIT
     FLOW.BUDGET.GET FLOW.BUDGET.LIST FLOW.BUDGET.RELEASE FLOW.BUDGET.RESERVE
-    FLOW.BY_CORRELATION FLOW.BY_PARENT FLOW.BY_ROOT FLOW.CANCEL FLOW.CANCEL_MANY
-    FLOW.CIRCUIT.CLOSE FLOW.CIRCUIT.GET FLOW.CIRCUIT.OPEN FLOW.CLAIM_DUE
+    FLOW.CANCEL FLOW.CANCEL_MANY FLOW.CIRCUIT.CLOSE FLOW.CIRCUIT.GET
+    FLOW.CIRCUIT.OPEN FLOW.CLAIM_DUE
     FLOW.COMPLETE FLOW.COMPLETE_MANY FLOW.CREATE FLOW.CREATE_MANY
     FLOW.EFFECT.COMPENSATE FLOW.EFFECT.CONFIRM FLOW.EFFECT.FAIL FLOW.EFFECT.GET
-    FLOW.EFFECT.RESERVE FLOW.EXTEND_LEASE FLOW.FAIL FLOW.FAILURES FLOW.FAIL_MANY
+    FLOW.EFFECT.RESERVE FLOW.EXTEND_LEASE FLOW.FAIL FLOW.FAIL_MANY
     FLOW.GET FLOW.GOVERNANCE.LEDGER FLOW.GOVERNANCE.OVERVIEW FLOW.HISTORY
     FLOW.INFO FLOW.LIMIT.GET FLOW.LIMIT.LEASE FLOW.LIMIT.LIST FLOW.LIMIT.RELEASE
-    FLOW.LIMIT.SPEND FLOW.LIST FLOW.POLICY.GET FLOW.POLICY.SET FLOW.RECLAIM
+    FLOW.LIMIT.SPEND FLOW.POLICY.GET FLOW.POLICY.SET FLOW.QUERY FLOW.QUERY.INDEXES FLOW.RECLAIM
     FLOW.RETENTION_CLEANUP FLOW.RETRY FLOW.RETRY_MANY FLOW.REWIND
-    FLOW.RUN_STEPS_MANY FLOW.SCHEDULE.CREATE FLOW.SCHEDULE.DELETE FLOW.SEARCH
+    FLOW.RUN_STEPS_MANY FLOW.SCHEDULE.CREATE FLOW.SCHEDULE.DELETE
     FLOW.SCHEDULE.FIRE FLOW.SCHEDULE.FIRE_DUE FLOW.SCHEDULE.GET FLOW.SCHEDULE.LIST
     FLOW.SCHEDULE.PAUSE FLOW.SCHEDULE.RESUME FLOW.SIGNAL FLOW.SPAWN_CHILDREN
-    FLOW.START_AND_CLAIM FLOW.STATS FLOW.STEP_CONTINUE FLOW.STUCK FLOW.TERMINALS
+    FLOW.START_AND_CLAIM FLOW.STATS FLOW.STEP_CONTINUE
     FLOW.TRANSITION FLOW.TRANSITION_MANY FLOW.VALUE.PUT FLUSHALL FLUSHDB GEOADD
     GEODIST GEOHASH GEOPOS GEOSEARCH GEOSEARCHSTORE GET GETBIT GETDEL GETEX
     GETRANGE GETSET HDEL HELLO HEXISTS HEXPIRE HEXPIRETIME HGET HGETALL HGETDEL
     HGETEX HINCRBY HINCRBYFLOAT HKEYS HLEN HMGET HPERSIST HPEXPIRE HPTTL
     HRANDFIELD HSCAN HSET HSETEX HSETNX HSTRLEN HTTL HVALS INCR INCRBY
-    INCRBYFLOAT INFO KEY_INFO KEYS LASTSAVE LINDEX LINSERT LLEN LMOVE LOCK LOLWUT
+    INCRBYFLOAT INFO INVOCATION.CREATE INVOCATION.DEFINITION.GET
+    INVOCATION.DEFINITION.LIST INVOCATION.DEFINITION.PUT INVOCATION.GET
+    INVOCATION.PARTITION.LIST KEY_INFO KEYS LASTSAVE LINDEX LINSERT LLEN LMOVE LOCK LOLWUT
     LPOP LPOS LPUSH LPUSHX LRANGE LREM LSET LTRIM MEMORY MGET MODULE MSET MSETNX
     MULTI OBJECT PERSIST PEXPIRE PEXPIREAT PEXPIRETIME PFADD PFCOUNT PFMERGE PING
     PSETEX PSUBSCRIBE PTTL PUBLISH PUBSUB PUNSUBSCRIBE QUIT RANDOMKEY RATELIMIT.ADD
@@ -188,16 +195,16 @@ function setDifference(left: ReadonlySet<string>, right: ReadonlySet<string>): s
 
 describe("FerricStore integration", () => {
   it("rejects connection-pinned transactions before any mutation is sent", async () => {
-    const flow = await FerricStoreClient.fromUrl(url());
+    const flow = await integrationClient();
     const key = `ts-sdk:unsupported-transaction:${suffix()}`;
 
     try {
-      await expect(flow.command("MULTI")).rejects.toThrow(/MULTI.*pinned connection/i);
+      await expect(flow.command("MULTI")).rejects.toThrow(/MULTI.*(?:pinned connection|persistent native TCP session)/i);
       await expect(flow.pipeline([
         ["MULTI"],
         ["SET", key, "value"],
         ["EXEC"]
-      ])).rejects.toThrow(/MULTI.*pinned connection/i);
+      ])).rejects.toThrow(/MULTI.*(?:pinned connection|persistent native TCP session)/i);
       await expect(flow.command("GET", key)).resolves.toBeNull();
     } finally {
       await flow.command("DEL", key).catch(() => undefined);
@@ -206,7 +213,7 @@ describe("FerricStore integration", () => {
   });
 
   it("keeps native control commands out of explicit and automatic pipelines", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), {
+    const flow = await integrationClient({
       autoBatch: { enabled: true, mode: "all" }
     });
 
@@ -225,7 +232,7 @@ describe("FerricStore integration", () => {
   });
 
   it("completes acknowledged jobs and claims replacements in one native pipeline", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
+    const flow = await integrationClient({ codec: new RawCodec() });
     const runId = suffix();
     const now = Date.now();
     const type = `ts-sdk:fused-refill:${runId}`;
@@ -271,7 +278,7 @@ describe("FerricStore integration", () => {
   });
 
   it("keeps native protocol command catalog integration coverage classified", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
+    const flow = await integrationClient({ codec: new RawCodec() });
 
     try {
       const catalogNames = commandCatalogNames(await flow.command("COMMAND"));
@@ -292,8 +299,8 @@ describe("FerricStore integration", () => {
     }
   });
 
-  it("matches the live native OPTIONS opcode table", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
+  it.skipIf(httpIntegration())("matches the live native OPTIONS opcode table", async () => {
+    const flow = await integrationClient({ codec: new RawCodec() });
 
     try {
       expect(optionsOpcodeTable(await flow.command("OPTIONS"))).toEqual(COMMAND_OPCODES);
@@ -302,8 +309,8 @@ describe("FerricStore integration", () => {
     }
   });
 
-  it("receives a well-formed compact response compatibility matrix from OPTIONS", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new RawCodec() });
+  it.skipIf(httpIntegration())("receives a well-formed compact response compatibility matrix from OPTIONS", async () => {
+    const flow = await integrationClient({ codec: new RawCodec() });
 
     try {
       const advertised = optionsCompactResponseOpcodes(await flow.command("OPTIONS"));
@@ -318,7 +325,7 @@ describe("FerricStore integration", () => {
     }
   });
 
-  it("receives policy replacement and generation fields in HELLO capabilities", async () => {
+  it.skipIf(httpIntegration())("receives policy replacement and generation fields in HELLO capabilities", async () => {
     const adapter = await NativeAdapter.fromUrl(url());
 
     try {
@@ -338,7 +345,7 @@ describe("FerricStore integration", () => {
   });
 
   it("uses KV helpers and a full Flow claim/complete cycle", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), {
+    const flow = await integrationClient({
       codec: new JsonCodec()
     });
 
@@ -346,6 +353,7 @@ describe("FerricStore integration", () => {
     const key = `ts-sdk:kv:${runId}`;
     const id = `ts-sdk:flow:${runId}`;
     const type = "ts-sdk-integration";
+    const now = Date.now();
 
     try {
       await flow.kv.set(key, { ok: true }, { px: 60_000 });
@@ -353,8 +361,10 @@ describe("FerricStore integration", () => {
 
       await flow.create(id, {
         idempotent: true,
+        nowMs: now,
         partitionKey: id,
         payload: { hello: "world" },
+        runAtMs: now,
         state: "queued",
         type
       });
@@ -362,6 +372,7 @@ describe("FerricStore integration", () => {
       const jobs = await flow.claimDue(type, {
         leaseMs: 30_000,
         limit: 1,
+        nowMs: now + 1,
         partitionKey: id,
         payload: true,
         state: "queued",
@@ -397,7 +408,7 @@ describe("FerricStore integration", () => {
   });
 
   it("claims full records across multiple states in one command response", async () => {
-    const adapter = await NativeAdapter.fromUrl(url());
+    const adapter = await integrationExecutor();
     const calls: CommandArgument[][] = [];
     const flow = new FerricStoreClient({
       async close(): Promise<void> {
@@ -463,7 +474,7 @@ describe("FerricStore integration", () => {
   });
 
   it("stores state metadata and policy indexed state metadata", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const flow = await integrationClient({ codec: new JsonCodec() });
     const runId = suffix();
     const type = `ts-sdk-state-meta-${runId}`;
     const id = `ts-sdk:state-meta:${runId}`;
@@ -492,13 +503,15 @@ describe("FerricStore integration", () => {
         }
       });
 
-      const searchMatches = await flow.search(type, {
-        consistentProjection: true,
-        partitionKey,
-        state: "accept",
-        stateMeta: { version: "1" }
-      });
-      expect(searchMatches.some((record) => record.id === id)).toBe(true);
+      await eventually(
+        () => flow.search(type, {
+          partitionKey,
+          state: "accept",
+          stateMeta: { version: "1" }
+        }),
+        (records) => records.some((record) => record.id === id),
+        "FLOW.QUERY state metadata projection did not become ready"
+      );
 
       const job = await claimOne(flow, type, "accept", partitionKey, { nowMs: now + 1 });
       await expect(flow.complete(id, {
@@ -521,7 +534,7 @@ describe("FerricStore integration", () => {
   });
 
   it("patches, replaces, and generation-fences policies atomically", async () => {
-    const flow = await FerricStoreClient.fromUrl(url());
+    const flow = await integrationClient();
     const type = `ts-sdk-policy-cas-${suffix()}`;
 
     try {
@@ -565,7 +578,7 @@ describe("FerricStore integration", () => {
   });
 
   it("enforces FIFO state policy edges on the real server", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const flow = await integrationClient({ codec: new JsonCodec() });
     const runId = suffix();
     const parallelType = `ts-sdk-fifo-default-${runId}`;
     const fifoType = `ts-sdk-fifo-policy-${runId}`;
@@ -723,7 +736,7 @@ describe("FerricStore integration", () => {
   });
 
   it("stores state metadata for every flow mutation command", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const flow = await integrationClient({ codec: new JsonCodec() });
     const runId = suffix();
     const type = `ts-sdk-state-meta-all-${runId}`;
     const now = Date.now();
@@ -874,7 +887,7 @@ describe("FerricStore integration", () => {
   }, 20_000);
 
   it("covers native helpers and read-only diagnostics", async () => {
-    const flow = await FerricStoreClient.fromUrl(url(), { codec: new JsonCodec() });
+    const flow = await integrationClient({ codec: new JsonCodec() });
     const runId = suffix();
     const prefix = `ts-sdk:native:${runId}:`;
     const key = `${prefix}cas`;
@@ -937,25 +950,27 @@ describe("FerricStore integration", () => {
       expect(keyInfo.valueSize).toBeGreaterThan(0);
       expect(keyInfo.lastWriteShard).toBeGreaterThanOrEqual(0);
 
-      const first = await flow.fetchOrCompute(cacheKey, { hint: "integration", ttlMs: 60_000 });
-      expect(first.shouldCompute).toBe(true);
-      if (!first.shouldCompute) throw new Error("expected a fetch-or-compute lease");
-      await expect(flow.fetchOrComputeResult(cacheKey, { computed: true }, {
-        computeToken: first.computeToken,
-        ttlMs: 60_000
-      })).resolves.toBe(true);
-      const cached = await flow.fetchOrCompute<{ computed: boolean }>(cacheKey, { ttlMs: 60_000 });
-      expect(cached.hit).toBe(true);
-      if (!cached.hit) throw new Error("expected a cached fetch-or-compute result");
-      expect(cached.value).toEqual({ computed: true });
+      if (!httpIntegration()) {
+        const first = await flow.fetchOrCompute(cacheKey, { hint: "integration", ttlMs: 60_000 });
+        expect(first.shouldCompute).toBe(true);
+        if (!first.shouldCompute) throw new Error("expected a fetch-or-compute lease");
+        await expect(flow.fetchOrComputeResult(cacheKey, { computed: true }, {
+          computeToken: first.computeToken,
+          ttlMs: 60_000
+        })).resolves.toBe(true);
+        const cached = await flow.fetchOrCompute<{ computed: boolean }>(cacheKey, { ttlMs: 60_000 });
+        expect(cached.hit).toBe(true);
+        if (!cached.hit) throw new Error("expected a cached fetch-or-compute result");
+        expect(cached.value).toEqual({ computed: true });
 
-      const errorKey = `${prefix}cache-error`;
-      const firstError = await flow.fetchOrCompute(errorKey, { ttlMs: 60_000 });
-      expect(firstError.shouldCompute).toBe(true);
-      if (!firstError.shouldCompute) throw new Error("expected a fetch-or-compute lease");
-      await expect(flow.fetchOrComputeError(errorKey, "boom", {
-        computeToken: firstError.computeToken
-      })).resolves.toBe(true);
+        const errorKey = `${prefix}cache-error`;
+        const firstError = await flow.fetchOrCompute(errorKey, { ttlMs: 60_000 });
+        expect(firstError.shouldCompute).toBe(true);
+        if (!firstError.shouldCompute) throw new Error("expected a fetch-or-compute lease");
+        await expect(flow.fetchOrComputeError(errorKey, "boom", {
+          computeToken: firstError.computeToken
+        })).resolves.toBe(true);
+      }
 
       await expect(flow.serverInfo("server")).resolves.toContain("#");
       await expectSupportedOrKnownServerError(flow.configGet("*"));
@@ -972,26 +987,28 @@ describe("FerricStore integration", () => {
       await expect(flow.commandInfo("get")).resolves.toHaveLength(1);
       await expect(flow.commandDocs("get")).resolves.toBeDefined();
       expect((await flow.commandGetKeys(["GET", key])).map(text)).toContain(key);
-      await expect(flow.clientId()).resolves.toBeGreaterThan(0);
-      await expect(flow.clientSetName(`ts-sdk-${runId}`)).rejects.toThrow(/stable single connection/i);
-      const stableClient = await FerricStoreClient.fromUrl(url(), {
-        codec: new JsonCodec(),
-        reconnect: false
-      });
-      try {
-        await expect(stableClient.clientSetName(`ts-sdk-${runId}`)).resolves.toBe(true);
-        await expect(stableClient.clientGetName()).resolves.toBe(`ts-sdk-${runId}`);
-        await expectSupportedOrKnownServerError(stableClient.auth("bad-password"));
-      } finally {
-        await stableClient.close();
+      if (!httpIntegration()) {
+        await expect(flow.clientId()).resolves.toBeGreaterThan(0);
+        await expect(flow.clientSetName(`ts-sdk-${runId}`)).rejects.toThrow(/stable single connection/i);
+        const stableClient = await FerricStoreClient.fromUrl(url(), {
+          codec: new JsonCodec(),
+          reconnect: false
+        });
+        try {
+          await expect(stableClient.clientSetName(`ts-sdk-${runId}`)).resolves.toBe(true);
+          await expect(stableClient.clientGetName()).resolves.toBe(`ts-sdk-${runId}`);
+          await expectSupportedOrKnownServerError(stableClient.auth("bad-password"));
+        } finally {
+          await stableClient.close();
+        }
+        await expect(flow.clientInfo()).resolves.toContain("id=");
+        await expect(flow.clientList()).resolves.toContain("id=");
+        await expect(flow.clientTracking("ON", { optin: true })).rejects.toThrow(/not supported/i);
+        await expect(flow.clientTrackingInfo()).resolves.toBeDefined();
+        await expect(flow.clientGetRedir()).resolves.toBeGreaterThanOrEqual(0);
+        await expect(flow.clientCaching("NO")).rejects.toThrow(/not supported/i);
+        await expect(flow.clientTracking("OFF")).rejects.toThrow(/not supported/i);
       }
-      await expect(flow.clientInfo()).resolves.toContain("id=");
-      await expect(flow.clientList()).resolves.toContain("id=");
-      await expect(flow.clientTracking("ON", { optin: true })).rejects.toThrow(/not supported/i);
-      await expect(flow.clientTrackingInfo()).resolves.toBeDefined();
-      await expect(flow.clientGetRedir()).resolves.toBeGreaterThanOrEqual(0);
-      await expect(flow.clientCaching("NO")).rejects.toThrow(/not supported/i);
-      await expect(flow.clientTracking("OFF")).rejects.toThrow(/not supported/i);
       await expectSupportedOrKnownServerError(flow.save());
       await expectSupportedOrKnownServerError(flow.bgsave());
       await expect(flow.lastsave()).resolves.toBeGreaterThanOrEqual(0);
@@ -1004,18 +1021,29 @@ describe("FerricStore integration", () => {
       await expectSupportedOrKnownServerError(flow.aclSetUser(`ts-sdk-${runId}`, ["off"]));
       await expectSupportedOrKnownServerError(flow.aclGetUser("default"));
       await expectSupportedOrKnownServerError(flow.aclList());
-      const aclWhoami = await expectSupportedOrKnownServerError(
-        flow.aclWhoami(),
-        /unsupported|unknown|not supported|not enabled|invalid/i
-      );
-      if (aclWhoami != null) expect(aclWhoami).toBe("default");
+      if (!httpIntegration()) {
+        const aclWhoami = await expectSupportedOrKnownServerError(
+          flow.aclWhoami(),
+          /unsupported|unknown|not supported|not enabled|invalid/i
+        );
+        if (aclWhoami != null) expect(aclWhoami).toBe("default");
+      }
       await expectSupportedOrKnownServerError(flow.aclSave());
+      if (!httpIntegration()) {
+        const aclLoad = await expectSupportedOrKnownServerError(
+          flow.aclLoad(),
+          /unsupported|unknown|not supported|not enabled|invalid|no config file|connection closed/i
+        );
+        if (aclLoad != null) {
+          await expect(waitForAclProjection(async () => await flow.aclWhoami())).resolves.toBe("default");
+        }
+      }
       await expectSupportedOrKnownServerError(
-        flow.aclLoad(),
-        /unsupported|unknown|not supported|not enabled|invalid|no config file|connection closed/i
+        waitForAclProjection(async () => await flow.aclDelUser(`ts-sdk-${runId}`))
       );
-      await expectSupportedOrKnownServerError(flow.aclDelUser(`ts-sdk-${runId}`));
-      await expect(flow.auth("bad-password")).rejects.toThrow(/stable single connection/i);
+      if (!httpIntegration()) {
+        await expect(flow.auth("bad-password")).rejects.toThrow(/stable single connection/i);
+      }
       await expect(flow.clusterHealth()).resolves.toBeTypeOf("object");
       await expect(flow.clusterStats()).resolves.toBeTypeOf("object");
       await expect(flow.clusterKeyslot(key)).resolves.toBeGreaterThanOrEqual(0);
@@ -1034,9 +1062,9 @@ describe("FerricStore integration", () => {
       await expectSupportedOrKnownServerError(flow.invocationDefinitionPut({ name: `send-email-${runId}` }));
       await expectSupportedOrKnownServerError(flow.invocationDefinitionGet(`send-email-${runId}`));
       await expectSupportedOrKnownServerError(flow.invocationDefinitionList());
-      await expectSupportedOrKnownServerError(flow.invocationCreate(`send-email-${runId}`, { tenant: "acme" }));
+      await expectSupportedOrKnownServerError(flow.invocationCreate(`send-email-${runId}`, { source: "typescript-sdk-integration" }));
       await expectSupportedOrKnownServerError(flow.invocationGet(`invocation-${runId}`));
-      await expectSupportedOrKnownServerError(flow.invocationPartitionList(`send-email-${runId}`, { scope: "tenant:acme" }));
+      await expectSupportedOrKnownServerError(flow.invocationPartitionList(`send-email-${runId}`));
     } finally {
       await deletePrefixedKeys(flow, prefix);
       await flow.close();

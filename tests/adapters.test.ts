@@ -27,6 +27,7 @@ import {
   startCountingServer,
   startFragmentingServer,
   validTopologyPayload,
+  v010Startup,
   waitFor,
   writeIncrementalFragments
 } from "./adapter-test-support.js";
@@ -42,6 +43,26 @@ test("NativeAdapter handles fragmented response frames", async () => {
     const response = await adapter.executeCommand("PING");
     expect(Buffer.isBuffer(response)).toBe(true);
     expect((response as Buffer).toString("utf8")).toBe("PONG");
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("NativeAdapter explicitly requests only compact response codecs it can decode", async () => {
+  let startupPayload: Record<string, unknown> | undefined;
+  const server = await startCountingServer((request) => {
+    if (request.opcode === OPCODES.startup) {
+      startupPayload = request.payload as Record<string, unknown>;
+      return v010Startup();
+    }
+    return undefined;
+  }, { fragmentResponses: false });
+  const address = server.address() as AddressInfo;
+  const adapter = await NativeAdapter.fromUrl(`ferric://127.0.0.1:${address.port}`);
+
+  try {
+    expect((startupPayload?.compact_response_codecs as Buffer[]).map((value) => value.toString("utf8")))
+      .toEqual(["flow_query_result_v1"]);
   } finally {
     await adapter.close();
   }
@@ -225,7 +246,12 @@ test("FerricStoreClient.fromUrl waits for initial startup with reconnect enabled
       if (request.opcode !== OPCODES.startup) return undefined;
       startupSeen = true;
       void startupGate.then(() => {
-        socket.write(responseFrame(request.opcode, request.laneId, request.requestId, "OK"));
+        socket.write(responseFrame(
+          request.opcode,
+          request.laneId,
+          request.requestId,
+          v010Startup()
+        ));
       });
       return NO_RESPONSE;
     },

@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 import { expect } from "vitest";
 import {
+  HTTPAdapter,
   FerricStoreClient,
+  NativeAdapter,
+  type CommandExecutor,
+  type FerricStoreClientFromUrlOptions,
   type ClaimedItem,
   type FencedItem,
   type FlowRecord
@@ -11,8 +17,101 @@ export function url(): string {
   return process.env.FERRICSTORE_URL ?? "ferric://127.0.0.1:6388";
 }
 
+export function httpIntegration(): boolean {
+  return url().startsWith("http://") || url().startsWith("https://");
+}
+
+export async function integrationClient(
+  options: FerricStoreClientFromUrlOptions = {}
+): Promise<FerricStoreClient> {
+  const target = url();
+  if (!target.startsWith("http://") && !target.startsWith("https://")) {
+    return await FerricStoreClient.fromUrl(target, options);
+  }
+  const password = process.env.FERRICSTORE_PASSWORD;
+  if (password == null || password === "") throw new Error("FERRICSTORE_PASSWORD is required for HTTP integration");
+  const caFile = process.env.FERRICSTORE_CA_FILE;
+  return await FerricStoreClient.fromUrl(target, {
+    ...options,
+    reconnect: false,
+    httpOptions: {
+      ...(options.httpOptions ?? {}),
+      http2: process.env.FERRICSTORE_HTTP2 !== "false",
+      password,
+      tlsOptions: {
+        ...(options.httpOptions?.tlsOptions ?? {}),
+        ...(caFile == null || caFile === "" ? {} : { ca: readFileSync(caFile) })
+      },
+      username: process.env.FERRICSTORE_USERNAME ?? "default"
+    }
+  });
+}
+
+export async function integrationExecutor(): Promise<CommandExecutor & { close(): Promise<void> }> {
+  const target = url();
+  if (!httpIntegration()) return await NativeAdapter.fromUrl(target);
+  const password = process.env.FERRICSTORE_PASSWORD;
+  if (password == null || password === "") throw new Error("FERRICSTORE_PASSWORD is required for HTTP integration");
+  const caFile = process.env.FERRICSTORE_CA_FILE;
+  return await HTTPAdapter.fromUrl(target, {
+    http2: process.env.FERRICSTORE_HTTP2 !== "false",
+    password,
+    tlsOptions: caFile == null || caFile === "" ? {} : { ca: readFileSync(caFile) },
+    username: process.env.FERRICSTORE_USERNAME ?? "default"
+  });
+}
+
 export function suffix(): string {
   return randomUUID();
+}
+
+export async function eventually<T>(
+  operation: () => Promise<T>,
+  ready: (value: T) => boolean,
+  message: string,
+  options: { readonly intervalMs?: number; readonly timeoutMs?: number } = {}
+): Promise<T> {
+  const deadline = performance.now() + (options.timeoutMs ?? 30_000);
+  const intervalMs = options.intervalMs ?? 50;
+  let lastValue: T | undefined;
+  let lastError: unknown;
+
+  while (performance.now() < deadline) {
+    try {
+      lastValue = await operation();
+      lastError = undefined;
+      if (ready(lastValue)) return lastValue;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(message, { cause: lastError ?? lastValue });
+}
+
+export async function waitForAclProjection<T>(
+  operation: () => Promise<T>,
+  options: { readonly intervalMs?: number; readonly timeoutMs?: number } = {}
+): Promise<T> {
+  const deadline = performance.now() + (options.timeoutMs ?? 5_000);
+  const intervalMs = options.intervalMs ?? 25;
+  let lastError: Error | undefined;
+
+  while (performance.now() < deadline) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!(error instanceof Error) ||
+          !/^(?:NOPERM|LOADING) ACL catalog projection unavailable$/i.test(error.message)) {
+        throw error;
+      }
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error("ACL catalog projection did not become ready", { cause: lastError });
 }
 
 export function text(value: unknown): string {
@@ -31,7 +130,7 @@ export function ok(value: unknown): boolean {
 
 export async function expectSupportedOrKnownServerError<T>(
   promise: Promise<T>,
-  pattern = /unsupported|unknown|not supported|not enabled|invalid|password|cluster|no config file|shard index/i
+  pattern = /unsupported|unknown|not supported|not enabled|invalid|not[_ ]found|password|cluster|no config file|shard index/i
 ): Promise<T | undefined> {
   try {
     return await promise;
@@ -44,7 +143,12 @@ export async function expectSupportedOrKnownServerError<T>(
 
 export function field(source: unknown, name: string): unknown {
   if (source instanceof Map) {
-    return source.get(name) ?? source.get(Buffer.from(name));
+    if (source.has(name)) return source.get(name);
+    const expected = Buffer.from(name);
+    for (const [key, value] of source.entries()) {
+      if ((Buffer.isBuffer(key) || key instanceof Uint8Array) && Buffer.from(key).equals(expected)) return value;
+    }
+    return undefined;
   }
   if (typeof source === "object" && source != null) {
     const record = source as Record<string, unknown>;
@@ -106,7 +210,8 @@ export async function claimOne(
     worker?: string;
   } = {}
 ): Promise<ClaimedItem> {
-  const jobs = await flow.claimJobs(type, {
+  const deadline = performance.now() + 5_000;
+  const claim = async (): Promise<ClaimedItem[]> => await flow.claimJobs(type, {
     leaseMs: options.leaseMs ?? 30_000,
     limit: 1,
     nowMs: options.nowMs,
@@ -114,6 +219,12 @@ export async function claimOne(
     state,
     worker: options.worker ?? "ts-sdk-integration-worker"
   });
+  let jobs = await claim();
+  while (jobs.length === 0 && performance.now() < deadline) {
+    // A successful empty claim has no mutation to replay. Errors propagate above.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    jobs = await claim();
+  }
   expect(jobs).toHaveLength(1);
   const job = jobs[0];
   if (job == null) {
@@ -132,18 +243,19 @@ export async function createAndClaim(
   const id = `ts-sdk:${name}:${runId}`;
   const partitionKey = `${id}:partition`;
   const state = options.state ?? "queued";
+  const nowMs = options.nowMs ?? Date.now();
   await flow.create(id, {
     idempotent: true,
-    nowMs: options.nowMs,
+    nowMs,
     partitionKey,
     payload: { name },
-    runAtMs: options.nowMs,
+    runAtMs: nowMs,
     state,
     type
   });
   const job = await claimOne(flow, type, state, partitionKey, {
     leaseMs: options.leaseMs,
-    nowMs: options.nowMs
+    nowMs
   });
   return { id, job, partitionKey };
 }

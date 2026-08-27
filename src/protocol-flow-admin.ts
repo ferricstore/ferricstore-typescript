@@ -62,7 +62,8 @@ const FLOW_ADMIN_BOOLEAN_FIELDS = new Set([
 
 const FLOW_ADMIN_FIELDS: Readonly<Record<string, string>> = {
   ACTUAL_AMOUNT: "actual_amount", AMOUNT: "amount", APPROVER: "approver", ASSIGNEES: "assignees",
-  AT_MS: "at_ms", BLOCK: "block_ms", BLOCK_MS: "block_ms", CONSISTENT_PROJECTION: "consistent_projection",
+  AT_MS: "at_ms", BLOCK: "block_ms", BLOCK_MS: "block_ms", CATCHUP_POLICY: "catchup_policy",
+  CONSISTENT_PROJECTION: "consistent_projection",
   CORRELATION_ID: "correlation_id", COUNT: "count", CRON: "cron", DEADLINE_MS: "deadline_ms",
   DELAY_MS: "delay_ms", EFFECT_KEY: "effect_key", EFFECT_TYPE: "effect_type", END_AT_MS: "end_at_ms",
   ERROR: "error", EVENT: "event", EVERY_MS: "every_ms", EXPIRES_AT_MS: "expires_at_ms",

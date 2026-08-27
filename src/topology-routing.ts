@@ -1,5 +1,4 @@
 import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
 import {
   flowApprovalIdCommands,
   flowGovernanceScopeCommands,
@@ -14,6 +13,7 @@ import {
   splitFlowValueMGetArguments
 } from "./command-grammar.js";
 import { FerricStoreError } from "./errors.js";
+import { flowLogicalPartitionRoutingKey } from "./flow-partition-route-cache.js";
 import type { Command, CommandArgument } from "./internal.js";
 import type { RoutingRoute } from "./routing-topology.js";
 import type { RoutedCommandData, RoutedKeyGroup } from "./topology-execution-types.js";
@@ -38,9 +38,6 @@ export interface FlowRoutingData {
   readonly command?: ProtocolCommand;
   readonly key: string | Buffer;
 }
-
-const FLOW_PARTITION_ROUTE_CACHE_MAX = 1_024;
-const flowPartitionRouteCache = new Map<string, string>();
 
 export function routingKeyFromProtocolPayload(
   name: string | undefined,
@@ -106,6 +103,9 @@ export function flowRoutingData(name: string, args: readonly CommandArgument[]):
   if (flowScheduleCommands.has(name)) {
     return undefined;
   }
+
+  // FLOW.QUERY routing and ACL keys come from the server-prepared FQL plan.
+  if (name === "FLOW.QUERY") return undefined;
 
   if (flowApprovalIdCommands.has(name)) {
     const id = flowArgs[0];
@@ -248,37 +248,6 @@ function flowPartitionRoutingKeyFromCommand(
 
 function isRoutingKey(value: unknown): value is string | Buffer {
   return typeof value === "string" || Buffer.isBuffer(value);
-}
-
-function flowLogicalPartitionRoutingKey(value: unknown): string | undefined {
-  if (typeof value !== "string" && !Buffer.isBuffer(value)) {
-    return undefined;
-  }
-  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
-  const text = bytes.toString("utf8");
-  const autoMatch = /^__flow_auto__:(0|[1-9]\d{0,2})$/u.exec(text);
-  if (autoMatch != null) {
-    const bucket = Number(autoMatch[1]);
-    if (bucket < 256) {
-      return `{fa:${bucket}}`;
-    }
-  }
-  const cacheKey = `${Buffer.isBuffer(value) ? "b" : "s"}:${bytes.toString("base64")}`;
-  const cached = flowPartitionRouteCache.get(cacheKey);
-  if (cached != null) {
-    flowPartitionRouteCache.delete(cacheKey);
-    flowPartitionRouteCache.set(cacheKey, cached);
-    return cached;
-  }
-
-  const digest = createHash("sha256").update(bytes).digest("base64url");
-  const routeKey = `{f:${digest}}`;
-  if (flowPartitionRouteCache.size >= FLOW_PARTITION_ROUTE_CACHE_MAX) {
-    const oldest = flowPartitionRouteCache.keys().next().value;
-    if (oldest != null) flowPartitionRouteCache.delete(oldest);
-  }
-  flowPartitionRouteCache.set(cacheKey, routeKey);
-  return routeKey;
 }
 
 function flowAutoIdRoutingKey(value: unknown): string | undefined {

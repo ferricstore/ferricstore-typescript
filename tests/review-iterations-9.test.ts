@@ -13,7 +13,7 @@ import { mapSettledWithConcurrency } from "../src/topology-utilities.js";
 import { RoutingTopology } from "../src/topology.js";
 import { topologyForInstallation } from "../src/topology-installation.js";
 import { FakeExecutor } from "./fake-executor.js";
-import { BackpressureSocket, directNativeAdapter } from "./adapter-test-support.js";
+import { BackpressureSocket, directNativeAdapter, v010Startup } from "./adapter-test-support.js";
 
 describe("review iterations 9", () => {
   it("normalizes and validates scalar and COUNT LPOS replies", async () => {
@@ -222,11 +222,13 @@ describe("review iterations 9", () => {
 
     try {
       expect(internals.capabilities.requestFrameBytes).toBe(64 * 1_024);
-      internals.applyStartupLimits({ limits: { max_frame_bytes: 32 * 1_024 * 1_024 } });
+      internals.applyStartupLimits(v010Startup({
+        limits: { max_frame_bytes: 32 * 1_024 * 1_024 }
+      }));
       expect(internals.capabilities.requestFrameBytes).toBe(64 * 1_024);
       internals.capabilities.activateAuthenticated();
       expect(internals.capabilities.requestFrameBytes).toBe(16 * 1_024 * 1_024);
-      internals.applyStartupLimits({ limits: { max_frame_bytes: 1_024 } });
+      internals.applyStartupLimits(v010Startup({ limits: { max_frame_bytes: 1_024 } }));
       expect(internals.capabilities.requestFrameBytes).toBe(1_024);
     } finally {
       await adapter.close();

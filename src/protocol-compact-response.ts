@@ -10,7 +10,9 @@ import {
   readCompactBinaryMap
 } from "./protocol-compact-collections.js";
 import * as wire from "./protocol-constants.js";
-import { setOwnValue } from "./protocol-core.js";
+import { protocolErrorMessage } from "./protocol-error-message.js";
+import { decodeCompactFlowQueryResult } from "./protocol-flow-query-result.js";
+import { setProtocolMapEntry } from "./protocol-map-key.js";
 import {
   consumeDecodeItems,
   decodeValueWithBudget,
@@ -26,6 +28,7 @@ export function tryDecodeCompactResponse(
   if (body.byteLength === 0) return { found: false, value: undefined };
   const budget: wire.DecodeValueBudget = { remainingItems: wire.DEFAULT_MAX_VALUE_ITEMS };
   const tag = body.readUInt8(0);
+  validateCompactResponseItems(tag, opcode, body, hints);
   const pipelineValues = opcode === wire.OPCODES.pipeline && supports(hints, "pipeline_v1", opcode);
   if (tag === wire.COMPACT_OK_LIST && (supports(hints, "ok_list_v1", opcode) || pipelineValues)) {
     const values = decodeCompactOkList(body, budget);
@@ -88,6 +91,9 @@ export function tryDecodeCompactResponse(
       found: true,
       value: opcode === wire.OPCODES.pipeline ? markCompactPipelineDecoded(read.value) : read.value
     };
+  }
+  if (tag === wire.COMPACT_FLOW_QUERY_RESULT && supports(hints, "flow_query_result_v1", opcode)) {
+    return { found: true, value: decodeCompactFlowQueryResult(body, budget) };
   }
   return { found: false, value: undefined };
 }
@@ -216,7 +222,7 @@ function decodeCompactPipeline(
       const read = readBinary(data, offset);
       const errorStatus = status === 1 ? "busy" : "error";
       values[index] = classifyServerError(
-        errorMessage(status === 1 ? 4 : 1, read.value),
+        protocolErrorMessage(status === 1 ? 4 : 1, read.value),
         read.value,
         undefined,
         errorStatus
@@ -353,16 +359,16 @@ function readCompactFlowRecord(
     requireAvailable(data, offset, 1);
     const keyId = data.readUInt8(offset);
     offset += 1;
-    let key: string;
+    let key: string | Buffer;
     if (keyId === 0) {
       const read = readBinary(data, offset);
-      key = read.value.toString("utf8");
+      key = read.value;
       offset = read.offset;
     } else {
       key = wire.FLOW_RECORD_FIELD_KEYS[keyId] ?? `field_${keyId}`;
     }
     const read = decodeValueWithBudget(data, offset, budget);
-    setOwnValue(record, key, read.value);
+    setProtocolMapEntry(record, key, read.value);
     offset = read.offset;
   }
   return { value: record, offset };
@@ -406,12 +412,32 @@ function requireCompactContainer(count: number, budget: wire.DecodeValueBudget):
   consumeDecodeItems(count, budget);
 }
 
-function errorMessage(status: number | string, value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Buffer.isBuffer(value)) return value.toString("utf8");
-  if (typeof value === "object" && value != null && Object.hasOwn(value, "message")) {
-    const message = (value as Record<string, unknown>).message;
-    return typeof message === "string" ? message : String(message);
+function validateCompactResponseItems(
+  tag: number,
+  opcode: number,
+  data: Buffer,
+  hints: wire.ResponseDecodeHints
+): void {
+  const scalarItems = opcode === wire.OPCODES.set || opcode === wire.OPCODES.mset ? 1 : undefined;
+  const expected = scalarItems ?? hints.compactResponseItems;
+  if (expected == null || !COUNTED_COMPACT_TAGS.has(tag)) return;
+  requireAvailable(data, 0, 5);
+  const actual = data.readUInt32BE(1);
+  if (actual !== expected) {
+    throw new FerricStoreError(
+      `compact response returned ${actual} items; expected ${expected} items`
+    );
   }
-  return `ERR native request failed status=${status}: ${String(value)}`;
 }
+
+const COUNTED_COMPACT_TAGS = new Set<number>([
+  wire.COMPACT_FLOW_CLAIM_JOBS,
+  wire.COMPACT_OK_LIST,
+  wire.COMPACT_KV_MGET,
+  wire.COMPACT_FLOW_RECORD_LIST,
+  wire.COMPACT_BINARY_LIST_LIST,
+  wire.COMPACT_BINARY_MAP_LIST,
+  wire.COMPACT_INTEGER_LIST,
+  wire.COMPACT_KV_MGET_FIXED,
+  wire.COMPACT_PIPELINE_RESPONSE
+]);

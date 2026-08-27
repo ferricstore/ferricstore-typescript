@@ -12,9 +12,7 @@ import type {
   FlowStatePolicy,
   FlowStatePolicyLike,
   ManagementPairs,
-  ReadOptions,
-  RequestContext,
-  SearchStateMeta
+  RequestContext
 } from "./client-options.js";
 import { append, appendBool, arrayResponse, normalizeRefMeta, text, type CommandArgument } from "./internal.js";
 import { normalizeRequestContext } from "./request-context.js";
@@ -37,18 +35,6 @@ export function finiteNonNegativeInteger(value: number | undefined, fallback: nu
 
 export function finiteNonNegativeNumber(value: number | undefined, fallback: number): number {
   return value == null || !Number.isFinite(value) ? fallback : Math.max(0, value);
-}
-
-export function appendReadOptions(args: CommandArgument[], options: ReadOptions): void {
-  append(args, "COUNT", options.count);
-  append(args, "PARTITION", options.partitionKey);
-  append(args, "FROM_MS", options.fromMs);
-  append(args, "TO_MS", options.toMs);
-  appendBool(args, "REV", options.rev);
-  append(args, "STATE", options.state);
-  appendBool(args, "TERMINAL_ONLY", options.terminalOnly);
-  appendBool(args, "INCLUDE_COLD", options.includeCold);
-  appendBool(args, "CONSISTENT_PROJECTION", options.consistentProjection);
 }
 
 export function appendAttributeQueryOptions(args: CommandArgument[], options: AttributeQueryOptions): void {
@@ -114,30 +100,6 @@ export function appendAttributes(args: CommandArgument[], attributes: Record<str
   for (const [name, value] of Object.entries(attributes ?? {})) {
     args.push("ATTRIBUTE", name, value);
   }
-}
-
-export function appendSearchStateMeta(
-  args: CommandArgument[],
-  state: string | undefined,
-  stateMeta: SearchStateMeta | undefined
-): void {
-  const entries = Object.entries(stateMeta ?? {});
-  if (entries.length === 0) {
-    return;
-  }
-
-  if (entries.every(([, value]) => isPlainObject(value))) {
-    for (const [metaState, values] of entries) {
-      args.push("STATE_META", metaState, values as Record<string, unknown>);
-    }
-    return;
-  }
-
-  if (state == null) {
-    throw new Error("search stateMeta filters require state or nested state metadata");
-  }
-
-  args.push("STATE_META", state, stateMeta);
 }
 
 export function normalizeAdminResponse(value: unknown): unknown {

@@ -11,6 +11,7 @@ import { executeNativePipeline, type NativePipelineHost } from "../src/native-pi
 import {
   COMPACT_PIPELINE_RESPONSE,
   decodeResponse,
+  FLAG_CUSTOM_PAYLOAD,
   OPCODES,
   STATUS_OK
 } from "../src/protocol.js";
@@ -196,7 +197,7 @@ describe("second ten-pass review regressions", () => {
     expect(() => decodeResponse({
       body,
       bodyLength: body.byteLength,
-      flags: 0,
+      flags: FLAG_CUSTOM_PAYLOAD,
       laneId: 0,
       opcode: OPCODES.pipeline,
       requestId: 1n

@@ -40,6 +40,7 @@ export interface EncodeValueBudget extends DecodeValueBudget {
 export type EncodeValuePlan =
   | { readonly byteLength: 1; readonly tag: 0 | 1 | 2 }
   | { readonly byteLength: 9; readonly tag: 3; readonly value: bigint }
+  | { readonly byteLength: 9; readonly tag: 8; readonly value: bigint }
   | { readonly byteLength: 9; readonly tag: 7; readonly value: number }
   | {
       readonly byteLength: number;
@@ -121,7 +122,6 @@ export const COMMAND_OPCODES = {
   "FLOW.VALUE.PUT": 0x020b,
   "FLOW.VALUE.MGET": 0x020c,
   "FLOW.SIGNAL": 0x020d,
-  "FLOW.LIST": 0x020e,
   "FLOW.CREATE_MANY": 0x020f,
   "FLOW.COMPLETE_MANY": 0x0210,
   "FLOW.TRANSITION_MANY": 0x0211,
@@ -130,13 +130,7 @@ export const COMMAND_OPCODES = {
   "FLOW.CANCEL_MANY": 0x0214,
   "FLOW.RECLAIM": 0x0215,
   "FLOW.REWIND": 0x0216,
-  "FLOW.TERMINALS": 0x0217,
-  "FLOW.FAILURES": 0x0218,
-  "FLOW.BY_PARENT": 0x0219,
-  "FLOW.BY_ROOT": 0x021a,
-  "FLOW.BY_CORRELATION": 0x021b,
   "FLOW.INFO": 0x021c,
-  "FLOW.STUCK": 0x021d,
   "FLOW.POLICY.SET": 0x021e,
   "FLOW.POLICY.GET": 0x021f,
   "FLOW.SPAWN_CHILDREN": 0x0220,
@@ -155,7 +149,7 @@ export const COMMAND_OPCODES = {
   "FLOW.STATS": 0x022d,
   "FLOW.ATTRIBUTES": 0x022e,
   "FLOW.ATTRIBUTE_VALUES": 0x022f,
-  "FLOW.SEARCH": 0x0230,
+  "FLOW.QUERY": 0x0231,
   "FLOW.EFFECT.RESERVE": 0x0240,
   "FLOW.EFFECT.CONFIRM": 0x0241,
   "FLOW.EFFECT.FAIL": 0x0242,
@@ -245,7 +239,7 @@ export const OPCODES = {
   flowStepContinue: COMMAND_OPCODES["FLOW.STEP_CONTINUE"],
   flowStartAndClaim: COMMAND_OPCODES["FLOW.START_AND_CLAIM"],
   flowRunStepsMany: COMMAND_OPCODES["FLOW.RUN_STEPS_MANY"],
-  flowSearch: COMMAND_OPCODES["FLOW.SEARCH"]
+  flowQuery: COMMAND_OPCODES["FLOW.QUERY"]
 } as const;
 
 export const COMPACT_FLOW_CLAIM_JOBS = 0x80;
@@ -273,11 +267,12 @@ export const COMPACT_FLOW_TRANSITION_MANY_REQUEST = 0x9b;
 export const COMPACT_FLOW_TRANSITION_MANY_OK_REQUEST = 0x9c;
 export const COMPACT_FLOW_VALUE_MGET_REQUEST = 0x9d;
 export const COMPACT_FLOW_CREATE_MANY_MIXED_REQUEST = 0x9e;
-export const COMPACT_FLOW_LIST_REQUEST = 0x9f;
+export const COMPACT_FLOW_QUERY_RESULT = 0xa0;
 export const COMPACT_PIPELINE_DECODED = Symbol("ferricstore.compactPipelineDecoded");
 export const NULL_U32 = 0xffff_ffff;
 export const MIN_I64 = -9_223_372_036_854_775_808n;
 export const MAX_I64 = 9_223_372_036_854_775_807n;
+export const MAX_U64 = 18_446_744_073_709_551_615n;
 export const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 export const MIN_SAFE_INTEGER_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
 
@@ -333,6 +328,8 @@ export interface ProtocolCommand {
   readonly laneId?: number;
   /** @internal Correlated compact claim shape used to decode a direct response without guessing. */
   readonly compactClaimMode?: CompactClaimMode;
+  /** @internal Exact top-level item count expected from a compact collection response. */
+  readonly compactResponseItems?: number;
   /** @internal Correlated compact claim shapes for native pipeline response items. */
   readonly pipelineClaimModes?: readonly (CompactClaimMode | undefined)[];
   /** @internal Parsed routing metadata retained when a command uses COMMAND_EXEC. */
@@ -345,6 +342,7 @@ export type CompactClaimMode = "base" | "attrs" | "state" | "stateAttrs";
 
 export interface ResponseDecodeHints {
   readonly compactClaimMode?: CompactClaimMode;
+  readonly compactResponseItems?: number;
   readonly compactResponseOpcodes?: CompactResponseOpcodes;
   readonly pipelineClaimModes?: readonly (CompactClaimMode | undefined)[];
 }

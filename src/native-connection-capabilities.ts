@@ -2,7 +2,8 @@ import { startupLimits } from "./native-connection.js";
 import {
   EMPTY_COMPACT_RESPONSE_OPCODES,
   nativeNegotiation,
-  type CompactResponseOpcodes
+  type CompactResponseOpcodes,
+  type FlowQueryNegotiation
 } from "./native-negotiation.js";
 import { UNAUTHENTICATED_MAX_FRAME_BYTES } from "./native-adapter-config.js";
 
@@ -16,6 +17,9 @@ export interface AppliedNativeCapabilities {
 /** Connection-local HELLO capabilities and pre-auth request-size enforcement. */
 export class NativeConnectionCapabilities {
   compactResponseOpcodes: CompactResponseOpcodes = EMPTY_COMPACT_RESPONSE_OPCODES;
+  compactPubSubPublish = false;
+  compactStreamXAdd = false;
+  flowQuery?: FlowQueryNegotiation;
   requestFrameBytes: number;
   private negotiatedRequestFrameBytes: number;
 
@@ -28,6 +32,9 @@ export class NativeConnectionCapabilities {
     const limits = startupLimits(value);
     const negotiation = nativeNegotiation(value);
     this.compactResponseOpcodes = negotiation.compactResponseOpcodes;
+    this.compactPubSubPublish = negotiation.compactPubSubPublish;
+    this.compactStreamXAdd = negotiation.compactStreamXAdd;
+    this.flowQuery = negotiation.flowQuery;
     if (limits.frameBytes != null) {
       this.negotiatedRequestFrameBytes = Math.min(
         this.configuredRequestFrameBytes,

@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { FerricStoreError } from "./errors.js";
 import type { Command, CommandArgument } from "./internal.js";
+import { flowQueryPayload } from "./flow-query-request.js";
 
 import * as flow from "./protocol-flow.js";
 import { flowSignalPayload } from "./protocol-flow-signal.js";
@@ -176,22 +177,26 @@ export function buildProtocolCommand(
   }
   if (command === "SET" && commandArgs.length >= 2) {
     const payload = stringSetPayload(commandArgs);
-    return payload == null ? commandExec(args) : { opcode: wire.OPCODES.set, payload };
+    return payload == null
+      ? commandExec(args)
+      : { compactResponseItems: 1, opcode: wire.OPCODES.set, payload };
   }
   if (command === "MGET" && commandArgs.length > 0) {
     const compact = allowCustomPayload
       ? compactKeyPipelinePayload(wire.OPCODES.mget, commandArgs, 2, maxBodyBytes)
       : undefined;
-    if (compact != null) return compact;
+    if (compact != null) return { ...compact, compactResponseItems: commandArgs.length };
     return commandArgs.every(isBinaryCommandArgument)
-      ? { opcode: wire.OPCODES.mget, payload: { keys: commandArgs } }
+      ? { compactResponseItems: commandArgs.length, opcode: wire.OPCODES.mget, payload: { keys: commandArgs } }
       : commandExec(args);
   }
   if (command === "MSET" && commandArgs.length >= 2 && commandArgs.length % 2 === 0) {
     const compact = allowCustomPayload ? compactMsetPayload(commandArgs, maxBodyBytes) : undefined;
-    if (compact != null) return compact;
+    if (compact != null) return { ...compact, compactResponseItems: 1 };
     const pairs = typedKeyValuePairs(commandArgs);
-    return pairs == null ? commandExec(args) : { opcode: wire.OPCODES.mset, payload: { pairs } };
+    return pairs == null
+      ? commandExec(args)
+      : { compactResponseItems: 1, opcode: wire.OPCODES.mset, payload: { pairs } };
   }
   if (command === "DEL" && commandArgs.length > 0) {
     return commandArgs.every(isBinaryCommandArgument)
@@ -203,10 +208,8 @@ export function buildProtocolCommand(
   if (command === "FLOW.HISTORY") {
     return flow.flowHistoryPayload(commandArgs) ?? commandExec(args);
   }
-  if (command === "FLOW.LIST") {
-    return (allowCustomPayload
-      ? flow.compactFlowListPayload(commandArgs, maxBodyBytes)
-      : undefined) ?? commandExec(args);
+  if (command === "FLOW.QUERY") {
+    return { opcode: wire.OPCODES.flowQuery, payload: flowQueryPayload(commandArgs) };
   }
   if (command === "FLOW.POLICY.SET") {
     return flowPolicySetPayload(commandArgs) ?? commandExec(args);
@@ -327,21 +330,6 @@ export function buildProtocolCommand(
   if (command === "FLOW.RUN_STEPS_MANY") {
     return flow.flowAdminPayload(wire.OPCODES.flowRunStepsMany, commandArgs) ?? commandExec(args);
   }
-  if (command === "FLOW.SEARCH") {
-    if (flow.hasFlowCommandOnlyOption(command, commandArgs)) {
-      const fallback = commandExec(args);
-      try {
-        const parsed = flow.flowSearchPayload(commandArgs);
-        return parsed == null
-          ? fallback
-          : flow.withFlowPartitionRouting(fallback, parsed.payload);
-      } catch {
-        return fallback;
-      }
-    }
-    return flow.flowSearchPayload(commandArgs) ?? commandExec(args);
-  }
-
   return commandExec(args);
 }
 
@@ -358,11 +346,23 @@ export function buildProtocolCommand(
 
 export function tryPipelineCommand(
   commands: readonly Command[],
-  maxBodyBytes = Number.MAX_SAFE_INTEGER
+  maxBodyBytes = Number.MAX_SAFE_INTEGER,
+  allowStreamXAdd = true,
+  allowPubSubPublish = true
 ): wire.ProtocolCommand | undefined {
-  const compact = compactPipelinePayload(commands, maxBodyBytes);
+  const compact = compactPipelinePayload(
+    commands,
+    maxBodyBytes,
+    allowStreamXAdd,
+    allowPubSubPublish,
+  );
   if (compact != null) {
-    return { flags: wire.FLAG_CUSTOM_PAYLOAD, opcode: wire.OPCODES.pipeline, payload: compact };
+    return {
+      compactResponseItems: commands.length,
+      flags: wire.FLAG_CUSTOM_PAYLOAD,
+      opcode: wire.OPCODES.pipeline,
+      payload: compact
+    };
   }
 
   const protocols = new Array<wire.ProtocolCommand>(commands.length);
@@ -408,6 +408,7 @@ export function tryPipelineCommand(
   const hasPipelineClaimMode = pipelineClaimModes.some((mode) => mode != null);
 
   return {
+    compactResponseItems: commands.length,
     opcode: wire.OPCODES.pipeline,
     payload: {
       atomicity: "none",

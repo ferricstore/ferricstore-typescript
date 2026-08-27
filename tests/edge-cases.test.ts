@@ -280,7 +280,10 @@ describe("FerricStoreClient edge cases", () => {
     await expect(client.claimDue("order", { state: "created", worker: "worker-1" })).rejects.toThrow(
       "FLOW.CLAIM_DUE returned an invalid response"
     );
-    await expect(client.search("order")).rejects.toThrow("FLOW.SEARCH returned an invalid response");
+    await expect(client.search("order", {
+      attributes: { tenant: "acme" },
+      partitionKey: "tenant-a"
+    })).rejects.toThrow("FLOW.QUERY result must be a map");
   });
 
   it("rejects mutually exclusive claim options before sending a command", async () => {
