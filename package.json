@@ -107,12 +107,12 @@
     "@langchain/core": "^1.2.9",
     "@langchain/langgraph": "^1.4.12",
     "@openai/agents": "^0.17.0",
-    "@types/node": "^26.2.0",
-    "eslint": "^10.9.0",
+    "@types/node": "^22.20.1",
+    "eslint": "^10.9.1",
     "tsup": "^8.5.1",
     "typedoc": "^0.28.20",
-    "typescript": "^7.0.2",
-    "typescript-eslint": "^8.67.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.68.0",
     "vitest": "^4.1.11"
   },
   "peerDependencies": {
