@@ -49,7 +49,21 @@ describe("release workflow", () => {
     expect(npm).toMatch(
       /needs:\s*\[integration, authenticated-integration, http-integration\]/u
     );
+    expect(npm).toContain("Verify release tag and checkout");
+    expect(npm).toContain("package_version");
+    expect(npm).toContain("expected_tag");
+    expect(npm).toContain("GITHUB_REF_NAME");
+    expect(npm).toContain("GITHUB_SHA");
+    expect(npm).toContain("git rev-parse HEAD");
+    expect(npm).not.toContain(".verification.verified");
+    expect(npm).not.toContain("GPG");
     expect(npm).toContain("npm publish --provenance --access public");
+  });
+
+  it("links the adapter API to rendered package documentation", () => {
+    const readme = readFileSync(`${repositoryRoot}/README.md`, "utf8");
+    expect(readme).toContain("https://unpkg.com/@ferricstore/ferricstore/docs/agent-api/modules.html");
+    expect(readme).not.toContain("github.com/ferricstore/ferricstore-typescript/blob/main/docs/agent-api");
   });
 
   it("pins third-party actions and grants write permissions only to the job that needs them", () => {
@@ -86,7 +100,7 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.11.11");
+    expect(metadata.version).toBe("0.12.1");
     expect(metadata.ferricstore).toEqual({
       minimumServerVersion: "0.11.4",
       nativeProtocolVersion: 1
@@ -117,16 +131,22 @@ describe("core compatibility CI", () => {
       scripts?: Record<string, string>;
     };
     const guardPath = `${repositoryRoot}/scripts/check-generated-docs.mjs`;
+    const agentTypedoc = JSON.parse(readFileSync(`${repositoryRoot}/typedoc.agent.json`, "utf8")) as {
+      entryPoints?: string[];
+      out?: string;
+    };
 
-    expect(metadata.scripts?.["docs:check"]).toBe(
-      "typedoc --logLevel Warn && node scripts/check-generated-docs.mjs"
-    );
+    expect(metadata.scripts?.docs).toContain("typedoc.agent.json");
+    expect(metadata.scripts?.["docs:check"]).toContain("scripts/check-generated-docs.mjs");
     expect(existsSync(guardPath)).toBe(true);
+    expect(agentTypedoc.entryPoints).toEqual(["src/langgraph.ts", "src/openai-agents.ts"]);
+    expect(agentTypedoc.out).toBe("docs/agent-api");
     if (!existsSync(guardPath)) return;
 
     const guard = readFileSync(guardPath, "utf8");
     expect(guard).toContain("inflateSync");
     expect(guard).toContain("git show");
+    expect(guard).toContain("docs/agent-api");
     for (const asset of ["hierarchy.js", "navigation.js", "search.js"]) {
       expect(guard).toContain(asset);
     }

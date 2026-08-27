@@ -6,6 +6,42 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-08-27
+
+### Fixed
+
+- Fence adapter state with native compare-and-swap commits, epoch-protected
+  LangGraph threads, CAS tombstones, and append-only validated indexes so an
+  expired writer cannot overwrite or hide newer data.
+- Honor global LangGraph checkpoint namespace filters and preserve nested
+  `invokeOptions` configuration, metadata, context, and intentional null input.
+- Make OpenAI Agents transaction digests independent of the worker locale while
+  continuing to accept receipts written by the original locale-ordered format.
+- Validate the release tag against the package version and checked-out commit,
+  include optional framework entry points in the generated API reference, and
+  link to a rendered package-hosted reference.
+
+## [0.12.0] - 2026-08-27
+
+### Added
+
+- Add a FerricStore-backed LangGraph.js checkpoint saver with pending writes,
+  checkpoint history, namespaces, and configurable durability behavior.
+- Add a LangGraph.js `BaseStore` for durable long-term memory and a
+  `LangGraphFlow` bridge for running graph handlers through FerricFlow.
+- Add an OpenAI Agents SDK `Session` with durable message history, atomic
+  rewrites, and idempotent mutations.
+- Publish the framework integrations from the existing package through the
+  `@ferricstore/ferricstore/langgraph` and
+  `@ferricstore/ferricstore/openai-agents` subpaths, with examples and usage
+  documentation.
+
+### Changed
+
+- Share snapshot and durability logic across the agent persistence adapters,
+  keep framework dependencies optional, and exercise the adapters in the
+  isolated live-integration release gate.
+
 ## [0.11.11] - 2026-08-23
 
 ### Fixed

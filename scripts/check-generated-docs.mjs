@@ -5,15 +5,15 @@ import { inflateSync } from "node:zlib";
 import { isDeepStrictEqual } from "node:util";
 
 const root = process.cwd();
-const docsRoot = resolve(root, "docs/api");
-const compressedAssets = [
-  "docs/api/assets/hierarchy.js",
-  "docs/api/assets/navigation.js",
-  "docs/api/assets/search.js"
-];
+const docsRoots = ["docs/api", "docs/agent-api"];
+const compressedAssets = docsRoots.flatMap((path) => [
+  `${path}/assets/hierarchy.js`,
+  `${path}/assets/navigation.js`,
+  `${path}/assets/search.js`
+]);
 
-const generatedFiles = listFiles(docsRoot).sort();
-const trackedFiles = execFileSync("git", ["ls-files", "--", "docs/api"], {
+const generatedFiles = docsRoots.flatMap((path) => listFiles(resolve(root, path))).sort();
+const trackedFiles = execFileSync("git", ["ls-files", "--", ...docsRoots], {
   encoding: "utf8"
 }).trim().split("\n").filter(Boolean).sort();
 
@@ -27,7 +27,7 @@ const diff = spawnSync(
     "diff",
     "--exit-code",
     "--",
-    "docs/api",
+    ...docsRoots,
     ...compressedAssets.map((path) => `:(exclude)${path}`)
   ],
   { stdio: "inherit" }

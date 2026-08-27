@@ -16,9 +16,25 @@ npm install @ferricstore/ferricstore
 
 Requires Node.js 22.22 or newer. The SDK ships ESM and CommonJS builds and is tested with Node 22, 24, and 26.
 
+Agent framework adapters are optional:
+
+```bash
+npm install @ferricstore/ferricstore @langchain/langgraph @langchain/core
+# or
+npm install @ferricstore/ferricstore @openai/agents
+```
+
+Use `@ferricstore/ferricstore/langgraph` for a LangGraph.js checkpointer,
+long-term `BaseStore`, and FerricFlow handler bridge. Use
+`@ferricstore/ferricstore/openai-agents` for an atomic, idempotent OpenAI
+Agents SDK `Session`. See [docs/agent-frameworks.md](docs/agent-frameworks.md).
+The generated
+[agent framework API reference](https://unpkg.com/@ferricstore/ferricstore/docs/agent-api/modules.html)
+covers every public adapter class and option.
+
 ## Compatibility
 
-TypeScript SDK `0.11.11` requires FerricStore server `0.11.4` or newer. With
+TypeScript SDK `0.12.0` requires FerricStore server `0.11.4` or newer. With
 FerricStore 0.11.11 it negotiates compact Stream mode 34 for homogeneous auto-ID
 `XADD` pipelines and compact Pub/Sub mode 35 for homogeneous `PUBLISH`
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
@@ -649,6 +665,8 @@ Runnable examples live in the `examples/` directory:
 - [signals.ts](examples/signals.ts)
 - [value-refs.ts](examples/value-refs.ts)
 - [kv-store.ts](examples/kv-store.ts)
+- [langgraph.ts](examples/langgraph.ts)
+- [openai-agents-session.ts](examples/openai-agents-session.ts)
 
 ## Codecs
 

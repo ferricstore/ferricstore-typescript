@@ -1,0 +1,14 @@
+{
+  "entryPoints": ["src/langgraph.ts", "src/openai-agents.ts"],
+  "entryPointStrategy": "resolve",
+  "out": "docs/agent-api",
+  "readme": "docs/agent-frameworks.md",
+  "basePath": "src",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "githubPages": false,
+  "disableGit": true,
+  "sourceLinkTemplate": "https://github.com/ferricstore/ferricstore-typescript/blob/main/src/{path}#L{line}",
+  "hideGenerator": true,
+  "plugin": []
+}
