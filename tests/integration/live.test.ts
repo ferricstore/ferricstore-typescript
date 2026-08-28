@@ -887,7 +887,7 @@ describe("FerricStore integration", () => {
   }, 20_000);
 
   it("covers native helpers and read-only diagnostics", async () => {
-    const flow = await integrationClient({ codec: new JsonCodec() });
+    let flow = await integrationClient({ codec: new JsonCodec() });
     const runId = suffix();
     const prefix = `ts-sdk:native:${runId}:`;
     const key = `${prefix}cas`;
@@ -1035,6 +1035,8 @@ describe("FerricStore integration", () => {
           /unsupported|unknown|not supported|not enabled|invalid|no config file|connection closed/i
         );
         if (aclLoad != null) {
+          await flow.close();
+          flow = await integrationClient({ codec: new JsonCodec() });
           await expect(waitForAclProjection(async () => await flow.aclWhoami())).resolves.toBe("default");
         }
       }
