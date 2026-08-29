@@ -154,6 +154,59 @@ test("redirects retain caller authentication and custom headers across origins",
   }
 });
 
+test("authenticated HTTP requests revalidate once after a stale-session 401", async () => {
+  let requests = 0;
+  const server = await startHttpServer(async (request, response) => {
+    requests += 1;
+    expect(request.headers.authorization).toBe("Bearer secret");
+    await body(request);
+    if (requests === 1) {
+      json(response, 401, { error: { code: "unauthenticated" } });
+    } else {
+      json(response, 200, success("PONG"));
+    }
+  });
+  const adapter = await HTTPAdapter.fromUrl(url(server), { bearerToken: "secret" });
+  try {
+    await expect(adapter.executeCommand("PING")).resolves.toBe("PONG");
+    expect(requests).toBe(2);
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("authenticated HTTP requests retry a persistent 401 at most once", async () => {
+  let requests = 0;
+  const server = await startHttpServer(async (request, response) => {
+    requests += 1;
+    await body(request);
+    json(response, 401, { error: { code: "unauthenticated" } });
+  });
+  const adapter = await HTTPAdapter.fromUrl(url(server), { bearerToken: "invalid" });
+  try {
+    await expect(adapter.executeCommand("PING")).rejects.toMatchObject({ statusCode: 401 });
+    expect(requests).toBe(2);
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("anonymous HTTP requests do not retry a 401", async () => {
+  let requests = 0;
+  const server = await startHttpServer(async (request, response) => {
+    requests += 1;
+    await body(request);
+    json(response, 401, { error: { code: "unauthenticated" } });
+  });
+  const adapter = await HTTPAdapter.fromUrl(url(server));
+  try {
+    await expect(adapter.executeCommand("PING")).rejects.toMatchObject({ statusCode: 401 });
+    expect(requests).toBe(1);
+  } finally {
+    await adapter.close();
+  }
+});
+
 test("HTTP/2 follows cross-origin redirects without dropping the request body or credentials", async () => {
   let targetRequest: { authorization?: string; body?: string; method?: string; path?: string } = {};
   const target = startHttp2Server();
