@@ -17,8 +17,8 @@ jobs:
         include:
           - server: release-0.11.4
             image: ghcr.io/ferricstore/ferricstore:0.11.4@sha256:ee49d39e3b15cd6298537a88818647e71bcfc7571921e88bcf3a201311c690fc
-          - server: release-0.11.11
-            image: quay.io/ferricstore/ferricstore:0.11.11@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5
+          - server: release-0.11.14
+            image: quay.io/ferricstore/ferricstore:0.11.14@sha256:f7d29befefa15bce4b3755bf786cf7620c814f13bbd336c0d9955581b323b60e
           - server: pinned-core
             image: ghcr.io/ferricstore/ferricstore:ci-014997467189c292f7a15b7ca605d514adcd8df2@sha256:2dc91388959a308947e762081bc447feaa2a5f6846d56de9e05aca17ce2f57f7
     env:
@@ -32,13 +32,13 @@ jobs:
       - run: npm ci
       - run: npm run test:integration:isolated
       - name: Build SDK for throughput smoke
-        if: ${{ matrix.server == 'release-0.11.11' }}
+        if: ${{ matrix.server == 'release-0.11.14' }}
         run: npm run build
       - name: Start release server for throughput smoke
-        if: ${{ matrix.server == 'release-0.11.11' }}
+        if: ${{ matrix.server == 'release-0.11.14' }}
         run: npm run integration:up
       - name: Acknowledged response throughput smoke
-        if: ${{ matrix.server == 'release-0.11.11' }}
+        if: ${{ matrix.server == 'release-0.11.14' }}
         run: >-
           npm run bench:kv -- --command set --request-mode direct
           --requests 1000 --pipeline 1 --clients 4 --inflight-batches 8
@@ -52,7 +52,7 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     env:
-      FERRICSTORE_IMAGE: quay.io/ferricstore/ferricstore:0.11.11@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5
+      FERRICSTORE_IMAGE: quay.io/ferricstore/ferricstore:0.11.14@sha256:f7d29befefa15bce4b3755bf786cf7620c814f13bbd336c0d9955581b323b60e
       FERRICSTORE_AUTH_PASSWORD: ts-sdk-integration-secret
       FERRICSTORE_AUTH_URL: ferric://default:ts-sdk-integration-secret@127.0.0.1:6388
     steps:
@@ -77,7 +77,7 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     env:
-      FERRICSTORE_IMAGE: quay.io/ferricstore/ferricstore:0.11.11@sha256:d9f488539f0d6c1a513d2315e7a9c2947cc795b393f3774c9de8ba5e5b5c21b5
+      FERRICSTORE_IMAGE: quay.io/ferricstore/ferricstore:0.11.14@sha256:f7d29befefa15bce4b3755bf786cf7620c814f13bbd336c0d9955581b323b60e
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
