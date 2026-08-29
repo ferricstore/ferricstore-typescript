@@ -58,6 +58,13 @@ export class HTTPTransport {
       : setLongTimeout(() => controller.abort(requestTimeoutReason), timeoutMs);
     timer?.unref();
     try {
+      const response = await this.request(this.config.commandUrl, "POST", body, 0, controller.signal);
+      if (response.status !== 401 || this.config.headers.authorization == null) return response;
+
+      // FerricStore invalidates cached authenticated sessions after ACL catalog
+      // changes. The first 401 evicts that stale server-side session before any
+      // command is executed, so one replay lets the same credentials establish
+      // a fresh session. Invalid credentials still fail after this single retry.
       return await this.request(this.config.commandUrl, "POST", body, 0, controller.signal);
     } catch (error) {
       if (controller.signal.aborted) {
