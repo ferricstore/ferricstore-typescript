@@ -142,6 +142,7 @@ describe("FerricStoreClient edge cases", () => {
       id: "flow-1",
       type: "order",
       state: "running",
+      run_state: "queued",
       lease_token: Buffer.from("lease"),
       fencing_token: "not-an-integer"
     })).toThrow("not an integer");

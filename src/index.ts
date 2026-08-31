@@ -27,6 +27,7 @@ export {
   FerricStoreClient,
   FlowBatchError,
   type AdminListOptions,
+  type AdvanceOptions,
   type ApprovalListOptions,
   type ApprovalRequestOptions,
   type AttributeQueryOptions,
@@ -89,6 +90,8 @@ export {
   type SearchOptions,
   type SearchStateMeta,
   type StartAndClaimOptions,
+  type StepOptions,
+  type StepResult,
   type StepContinueOptions,
   type TransitionOptions
 } from "./client.js";
@@ -163,9 +166,14 @@ export type ConnectionRequestDisposition = import("./errors.js").RequestDisposit
 export {
   complete,
   fail,
+  isAlreadyAppliedOutcome,
   isOutcome,
   retry,
   transition,
+  type AlreadyAppliedOutcome,
+  type AppliedStepOutcome,
+  type ReplayedStepResult,
+  type WorkflowStepResult,
   type CompleteOutcome,
   type FailOutcome,
   type NamedValueMutation,

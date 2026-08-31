@@ -1,34 +1,68 @@
-import { valueMGetEntries, type FerricStoreClient, type StepContinueOptions } from "./client.js";
+import {
+  valueMGetEntries,
+  type AdvanceOptions,
+  type FerricStoreClient,
+  type StepContinueOptions,
+  type StepOptions
+} from "./client.js";
+import { advanceClaim, durableMutationMayHaveCommitted, runDurableStep } from "./client-durable-step.js";
 import { setOwnValue } from "./internal.js";
-import type { ChildSpec, ClaimedItem, FencingToken, FlowRecord } from "./types.js";
+import {
+  alreadyApplied,
+  appliedStep,
+  replayedStep,
+  type AlreadyAppliedOutcome,
+  type WorkflowStepResult
+} from "./outcomes.js";
+import {
+  CLAIMED_ITEM_WIRE,
+  type ChildSpec,
+  type ClaimedItem,
+  type FencingToken,
+  type FlowRecord
+} from "./types.js";
 import type { Workflow } from "./workflow.js";
 import { valueRefToString } from "./workflow-utilities.js";
 
 const MISSING_VALUE = Symbol("ferricstore.missingValue");
 
+/** @internal Coordinates lease renewal around an atomic lease-rotating write. */
+export interface WorkflowMutationCoordinator {
+  pause(): Promise<void>;
+  resume(job: ClaimedItem): void;
+}
+
 export class WorkflowContext {
   readonly workflow: Workflow;
   readonly job: FlowRecord | ClaimedItem;
-  readonly stateName: string;
   readonly flow: WorkflowFlowCommands;
-  private readonly leaseJob: ClaimedItem;
+  private appliedMutation = false;
+  private currentStateName: string;
+  private leaseJob: ClaimedItem;
+  private mutationFailure?: unknown;
+  private mutationPhase: "idle" | "committing" | "uncertain" = "idle";
   private readonly valueCache = new Map<string, unknown>();
 
   constructor(
     workflow: Workflow,
     job: FlowRecord | ClaimedItem,
     stateName: string,
-    leaseJob: ClaimedItem = job
+    leaseJob: ClaimedItem = job,
+    private readonly mutationCoordinator?: WorkflowMutationCoordinator
   ) {
     this.workflow = workflow;
     this.job = job;
     this.leaseJob = leaseJob;
-    this.stateName = stateName;
+    this.currentStateName = stateName;
     this.flow = new WorkflowFlowCommands(this);
   }
 
   get client(): FerricStoreClient {
     return this.workflow.client;
+  }
+
+  get stateName(): string {
+    return this.currentStateName;
   }
 
   get id(): string {
@@ -44,7 +78,7 @@ export class WorkflowContext {
   }
 
   get logicalState(): string {
-    return this.stateName;
+    return this.currentStateName;
   }
 
   get partitionKey(): string | undefined {
@@ -93,6 +127,65 @@ export class WorkflowContext {
 
   get correlationId(): string | undefined {
     return "correlationId" in this.job ? this.job.correlationId : undefined;
+  }
+
+  async advance(
+    toState: string,
+    options: Omit<AdvanceOptions, "toState"> = {}
+  ): Promise<AlreadyAppliedOutcome> {
+    if (typeof toState !== "string" || toState.length === 0) {
+      throw new TypeError("toState must be a non-empty string");
+    }
+    const current = this.durableClaim();
+    await this.beforeCommit();
+    let refreshed: ClaimedItem;
+    try {
+      refreshed = await advanceClaim(this.client, current, { ...options, toState });
+    } catch (error) {
+      this.commitFailed(error);
+      throw error;
+    }
+    this.committed(refreshed);
+    return alreadyApplied(refreshed);
+  }
+
+  async step<TResult>(options: StepOptions<TResult>): Promise<WorkflowStepResult<TResult>> {
+    let applied = false;
+    const stepped = await runDurableStep(this.client, this.durableClaim(), options, {
+      beforeCommit: async () => await this.beforeCommit(),
+      commitFailed: (error) => this.commitFailed(error),
+      committed: (job) => {
+        applied = true;
+        this.committed(job);
+      },
+      replayed: (job) => this.replayed(job)
+    });
+    return applied
+      ? appliedStep(stepped.job, stepped.result)
+      : replayedStep(stepped.job, stepped.result);
+  }
+
+  /** @internal */
+  get hasAppliedMutation(): boolean {
+    return this.appliedMutation;
+  }
+
+  /** @internal */
+  get uncertainMutationFailure(): unknown {
+    return this.mutationPhase === "uncertain" ? this.mutationFailure : undefined;
+  }
+
+  /** @internal */
+  get hasUncertainMutation(): boolean {
+    return this.mutationPhase === "uncertain";
+  }
+
+  /** @internal */
+  assertAppliedOutcome(outcome: AlreadyAppliedOutcome): void {
+    if (!this.appliedMutation || !outcome.job.leaseToken.equals(this.leaseJob.leaseToken) ||
+        outcome.job.fencingToken !== this.leaseJob.fencingToken) {
+      throw new Error("already-applied outcome does not match the workflow's refreshed claim");
+    }
   }
 
   async value(name: string, defaultValue?: unknown, options: { localCache?: boolean } = {}): Promise<unknown> {
@@ -181,7 +274,57 @@ export class WorkflowContext {
   }
 
   private valueMaxBytes(): number | undefined {
-    return this.workflow.stateRegistration(this.stateName)?.valueMaxBytes;
+    return this.workflow.stateRegistration(this.currentStateName)?.valueMaxBytes;
+  }
+
+  private durableClaim(): ClaimedItem {
+    const runState = this.leaseJob.runState ?? (
+      this.leaseJob[CLAIMED_ITEM_WIRE] == null ? undefined : this.currentStateName
+    );
+    if (typeof runState !== "string" || runState.length === 0) {
+      throw new TypeError("job.runState must be a non-empty string");
+    }
+    return {
+      ...this.leaseJob,
+      leaseToken: Buffer.from(this.leaseJob.leaseToken),
+      runState
+    };
+  }
+
+  private async beforeCommit(): Promise<void> {
+    if (this.mutationPhase !== "idle") {
+      throw new Error("a durable workflow mutation is already in progress or has an uncertain result");
+    }
+    await this.mutationCoordinator?.pause();
+    this.mutationPhase = "committing";
+  }
+
+  private commitFailed(error: unknown): void {
+    if (!durableMutationMayHaveCommitted(error)) {
+      this.mutationFailure = undefined;
+      this.mutationPhase = "idle";
+      this.mutationCoordinator?.resume(this.leaseJob);
+      return;
+    }
+    this.mutationFailure = error;
+    this.mutationPhase = "uncertain";
+  }
+
+  private committed(job: ClaimedItem): void {
+    this.acceptJob(job);
+    this.appliedMutation = true;
+    this.mutationCoordinator?.resume(job);
+  }
+
+  private replayed(job: ClaimedItem): void {
+    this.acceptJob(job);
+  }
+
+  private acceptJob(job: ClaimedItem): void {
+    this.leaseJob = job;
+    this.currentStateName = job.runState ?? this.currentStateName;
+    this.mutationFailure = undefined;
+    this.mutationPhase = "idle";
   }
 }
 
@@ -222,12 +365,15 @@ export class WorkflowFlowCommands {
     });
   }
 
+  /** @deprecated Use `ctx.advance(toState)`. */
   async stepContinue(
     toState: string,
     options: Partial<Omit<StepContinueOptions, "toState" | "fromState" | "leaseToken" | "fencingToken">> & {
       fromState?: string;
     } = {}
   ): Promise<FlowRecord | ClaimedItem> {
+    // The context method intentionally preserves the deprecated low-level surface.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
     return await this.ctx.client.stepContinue(this.ctx.id, {
       ...options,
       fencingToken: this.ctx.fencingToken,

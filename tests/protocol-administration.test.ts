@@ -67,10 +67,14 @@ describe("native administration protocol codec", () => {
       }
     });
 
+    const durableResultName =
+      "__ferricstore_step__:sha256:ea8eb3a35639b63a2fd520c0ec03b3c5508553f55f02f6e52e8ac5d9e37121b7";
+    const durableResult = Buffer.from('{"receipt":"rcpt-1"}');
     expect(buildProtocolCommand([
       "FLOW.STEP_CONTINUE", "flow-1", lease, "created", "charged",
       "FENCING", 7, "LEASE_MS", 30_000, "NOW", 101,
-      "ATTRIBUTE_DELETE", "temporary", "RETURN", "JOBS_COMPACT"
+      "ATTRIBUTE_DELETE", "temporary", "RETURN", "JOBS_COMPACT",
+      "VALUE", durableResultName, durableResult
     ])).toMatchObject({
       opcode: COMMAND_OPCODES["FLOW.STEP_CONTINUE"],
       payload: {
@@ -82,7 +86,8 @@ describe("native administration protocol codec", () => {
         lease_token: lease,
         now_ms: 101,
         return: "JOBS_COMPACT",
-        to_state: "charged"
+        to_state: "charged",
+        values: { [durableResultName]: durableResult }
       }
     });
 

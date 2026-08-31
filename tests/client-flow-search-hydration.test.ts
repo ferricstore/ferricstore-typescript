@@ -114,11 +114,17 @@ describe("FerricStoreClient Flow search and claim hydration", () => {
     });
   });
 
-  it("encodes multi-state compact claims with the count-preserving STATES form", async () => {
-    const executor = new FakeExecutor([[]]);
+  it("encodes chainable multi-state compact claims with the count-preserving STATES form", async () => {
+    const executor = new FakeExecutor([[[
+      Buffer.from("order-1"),
+      Buffer.from("tenant-a"),
+      Buffer.from("lease-1"),
+      7,
+      Buffer.from("charged")
+    ]]]);
     const client = new FerricStoreClient(executor);
 
-    await client.claimJobs("order", {
+    const jobs = await client.claimJobs("order", {
       states: ["created", "charged"],
       worker: "worker-1"
     });
@@ -137,8 +143,9 @@ describe("FerricStoreClient Flow search and claim hydration", () => {
       "LIMIT",
       100,
       "RETURN",
-      "JOBS_COMPACT"
+      "JOBS_COMPACT_STATE"
     ]);
+    expect(jobs[0]?.runState).toBe("charged");
   });
 
   it("requests full multi-state records in one claim response", async () => {
