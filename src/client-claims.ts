@@ -30,7 +30,12 @@ import {
 } from "./client-claim-hydration.js";
 import { validatePipelineResponse } from "./adapters.js";
 import { FerricStoreMutationClient } from "./client-mutations.js";
-import { claimedItemFromResp, type ClaimedItem, type FlowRecord } from "./types.js";
+import {
+  CLAIMED_ITEM_WIRE,
+  claimedItemFromResp,
+  type ClaimedItem,
+  type FlowRecord
+} from "./types.js";
 
 type ClaimHydrationOptions = Pick<
   ClaimDueOptions,
@@ -131,12 +136,20 @@ export class FerricStoreClaimClient extends FerricStoreMutationClient {
   }
 
   async claimJobs(type: string, options: Omit<ClaimDueOptions, "jobOnly">): Promise<ClaimedItem[]> {
-    return (await this.claimDue(type, {
+    const requestedState = options.state;
+    const includeState = options.includeState ?? requestedState == null;
+    const jobs = (await this.claimDue(type, {
       ...options,
-      includeState: options.includeState ?? false,
+      includeState,
       jobOnly: true,
       limit: options.limit ?? 100
-    }));
+    })) as ClaimedItem[];
+    if (!includeState && requestedState != null) {
+      for (const job of jobs) {
+        if (job[CLAIMED_ITEM_WIRE] != null) job.runState ??= requestedState;
+      }
+    }
+    return jobs;
   }
 
   async reclaim(type: string, options: ReclaimOptions): Promise<(FlowRecord | ClaimedItem)[]> {
@@ -160,7 +173,7 @@ export class FerricStoreClaimClient extends FerricStoreMutationClient {
     this.appendPartitionOptions(args, captured);
     append(args, "PRIORITY", captured.priority);
     if (jobOnly) {
-      append(args, "RETURN", compactClaimReturnMode(false, captured.includeAttributes === true));
+      append(args, "RETURN", compactClaimReturnMode(true, captured.includeAttributes === true));
     }
     appendPayloadRead(args, captured.payload, captured.payloadMaxBytes);
     appendValueReturn(args, { values: captured.values, valueMaxBytes: captured.valueMaxBytes });

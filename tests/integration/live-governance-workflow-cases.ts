@@ -56,17 +56,11 @@ export function registerGovernanceWorkflowIntegrationTests(): void {
         type,
         worker: "ts-sdk-admin-worker"
       });
-      const continued = await flow.stepContinue(id, {
+      const continued = await flow.advance(started, {
         attributesMerge: { processor: "payments-v2" },
-        fencingToken: started.fencingToken,
-        fromState: "step-a",
-        leaseToken: started.leaseToken,
         nowMs: now + 2,
-        partitionKey,
         payload: { step: "b" },
-        returnJob: true,
-        toState: "step-b",
-        worker: "ts-sdk-admin-worker"
+        toState: "step-b"
       });
 
       const effectKey = "charge";

@@ -968,6 +968,8 @@ describe("FerricStoreClient Flow and administration", () => {
       worker: "worker-1"
     })).resolves.toMatchObject({ id: "flow-1", runState: "created" });
 
+    // The low-level compatibility alias remains callable during migration.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
     await expect(client.stepContinue("flow-1", {
       attributesDelete: ["temporary"],
       fencingToken: 7,

@@ -274,6 +274,25 @@ export interface StepContinueOptions extends Omit<LeaseMutationOptions, "returnR
   type?: string;
 }
 
+/** Options for advancing an already-claimed Flow to its next logical state. */
+export interface AdvanceOptions extends Omit<MutateOptions, "returnRecord"> {
+  toState: string;
+  leaseMs?: number;
+}
+
+/** Options for a closure whose result is journaled with its state transition. */
+export interface StepOptions<TResult> extends AdvanceOptions {
+  /** Stable operation identity. Keep this unchanged across retries. */
+  name: string;
+  run: () => TResult | PromiseLike<TResult>;
+}
+
+/** The renewed claim and durable result returned by a durable `step()` call. */
+export interface StepResult<TResult> {
+  readonly job: ClaimedItem;
+  readonly result: TResult;
+}
+
 export interface RunStepsItem {
   id: string;
   partitionKey?: string;

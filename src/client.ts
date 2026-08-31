@@ -19,8 +19,11 @@ import {
 } from "./types.js";
 
 import type {
+  AdvanceOptions,
   FerricStoreClientFromUrlOptions,
   StartAndClaimOptions,
+  StepOptions,
+  StepResult,
   StepContinueOptions,
   RunStepsItem,
   RunStepsManyOptions
@@ -29,6 +32,7 @@ export type {
   FlowBatchCompletedItem,
   ClaimHydrationItem,
   AutoBatchOptions,
+  AdvanceOptions,
   FerricStoreClientOptions,
   FerricStoreClientFromUrlOptions,
   CreateOptions,
@@ -50,6 +54,8 @@ export type {
   ExtendLeaseOptions,
   TransitionOptions,
   StepContinueOptions,
+  StepOptions,
+  StepResult,
   RunStepsItem,
   RunStepsManyOptions,
   FlowAdminRecord,
@@ -114,6 +120,7 @@ import {
 import { FerricStoreProducerClient } from "./client-producer.js";
 import { snapshotClientOptions } from "./client-config.js";
 import { snapshotFencedItem, snapshotFlowManyOptions } from "./flow-many-snapshot.js";
+import { advanceClaim, runDurableStep } from "./client-durable-step.js";
 
 export class FerricStoreClient extends FerricStoreProducerClient {
   static async fromUrl(url: string, options: FerricStoreClientFromUrlOptions = {}): Promise<FerricStoreClient> {
@@ -268,6 +275,10 @@ export class FerricStoreClient extends FerricStoreProducerClient {
     return await this.recordOrGet(await this.commandArgs(args), id, partitionKey);
   }
 
+  /**
+   * @deprecated Low-level compatibility API. Use {@link advance} for state-only
+   * continuation or {@link step} for a durable closure.
+   */
   async stepContinue(id: string, options: StepContinueOptions): Promise<FlowRecord | ClaimedItem> {
     const partitionKey = options.partitionKey;
     const returnJob = options.returnJob === true;
@@ -296,6 +307,26 @@ export class FerricStoreClient extends FerricStoreProducerClient {
     return returnJob
       ? claimedItemFromResp(response, this.codec, { type })
       : await this.recordOrGet(response, id, partitionKey);
+  }
+
+  /** Advance a claimed Flow and return its renewed claim. */
+  async advance(
+    job: FlowRecord | ClaimedItem,
+    options: AdvanceOptions
+  ): Promise<ClaimedItem> {
+    return await advanceClaim(this, job, options);
+  }
+
+  /**
+   * Run a closure after validating the claim, then atomically journal its
+   * result and advance the Flow. A committed result is replayed without
+   * invoking the closure again.
+   */
+  async step<TResult>(
+    job: FlowRecord | ClaimedItem,
+    options: StepOptions<TResult>
+  ): Promise<StepResult<TResult>> {
+    return await runDurableStep(this, job, options);
   }
 
   async runStepsMany(

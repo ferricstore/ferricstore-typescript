@@ -1,111 +1,13 @@
-import type { FerricStoreClient } from "./client.js";
 import { RawCodec, type Codec } from "./codecs.js";
 import {
-  CLAIMED_ITEM_WIRE,
   normalizeExceptionPolicy,
-  type ClaimedItem,
-  type FlowRecord,
   type WorkerConfig
 } from "./types.js";
-import { setLongInterval, setLongTimeout, sleep, type LongTimer } from "./internal.js";
+import { setLongTimeout, sleep, type LongTimer } from "./internal.js";
 import { snapshotWorkerConfig } from "./worker-config.js";
+export { LeaseRenewalError, LeaseRenewalGuard } from "./worker-lease-guard.js";
 
-type LeasedJob = FlowRecord | ClaimedItem;
 const DEFAULT_FLOW_MANY_BATCH_LIMIT = 1_000;
-
-/** Raised when a worker loses the ability to renew a claimed job's lease. */
-export class LeaseRenewalError extends Error {
-  constructor(cause: unknown) {
-    super("FerricStore lease renewal failed", { cause });
-    this.name = "LeaseRenewalError";
-  }
-}
-
-export class LeaseRenewalGuard {
-  private error?: LeaseRenewalError;
-  private inFlight?: Promise<void>;
-  readonly job: ClaimedItem;
-  private timer?: LongTimer;
-
-  constructor(
-    private readonly client: FerricStoreClient,
-    leasedJob: LeasedJob,
-    private readonly leaseMs: number,
-    options: WorkerConfig
-  ) {
-    this.job = snapshotLeasedJob(leasedJob);
-    if (options.leaseRenewal === false) {
-      return;
-    }
-    const intervalMs = positiveInteger(options.leaseRenewIntervalMs, Math.max(1, Math.trunc(leaseMs / 2)));
-    this.timer = setLongInterval(() => this.renew(), intervalMs);
-    this.timer.unref();
-  }
-
-  assertActive(): void {
-    if (this.error != null) {
-      throw this.error;
-    }
-  }
-
-  async stop(): Promise<void> {
-    if (this.timer != null) {
-      this.timer.cancel();
-      this.timer = undefined;
-    }
-    await this.inFlight;
-    this.assertActive();
-  }
-
-  private renew(): void {
-    if (this.error != null || this.inFlight != null) {
-      return;
-    }
-    const renewal = this.client.extendLease(this.job.id, {
-      fencingToken: this.job.fencingToken,
-      leaseMs: this.leaseMs,
-      leaseToken: this.job.leaseToken,
-      partitionKey: this.job.partitionKey,
-      returnOkOnSuccess: true
-    }).then(
-      () => undefined,
-      (error: unknown) => {
-        this.error = new LeaseRenewalError(error);
-        if (this.timer != null) {
-          this.timer.cancel();
-          this.timer = undefined;
-        }
-      }
-    );
-    this.inFlight = renewal;
-    void renewal.finally(() => {
-      if (this.inFlight === renewal) {
-        this.inFlight = undefined;
-      }
-    });
-  }
-}
-
-function snapshotLeasedJob(job: LeasedJob): ClaimedItem {
-  const leaseToken = Buffer.from(job.leaseToken);
-  const snapshot: ClaimedItem = {
-    fencingToken: job.fencingToken,
-    id: job.id,
-    leaseToken,
-    partitionKey: job.partitionKey,
-    runState: job.runState,
-    state: job.state,
-    type: job.type
-  };
-  const wire = (job as ClaimedItem)[CLAIMED_ITEM_WIRE];
-  if (wire != null) {
-    Object.defineProperty(snapshot, CLAIMED_ITEM_WIRE, {
-      enumerable: false,
-      value: { ...wire, leaseToken }
-    });
-  }
-  return snapshot;
-}
 
 export function workerConcurrency(options: WorkerConfig): number {
   return positiveInteger(options.concurrency ?? options.workers, 1);

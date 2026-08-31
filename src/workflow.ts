@@ -7,8 +7,6 @@ import {
   type RunStepsManyOptions,
   type StartAndClaimOptions
 } from "./client.js";
-import type { Outcome } from "./outcomes.js";
-import { complete, fail, isOutcome, retry } from "./outcomes.js";
 import {
   type ClaimedItem,
   type FlowRecord,
@@ -28,18 +26,16 @@ import {
   workerClaimLimit,
   workerConcurrency,
   workerDrainBatches,
-  workerErrorPayload,
   workerIdleSleepMs,
   workerLeaseMs,
   workerMaxIdleSleepMs,
   workerRefillStrategy,
   workerSignalAborted
 } from "./worker-internal.js";
-import { WorkflowContext } from "./workflow-context.js";
-import { applyWorkflowOutcome } from "./workflow-outcome-application.js";
 import { createWorkflowStateRegistration } from "./workflow-registration.js";
 import { snapshotFlowClientOptions } from "./flow-client-options.js";
 export { WorkflowContext, WorkflowFlowCommands } from "./workflow-context.js";
+import { executeWorkflowJob } from "./workflow-job-execution.js";
 import { resolveWorkflowStates, type ResolvedWorkflowState } from "./workflow-utilities.js";
 import type {
   ContinuousWorkflowJob,
@@ -255,6 +251,10 @@ export class WorkflowWorker {
         claimed += jobs.length;
         const guards = jobs.map((job) => new LeaseRenewalGuard(this.workflow.client, job, leaseMs, this.options));
         let cursor = 0;
+        let batchFailure: { error: unknown } | undefined;
+        const recordFailure = (error: unknown): void => {
+          batchFailure ??= { error };
+        };
         const runNext = async (): Promise<void> => {
           while (cursor < jobs.length) {
             const index = cursor;
@@ -265,23 +265,26 @@ export class WorkflowWorker {
             try {
               await this.applyJob(job, registration, guard);
               applied += 1;
+            } catch (error) {
+              recordFailure(error);
             } finally {
-              await guard.stop();
+              try {
+                await guard.stop();
+              } catch (error) {
+                recordFailure(error);
+              }
             }
           }
         };
         try {
-          const handlers = await Promise.allSettled(
+          await Promise.all(
             Array.from({ length: Math.min(concurrency, jobs.length) }, () => runNext())
           );
-          const failed = handlers.find((handler): handler is PromiseRejectedResult => handler.status === "rejected");
-          if (failed != null) {
-            throw failed.reason;
-          }
+          if (batchFailure != null) throwError(batchFailure.error);
         } finally {
           // A non-conforming server or custom executor can return more jobs than
-          // requested. Runners stop after a failure, so explicitly release only
-          // the guards that were never assigned; assigned guards stop in runNext.
+          // requested. Explicitly stop guards that were never assigned; assigned
+          // guards are stopped by runNext even when another item fails.
           await Promise.allSettled(
             guards.slice(cursor).map(async (guard) => await guard.stop())
           );
@@ -410,40 +413,10 @@ export class WorkflowWorker {
     registration: StateRegistration,
     guard: LeaseRenewalGuard
   ): Promise<void> {
-    guard.assertActive();
-    const ctx = new WorkflowContext(this.workflow, job, registration.name, guard.job);
-    let outcome: Outcome;
-    try {
-      const value = await registration.handler(ctx);
-      outcome = isOutcome(value) ? value : complete({ result: value });
-    } catch (error) {
-      await guard.stop();
-      await this.applyHandlerError(ctx, registration, error);
-      return;
-    }
-    await guard.stop();
-    await applyWorkflowOutcome(this.workflow.client, ctx, outcome, registration.returnRecord);
+    await executeWorkflowJob(this.workflow, this.options, job, registration, guard);
   }
+}
 
-  private async applyHandlerError(ctx: WorkflowContext, registration: StateRegistration, error: unknown): Promise<void> {
-    const policy = this.options.exceptionPolicy ?? registration.exceptionPolicy;
-    if (policy === "raise") {
-      throw error;
-    }
-    if (policy === "fail") {
-      await applyWorkflowOutcome(
-        this.workflow.client,
-        ctx,
-        fail({ error: workerErrorPayload(error, this.options, this.workflow.client.codec) }),
-        registration.returnRecord
-      );
-      return;
-    }
-    await applyWorkflowOutcome(
-      this.workflow.client,
-      ctx,
-      retry({ error: workerErrorPayload(error, this.options, this.workflow.client.codec) }),
-      registration.returnRecord
-    );
-  }
+function throwError(value: unknown): never {
+  throw value instanceof Error ? value : new Error("workflow worker failed", { cause: value });
 }

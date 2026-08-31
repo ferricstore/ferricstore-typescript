@@ -6,6 +6,27 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-31
+
+### Added
+
+- Add chainable `client.advance()` and durable `client.step()` APIs that infer
+  workflow identity, lease, fencing token, and logical state from the claimed
+  job, plus ergonomic `WorkflowContext` equivalents with safe refreshed-claim
+  handoff.
+- Add real worker recovery coverage for pre-commit interruption, external
+  idempotency, committed-response loss, stale-worker fencing, and waiting
+  workflow takeover over native TCP, TLS HTTP/1.1, and HTTP/2.
+
+### Changed
+
+- Deprecate `stepContinue()` as a low-level migration alias and fail closed on
+  malformed journal references, missing committed values, incomplete claim
+  responses, and uncertain commit outcomes.
+- Return the same codec-normalized result on first execution and replay, drain
+  unrelated claimed jobs before surfacing batch failures, and release finished
+  handlers only with refreshed lease and fencing credentials.
+
 ## [0.12.2] - 2026-08-27
 
 ### Changed
