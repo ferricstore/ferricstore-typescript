@@ -23,7 +23,7 @@
 <ul class="tsd-hierarchy">
 <li class="tsd-hierarchy-item"><a href="StepOptions.html" class="tsd-signature-type tsd-kind-interface">StepOptions</a></li></ul></li></ul></li></ul></section><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L278">src/client-options.ts:278</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L284">src/client-options.ts:284</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -69,13 +69,17 @@
 <h3 class="tsd-anchor-link" id="leasems"><code class="tsd-tag">Optional</code><span>lease<wbr/>Ms</span><a href="#leasems" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">leaseMs</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L280">src/client-options.ts:280</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L286">src/client-options.ts:286</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="nowms"><code class="tsd-tag">Optional</code><span>now<wbr/>Ms</span><a href="#nowms" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
-<div class="tsd-signature"><span class="tsd-kind-property">nowMs</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
+<div class="tsd-signature"><span class="tsd-kind-property">nowMs</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div>
+<div class="tsd-comment tsd-typography"><p>Explicit client-supplied command timestamp. Omit in production so each
+request samples the current client wall clock; primarily useful for tests.
+This is not the server response time or the client transport deadline.</p>
+</div><aside class="tsd-sources">
 <p>Inherited from <a href="MutateOptions.html">MutateOptions</a>.<a href="MutateOptions.html#nowms">nowMs</a></p>
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L242">src/client-options.ts:242</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L247">src/client-options.ts:247</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="overridevalues"><code class="tsd-tag">Optional</code><span>override<wbr/>Values</span><a href="#overridevalues" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">overrideValues</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span></div><aside class="tsd-sources">
@@ -104,7 +108,7 @@
 <h3 class="tsd-anchor-link" id="tostate"><span>to<wbr/>State</span><a href="#tostate" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">toState</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L279">src/client-options.ts:279</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L285">src/client-options.ts:285</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="valuerefs"><code class="tsd-tag">Optional</code><span>value<wbr/>Refs</span><a href="#valuerefs" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">valueRefs</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">Record</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">&gt;</span></div><aside class="tsd-sources">

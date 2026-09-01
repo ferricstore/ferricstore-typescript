@@ -69,16 +69,22 @@ export class HTTPAdapter implements CommandExecutor {
   }
 
   private async executeBatch(commands: readonly (readonly CommandArgument[])[]): Promise<HTTPResult[]> {
-    if (commands.length > this.#config.maxBatchItems) {
-      throw new HTTPTransportError("HTTP command batch exceeds maxBatchItems");
+    let body: Buffer;
+    let serverBlockMs: number | undefined;
+    try {
+      if (commands.length > this.#config.maxBatchItems) {
+        throw new HTTPTransportError("HTTP command batch exceeds maxBatchItems");
+      }
+      for (const command of commands) assertHTTPCommandSupported(command[0]);
+      const prepared = commands.map((command) => prepareHTTPCommand(command, this.#config.maxRequestBytes));
+      body = encodeHTTPCommands(prepared.map((command) => command.encoded), this.#config.maxRequestBytes);
+      if (body.byteLength > this.#config.maxRequestBytes) {
+        throw new HTTPTransportError("HTTP command request exceeds maxRequestBytes");
+      }
+      serverBlockMs = combinedServerBlockMs(prepared.map((command) => command.serverBlockMs));
+    } catch (error) {
+      throw unsentHTTPError(error);
     }
-    for (const command of commands) assertHTTPCommandSupported(command[0]);
-    const prepared = commands.map((command) => prepareHTTPCommand(command, this.#config.maxRequestBytes));
-    const body = encodeHTTPCommands(prepared.map((command) => command.encoded), this.#config.maxRequestBytes);
-    if (body.byteLength > this.#config.maxRequestBytes) {
-      throw new HTTPTransportError("HTTP command request exceeds maxRequestBytes");
-    }
-    const serverBlockMs = combinedServerBlockMs(prepared.map((command) => command.serverBlockMs));
     const response = await this.#transport.post(
       body,
       serverResponseTimeoutMs(this.#config.timeoutMs, serverBlockMs)
@@ -147,16 +153,38 @@ function commandError(value: unknown): FerricStoreError {
 
 function topLevelError(status: number, envelope: Record<string, unknown>, retryAfter: string | undefined): Error {
   const details = isRecord(envelope.error) ? envelope.error : {};
+  const code = typeof details.code === "string" ? details.code.toLowerCase() : undefined;
   const message = typeof details.message === "string"
     ? details.message
     : `HTTP command request failed with status ${status}`;
   const retryAfterMs = retryAfterMilliseconds(retryAfter);
+  const ambiguousTimeout = status === 408 || code === "request_timeout";
+  const safeToRetry = !ambiguousTimeout && (
+    details.safe_to_retry === true || definitelyRejectedHTTPStatus(status)
+  );
   return new HTTPTransportError(message, {
     raw: details,
     retryable: status === 408 || status === 425 || status === 429 || status >= 500,
     retryAfterMs,
-    safeToRetry: false,
+    requestDisposition: "possibly_sent",
+    safeToRetry,
     statusCode: status
+  });
+}
+
+function definitelyRejectedHTTPStatus(status: number): boolean {
+  return status === 400 || status === 401 || status === 403 || status === 404 ||
+    status === 405 || status === 406 || status === 411 || status === 413 ||
+    status === 414 || status === 415 || status === 422 || status === 426 || status === 431;
+}
+
+function unsentHTTPError(error: unknown): HTTPTransportError {
+  if (error instanceof HTTPTransportError && error.requestDisposition === "unsent") return error;
+  const message = error instanceof Error ? error.message : String(error);
+  return new HTTPTransportError(message, {
+    cause: error,
+    raw: error instanceof FerricStoreError ? error.raw ?? error : error,
+    requestDisposition: "unsent"
   });
 }
 

@@ -50,7 +50,9 @@ export class HTTPTransport {
   }
 
   async post(body: Buffer, timeoutMs: number | undefined): Promise<HTTPResponse> {
-    if (this.#closed) throw new HTTPTransportError("HTTP transport is closed");
+    if (this.#closed) {
+      throw new HTTPTransportError("HTTP transport is closed", { requestDisposition: "unsent" });
+    }
     const controller = new AbortController();
     this.#requests.add(controller);
     const timer = timeoutMs == null
@@ -74,9 +76,22 @@ export class HTTPTransport {
           raw: { retryable: true, safe_to_retry: false }
         });
       }
-      if (error instanceof HTTPTransportError || error instanceof RequestTimeoutError) throw error;
+      if (error instanceof RequestTimeoutError) throw error;
+      if (error instanceof HTTPTransportError) {
+        if (error.requestDisposition != null) throw error;
+        throw new HTTPTransportError(error.message, {
+          cause: error.cause ?? error,
+          raw: error.raw,
+          requestDisposition: "possibly_sent",
+          retryAfterMs: error.retryAfterMs,
+          retryable: error.retryable,
+          safeToRetry: false,
+          statusCode: error.statusCode
+        });
+      }
       throw new HTTPTransportError("HTTP command request failed", {
         cause: error,
+        requestDisposition: "possibly_sent",
         retryable: true,
         safeToRetry: false
       });
@@ -89,7 +104,9 @@ export class HTTPTransport {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
-    const error = new HTTPTransportError("HTTP transport is closed");
+    const error = new HTTPTransportError("HTTP transport is closed", {
+      requestDisposition: "possibly_sent"
+    });
     for (const controller of this.#requests) controller.abort(error);
     this.#httpAgent.destroy();
     this.#httpsAgent.destroy();

@@ -229,7 +229,10 @@ function decodeCompactPipeline(
       );
       offset = read.offset;
     } else {
-      throw new FerricStoreError("unknown compact pipeline status");
+      throw new FerricStoreError(`unknown compact pipeline status ${status}`, {
+        retryable: false,
+        safeToRetry: false
+      });
     }
   }
   if (offset !== data.byteLength) throw new FerricStoreError("trailing compact pipeline bytes");

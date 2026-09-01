@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   FerricStoreClient,
   JsonCodec,
+  RequestNotSentError,
   type AdvanceOptions,
   type ClaimedItem
 } from "../src/index.js";
 import { FakeExecutor } from "./fake-executor.js";
+import { durableMutationMayHaveCommitted, runDurableStep } from "../src/client-durable-step.js";
 
 const STEP_NAME = "charge-customer:v1";
 const STEP_VALUE_NAME =
@@ -144,6 +146,30 @@ describe("durable workflow steps", () => {
     await expect(client.advance(current, { toState: "charged" })).rejects.toThrow(
       "job.runState must be a non-empty string"
     );
+    expect(executor.calls).toEqual([]);
+  });
+
+  it("classifies continuation encoding failures as unsent before dispatch", async () => {
+    const executor = new FakeExecutor();
+    const encodingFailure = new TypeError("payload cannot be encoded");
+    const client = new FerricStoreClient(executor, {
+      codec: {
+        decode: (value) => value,
+        encode: () => { throw encodingFailure; }
+      }
+    });
+
+    let rejected: unknown;
+    try {
+      await client.advance(claimed(), { payload: { phase: "charged" }, toState: "charged" });
+    } catch (error) {
+      rejected = error;
+    }
+
+    expect(rejected).toBeInstanceOf(RequestNotSentError);
+    expect(rejected).toMatchObject({ requestDisposition: "unsent", safeToRetry: true });
+    expect(durableMutationMayHaveCommitted(rejected)).toBe(false);
+    expect((rejected as Error).cause).toBe(encodingFailure);
     expect(executor.calls).toEqual([]);
   });
 
@@ -560,6 +586,55 @@ describe("durable workflow steps", () => {
       values: { [STEP_VALUE_NAME]: "collision" }
     })).rejects.toThrow("reserved durable step result");
     expect(executor.calls).toEqual([]);
+  });
+
+  it("does not let a post-commit callback replace a confirmed durable result", async () => {
+    const executor = new FakeExecutor([
+      flowRecord(),
+      [Buffer.from("flow-1"), Buffer.from("tenant-a"), Buffer.from("lease-2"), 8]
+    ]);
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
+
+    await expect(runDurableStep(client, claimed(), {
+      name: STEP_NAME,
+      run: () => "receipt-1",
+      toState: "charged"
+    }, {
+      committed: () => { throw new Error("continuation dispatch rejected"); }
+    })).resolves.toMatchObject({
+      job: { fencingToken: 8, runState: "charged" },
+      result: "receipt-1"
+    });
+  });
+
+  it("does not let a recovery callback replace a replayed durable result", async () => {
+    const executor = new FakeExecutor([
+      flowRecord({ runState: "charged", valueRefs: { [STEP_VALUE_NAME]: "result-ref" } }),
+      [Buffer.from('"receipt-1"')]
+    ]);
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
+
+    await expect(runDurableStep(client, claimed({ runState: "charged" }), {
+      name: STEP_NAME,
+      run: () => "duplicate",
+      toState: "charged"
+    }, {
+      replayed: () => { throw new Error("replay dispatch rejected"); }
+    })).resolves.toMatchObject({ result: "receipt-1" });
+  });
+
+  it("preserves the mutation failure when failure notification also throws", async () => {
+    const mutationFailure = new Error("mutation outcome failed");
+    const executor = new FakeExecutor([flowRecord(), mutationFailure]);
+    const client = new FerricStoreClient(executor, { codec: new JsonCodec() });
+
+    await expect(runDurableStep(client, claimed(), {
+      name: STEP_NAME,
+      run: () => "receipt-1",
+      toState: "charged"
+    }, {
+      commitFailed: () => { throw new Error("failure dispatch rejected"); }
+    })).rejects.toBe(mutationFailure);
   });
 });
 

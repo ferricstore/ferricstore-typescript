@@ -1011,7 +1011,10 @@ test("ReconnectingExecutor rejects pipelines after close without dispatch", asyn
   await executor.ready();
   await executor.close();
 
-  await expect(executor.executePipeline([["GET", "key"]])).rejects.toThrow("client is closed");
+  await expect(executor.executePipeline([["GET", "key"]])).rejects.toMatchObject({
+    requestDisposition: "unsent",
+    safeToRetry: true
+  });
   expect(pipelineCalls).toBe(0);
 });
 

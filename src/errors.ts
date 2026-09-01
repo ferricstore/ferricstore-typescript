@@ -21,21 +21,31 @@ export class FerricStoreError extends Error {
   }
 }
 
-export class HTTPTransportError extends FerricStoreError {
-  override readonly code = "http_transport";
-  readonly statusCode: number | undefined;
-
-  constructor(message: string, options: ConstructorParameters<typeof FerricStoreError>[1] & {
-    statusCode?: number;
-  } = {}) {
-    super(message, options);
-    this.statusCode = options.statusCode;
-  }
-}
-
 export type RequestDisposition = "unsent" | "possibly_sent";
 /** @deprecated Use RequestDisposition; retained for source compatibility. */
 export type ConnectionRequestDisposition = RequestDisposition;
+
+export class HTTPTransportError extends FerricStoreError {
+  override readonly code = "http_transport";
+  readonly requestDisposition: RequestDisposition | undefined;
+  readonly statusCode: number | undefined;
+
+  constructor(message: string, options: ConstructorParameters<typeof FerricStoreError>[1] & {
+    requestDisposition?: RequestDisposition;
+    statusCode?: number;
+  } = {}) {
+    const disposition = options.requestDisposition;
+    super(message, {
+      ...options,
+      retryable: options.retryable ?? (disposition === "unsent" ? false : undefined),
+      safeToRetry: options.safeToRetry ?? (
+        disposition === "unsent" ? true : disposition === "possibly_sent" ? false : undefined
+      )
+    });
+    this.requestDisposition = disposition;
+    this.statusCode = options.statusCode;
+  }
+}
 
 /** Connection closure annotated with whether the current request may have reached the server. */
 export class ConnectionClosedError extends FerricStoreError {
@@ -71,6 +81,25 @@ export class RequestTimeoutError extends FerricStoreError {
     this.requestDisposition = requestDisposition;
     this.timeoutMs = timeoutMs;
   }
+}
+
+/** A local validation, encoding, sizing, or lifecycle failure before submission. */
+export class RequestNotSentError extends FerricStoreError {
+  override readonly code = "request_not_sent";
+  readonly requestDisposition = "unsent" as const;
+
+  constructor(message: string, options: { raw?: unknown; cause?: unknown } = {}) {
+    super(message, { ...options, retryable: false, safeToRetry: true });
+  }
+}
+
+/** @internal Preserve a local cause while attaching an explicit unsent outcome. */
+export function requestNotSentError(error: unknown, message?: string): RequestNotSentError {
+  if (error instanceof RequestNotSentError) return error;
+  return new RequestNotSentError(
+    message ?? (error instanceof Error ? error.message : String(error)),
+    { cause: error, raw: error }
+  );
 }
 
 export class FlowNotFoundError extends FerricStoreError {

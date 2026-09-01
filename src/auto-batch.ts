@@ -17,7 +17,7 @@ import {
   safeAutoBatchCommands
 } from "./command-metadata.js";
 import { autoBatchCommandName, autoBatchOrderingPlan } from "./auto-batch-ordering.js";
-import { FerricStoreError, mapException } from "./errors.js";
+import { RequestNotSentError, mapException } from "./errors.js";
 import { setLongTimeout, type Command, type CommandArgument, type LongTimer } from "./internal.js";
 import { commandHasServerBlock, commandRequiresDedicatedConnection } from "./protocol.js";
 import type { RoutingRoute, RoutingTopology } from "./topology.js";
@@ -62,7 +62,7 @@ class AutoBatchExecutor implements CommandExecutor {
 
   async executeCommandArgs(args: readonly CommandArgument[]): Promise<unknown> {
     if (this.closed) {
-      throw new FerricStoreError("FerricStore client is closed");
+      throw new RequestNotSentError("FerricStore client is closed");
     }
     const command = snapshotCommandArguments(args);
     if (this.executor.executePipeline == null) {
@@ -82,7 +82,7 @@ class AutoBatchExecutor implements CommandExecutor {
     if (orderingBarrier != null) {
       await orderingBarrier;
       if (this.closed) {
-        throw new FerricStoreError("FerricStore client is closed");
+        throw new RequestNotSentError("FerricStore client is closed");
       }
     }
 
@@ -99,7 +99,7 @@ class AutoBatchExecutor implements CommandExecutor {
 
   async executePipeline(commands: readonly Command[], options?: ExecutePipelineOptions): Promise<unknown[]> {
     if (this.closed) {
-      throw new FerricStoreError("FerricStore client is closed");
+      throw new RequestNotSentError("FerricStore client is closed");
     }
     const snapshot = snapshotPipelineCommands(commands);
     const snapshotOptions = snapshotPipelineOptions(options);
@@ -121,7 +121,7 @@ class AutoBatchExecutor implements CommandExecutor {
     options?: ExecutePipelineOptions
   ): Promise<unknown[] | undefined> {
     if (this.closed) {
-      throw new FerricStoreError("FerricStore client is closed");
+      throw new RequestNotSentError("FerricStore client is closed");
     }
     if (this.executor.executeFusedPipeline == null) return undefined;
     const snapshot = snapshotPipelineCommands(commands);
@@ -133,7 +133,7 @@ class AutoBatchExecutor implements CommandExecutor {
 
   async refreshTopology(): Promise<RoutingTopology> {
     if (this.closed) {
-      throw new FerricStoreError("FerricStore client is closed");
+      throw new RequestNotSentError("FerricStore client is closed");
     }
     const refreshTopology = this.executor.refreshTopology?.bind(this.executor);
     if (refreshTopology == null) {
@@ -144,7 +144,7 @@ class AutoBatchExecutor implements CommandExecutor {
 
   async route(key: string | Buffer): Promise<RoutingRoute> {
     if (this.closed) {
-      throw new FerricStoreError("FerricStore client is closed");
+      throw new RequestNotSentError("FerricStore client is closed");
     }
     const route = this.executor.route?.bind(this.executor);
     if (route == null) {
@@ -165,7 +165,7 @@ class AutoBatchExecutor implements CommandExecutor {
         this.timer.cancel();
         this.timer = undefined;
       }
-      this.failPending(new Error("FerricStore client closed before auto-batch flush"));
+      this.failPending(new RequestNotSentError("FerricStore client closed before auto-batch flush"));
       await this.orderingBarrier;
       await this.waitForInFlightBatches();
       await Promise.allSettled([...this.inFlightHelpers]);
@@ -176,7 +176,7 @@ class AutoBatchExecutor implements CommandExecutor {
 
   private async executeAfterPendingBatches<T>(operation: () => Promise<T>): Promise<T> {
     if (this.closed) {
-      throw new FerricStoreError("FerricStore client is closed");
+      throw new RequestNotSentError("FerricStore client is closed");
     }
     const previousBarrier = this.orderingBarrier;
     let releaseBarrier: (() => void) | undefined;
@@ -197,7 +197,7 @@ class AutoBatchExecutor implements CommandExecutor {
 
   private executeHelper<T>(operation: () => Promise<T>): Promise<T> {
     if (this.closed) {
-      return Promise.reject(new FerricStoreError("FerricStore client is closed"));
+      return Promise.reject(new RequestNotSentError("FerricStore client is closed"));
     }
     const task = Promise.resolve().then(operation);
     this.inFlightHelpers.add(task);
@@ -219,7 +219,7 @@ class AutoBatchExecutor implements CommandExecutor {
       await previousBarrier;
       await this.flushNow();
       if (this.closed) {
-        throw new FerricStoreError("FerricStore client is closed");
+        throw new RequestNotSentError("FerricStore client is closed");
       }
       dispatched = operation();
     } finally {

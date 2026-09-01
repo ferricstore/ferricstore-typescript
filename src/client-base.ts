@@ -19,7 +19,7 @@ import {
 import type { Command, CommandArgument } from "./internal.js";
 import type { RoutingRoute, RoutingTopology } from "./topology.js";
 import type { BackpressurePolicy } from "./types.js";
-import { FerricStoreError } from "./errors.js";
+import { RequestNotSentError } from "./errors.js";
 import { assertAtomicKeyValueCommandSharesSlot } from "./key-slot-validation.js";
 
 const DEFAULT_FLOW_MANY_BATCH_LIMIT = 1_000;
@@ -76,7 +76,7 @@ export class FerricStoreClientBase {
   }
 
   async close(): Promise<void> {
-    this.closeAbortController.abort(new FerricStoreError("FerricStore client is closed"));
+    this.closeAbortController.abort(new RequestNotSentError("FerricStore client is closed"));
     this.closePromise ??= (async () => await this.executor.close?.())();
     await this.closePromise;
   }
