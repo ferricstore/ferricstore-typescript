@@ -52,6 +52,16 @@ committed result without rerunning the closure; a closure whose result was not
 committed may run again, so external providers still require stable
 idempotency keys.
 
+A timer, signal, approval, or scheduled state is persisted before the current
+claim is released. Waiting therefore does not consume worker concurrency. Once
+the condition becomes runnable, any available worker can claim a fresh lease
+and continue from the durable state; completed durable steps replay their
+stored results instead of running again.
+
+`stepContinue()` is retained only as a deprecated low-level migration API.
+Applications should use chainable `advance()` for state-only transitions and
+`step()` for a journaled closure plus transition.
+
 The SDK does not use a global executor or thread pool for step closures. It
 awaits the value returned by the caller or worker-owned callback. CPU-bound
 closures therefore need the application's normal Node.js worker-thread or

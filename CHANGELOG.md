@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-09-01
+
+### Fixed
+
+- Document waiting-workflow claim release and fresh-lease takeover alongside
+  durable-step replay, provider idempotency, and the deprecated migration API.
+- Keep the README, generated reference, package metadata, and exported SDK
+  version aligned with the published patch release.
+
 ## [0.13.1] - 2026-09-01
 
 ### Fixed
