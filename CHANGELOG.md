@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-01
+
 ### Fixed
 
 - Treat HTTP response loss, HTTP 408, and unknown future native statuses as
@@ -19,6 +21,8 @@ The format is based on Keep a Changelog, and this project follows semver once it
   public `WorkflowContext` constructor.
 - Refresh the locked LangGraph and TypeScript ESLint patch releases while
   preserving the Node.js 22 and TypeScript 6 compatibility floors.
+- Report the package's current version through the exported
+  `FERRICSTORE_SDK_VERSION` constant and generated API reference.
 
 ## [0.13.0] - 2026-08-31
 

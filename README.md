@@ -34,7 +34,7 @@ covers every public adapter class and option.
 
 ## Compatibility
 
-TypeScript SDK `0.12.0` requires FerricStore server `0.11.4` or newer. With
+TypeScript SDK `0.13.1` requires FerricStore server `0.11.4` or newer. With
 FerricStore 0.11.11 it negotiates compact Stream mode 34 for homogeneous auto-ID
 `XADD` pipelines and compact Pub/Sub mode 35 for homogeneous `PUBLISH`
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
