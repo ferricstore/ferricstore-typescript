@@ -153,6 +153,7 @@ export {
   LockHeldError,
   LockNotOwnedError,
   OverloadedError,
+  RequestNotSentError,
   RequestTimeoutError,
   RerouteError,
   StaleLeaseError,

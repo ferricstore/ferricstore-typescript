@@ -44,7 +44,18 @@ order.state("created", async (ctx) => {
 });
 ```
 
-The handler is just code. The durable result is the `FLOW.TRANSITION` command.
+The handler is just code. Ordinary outcomes become explicit Flow mutations.
+For an operation that needs replayable output, `step()` validates the current
+lease, runs the closure in the caller's JavaScript execution context, and
+atomically stores its result with `FLOW.STEP_CONTINUE`. Recovery reads a
+committed result without rerunning the closure; a closure whose result was not
+committed may run again, so external providers still require stable
+idempotency keys.
+
+The SDK does not use a global executor or thread pool for step closures. It
+awaits the value returned by the caller or worker-owned callback. CPU-bound
+closures therefore need the application's normal Node.js worker-thread or
+service isolation strategy.
 
 ## Throughput-Oriented Choices
 

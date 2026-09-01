@@ -22,8 +22,10 @@ Releases are published to npm from GitHub Actions when a version tag is pushed.
    ```
 
 5. GitHub Actions verifies the tag matches the package version and checked-out
-   commit, then runs `npm run check`, package dry-run, and
-   `npm publish --provenance`.
+   commit before any publishing work, then runs `npm run check` and a package
+   dry-run. Before upload it compares the local tarball integrity with npm. A
+   retry skips an already-published matching immutable version and fails closed
+   if the same version exists with different contents.
 6. GitHub Actions creates a GitHub release with generated release notes from the tag.
 
 ## Dry Run

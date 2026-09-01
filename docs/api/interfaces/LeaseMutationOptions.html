@@ -23,7 +23,7 @@
 <li class="tsd-hierarchy-item"><a href="RetryOptions.html" class="tsd-signature-type tsd-kind-interface">RetryOptions</a></li>
 <li class="tsd-hierarchy-item"><a href="TransitionOptions.html" class="tsd-signature-type tsd-kind-interface">TransitionOptions</a></li></ul></li></ul></li></ul></section><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L246">src/client-options.ts:246</a></li></ul></aside>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L251">src/client-options.ts:251</a></li></ul></aside>
 <section class="tsd-panel-group tsd-index-group">
 <section class="tsd-panel tsd-index-panel">
 <details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
@@ -70,18 +70,22 @@
 <h3 class="tsd-anchor-link" id="fencingtoken"><span>fencing<wbr/>Token</span><a href="#fencingtoken" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">fencingToken</span><span class="tsd-signature-symbol">:</span> <a href="../types/FencingToken.html" class="tsd-signature-type tsd-kind-type-alias">FencingToken</a></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L248">src/client-options.ts:248</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L253">src/client-options.ts:253</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="leasetoken"><span>lease<wbr/>Token</span><a href="#leasetoken" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">leaseToken</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Buffer</span></div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L247">src/client-options.ts:247</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L252">src/client-options.ts:252</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="nowms"><code class="tsd-tag">Optional</code><span>now<wbr/>Ms</span><a href="#nowms" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
-<div class="tsd-signature"><span class="tsd-kind-property">nowMs</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div><aside class="tsd-sources">
+<div class="tsd-signature"><span class="tsd-kind-property">nowMs</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">number</span></div>
+<div class="tsd-comment tsd-typography"><p>Explicit client-supplied command timestamp. Omit in production so each
+request samples the current client wall clock; primarily useful for tests.
+This is not the server response time or the client transport deadline.</p>
+</div><aside class="tsd-sources">
 <p>Inherited from <a href="MutateOptions.html">MutateOptions</a>.<a href="MutateOptions.html#nowms">nowMs</a></p>
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L242">src/client-options.ts:242</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L247">src/client-options.ts:247</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="overridevalues"><code class="tsd-tag">Optional</code><span>override<wbr/>Values</span><a href="#overridevalues" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">overrideValues</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span></div><aside class="tsd-sources">
@@ -105,7 +109,7 @@
 <div class="tsd-signature"><span class="tsd-kind-property">returnRecord</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span></div><aside class="tsd-sources">
 <p>Inherited from <a href="MutateOptions.html">MutateOptions</a>.<a href="MutateOptions.html#returnrecord">returnRecord</a></p>
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L243">src/client-options.ts:243</a></li></ul></aside></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/client-options.ts#L248">src/client-options.ts:248</a></li></ul></aside></section>
 <section class="tsd-panel tsd-member tsd-is-inherited">
 <h3 class="tsd-anchor-link" id="statemeta"><code class="tsd-tag">Optional</code><span>state<wbr/>Meta</span><a href="#statemeta" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-signature"><span class="tsd-kind-property">stateMeta</span><span class="tsd-signature-symbol">?:</span> <a href="../types/StateMeta.html" class="tsd-signature-type tsd-kind-type-alias">StateMeta</a></div><aside class="tsd-sources">

@@ -57,7 +57,17 @@ describe("release workflow", () => {
     expect(npm).toContain("git rev-parse HEAD");
     expect(npm).not.toContain(".verification.verified");
     expect(npm).not.toContain("GPG");
-    expect(npm).toContain("npm publish --provenance --access public");
+    const tagGuard = npm.indexOf("Verify release tag and checkout");
+    const publish = npm.indexOf('npm publish "${tarball}" --provenance --access public');
+    expect(tagGuard).toBeGreaterThanOrEqual(0);
+    expect(publish).toBeGreaterThan(tagGuard);
+    expect(npm).toContain('npm view "${package_name}@${package_version}" dist.integrity');
+    expect(npm).toContain("registry_integrity");
+    expect(npm).toContain("local_integrity");
+    expect(npm).toContain("E404");
+    expect(npm).toContain("already published with matching integrity");
+    expect(source).toContain("group: release-${{ github.ref }}");
+    expect(source).toContain("cancel-in-progress: false");
   });
 
   it("links the adapter API to rendered package documentation", () => {

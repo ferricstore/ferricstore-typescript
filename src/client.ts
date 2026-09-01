@@ -121,6 +121,7 @@ import { FerricStoreProducerClient } from "./client-producer.js";
 import { snapshotClientOptions } from "./client-config.js";
 import { snapshotFencedItem, snapshotFlowManyOptions } from "./flow-many-snapshot.js";
 import { advanceClaim, runDurableStep } from "./client-durable-step.js";
+import { stepContinueArguments } from "./client-step-continue.js";
 
 export class FerricStoreClient extends FerricStoreProducerClient {
   static async fromUrl(url: string, options: FerricStoreClientFromUrlOptions = {}): Promise<FerricStoreClient> {
@@ -283,26 +284,7 @@ export class FerricStoreClient extends FerricStoreProducerClient {
     const partitionKey = options.partitionKey;
     const returnJob = options.returnJob === true;
     const type = options.type;
-    const args: CommandArgument[] = [
-      "FLOW.STEP_CONTINUE",
-      id,
-      options.leaseToken,
-      options.fromState,
-      options.toState,
-      "FENCING",
-      options.fencingToken,
-      "LEASE_MS",
-      options.leaseMs ?? 30_000,
-      "NOW",
-      options.nowMs ?? nowMs()
-    ];
-    append(args, "PARTITION", partitionKey);
-    append(args, "WORKER", options.worker);
-    appendEncoded(args, "PAYLOAD", this.codec, options.payload);
-    if (returnJob) args.push("RETURN", "JOBS_COMPACT");
-    appendStateMeta(args, options.stateMeta);
-    appendNamedValues(args, this.codec, options);
-    appendAttributeMutations(args, options);
+    const args = stepContinueArguments(id, options, this.codec);
     const response = await this.commandArgs(args);
     return returnJob
       ? claimedItemFromResp(response, this.codec, { type })

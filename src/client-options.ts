@@ -239,6 +239,11 @@ export interface MutateOptions {
   attributesMerge?: Record<string, CommandArgument>;
   attributesDelete?: string[];
   stateMeta?: StateMeta;
+  /**
+   * Explicit client-supplied command timestamp. Omit in production so each
+   * request samples the current client wall clock; primarily useful for tests.
+   * This is not the server response time or the client transport deadline.
+   */
   nowMs?: number;
   returnRecord?: boolean;
 }
@@ -253,6 +258,7 @@ export interface ExtendLeaseOptions {
   fencingToken: FencingToken;
   leaseMs: number;
   partitionKey?: string;
+  /** See {@link MutateOptions.nowMs}; this is a client timestamp override. */
   nowMs?: number;
   returnOkOnSuccess?: boolean;
 }
@@ -284,6 +290,10 @@ export interface AdvanceOptions extends Omit<MutateOptions, "returnRecord"> {
 export interface StepOptions<TResult> extends AdvanceOptions {
   /** Stable operation identity. Keep this unchanged across retries. */
   name: string;
+  /**
+   * Runs directly in the caller or worker's JavaScript execution context. The
+   * SDK awaits its result and does not submit it to a global thread pool.
+   */
   run: () => TResult | PromiseLike<TResult>;
 }
 

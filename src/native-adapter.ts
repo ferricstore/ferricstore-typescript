@@ -1,7 +1,7 @@
 import net from "node:net";
 import tls from "node:tls";
 import { Buffer } from "node:buffer";
-import { FerricStoreError, OverloadedError, RequestTimeoutError, classifyServerError } from "./errors.js";
+import { FerricStoreError, OverloadedError, RequestTimeoutError, classifyServerError, requestNotSentError } from "./errors.js";
 import { possiblySentConnectionClosedError, unsentConnectionClosedError } from "./adapter-connection-errors.js";
 import {
   booleanResponse,
@@ -22,7 +22,6 @@ import {
   DEFAULT_MAX_FRAME_BYTES,
   OPCODES,
   buildProtocolCommand,
-  encodeRequest,
   type ProtocolCommand
 } from "./protocol.js";
 import type { ExecutePipelineOptions } from "./pipeline-execution.js";
@@ -46,6 +45,7 @@ import { NativeWriteQueue } from "./native-write-queue.js";
 import { NativeConnectionCapabilities } from "./native-connection-capabilities.js";
 import { nativeStartupPayload } from "./native-startup-payload.js";
 import { withFlowQueryDeadline } from "./flow-query-deadline.js";
+import { encodeNativeRequest, prepareNativeCommand } from "./native-command-preparation.js";
 export class NativeAdapter implements CommandExecutor {
   private readonly socket: net.Socket | tls.TLSSocket;
   private readonly pending = new Map<bigint, PendingRequest>();
@@ -165,7 +165,7 @@ export class NativeAdapter implements CommandExecutor {
   }
 
   async executeCommandArgs(args: readonly CommandArgument[]): Promise<unknown> {
-    const command = buildProtocolCommand(args, this.capabilities.requestFrameBytes);
+    const command = prepareNativeCommand(args, this.capabilities.requestFrameBytes);
     return await this.request(command);
   }
 
@@ -174,10 +174,8 @@ export class NativeAdapter implements CommandExecutor {
     args: readonly CommandArgument[],
     laneId: number
   ): Promise<unknown> {
-    return await this.executeProtocolCommand(
-      buildProtocolCommand(args, this.capabilities.requestFrameBytes),
-      laneId
-    );
+    const command = prepareNativeCommand(args, this.capabilities.requestFrameBytes);
+    return await this.executeProtocolCommand(command, laneId);
   }
 
   async executeProtocolCommand(command: ProtocolCommand, laneId?: number): Promise<unknown> {
@@ -292,14 +290,14 @@ export class NativeAdapter implements CommandExecutor {
     let frame: Buffer;
     try {
       requestId = this.requestScheduler.nextRequestId();
-      frame = encodeRequest(
+      frame = encodeNativeRequest(
         withFlowQueryDeadline(command, timeoutMs),
         requestId,
         this.capabilities.requestFrameBytes
       );
     } catch (error) {
       if (hasFlowControlCredit) this.flowControl.release(laneId);
-      return Promise.reject(error instanceof Error ? error : new FerricStoreError(String(error), { raw: error }));
+      return Promise.reject(error instanceof Error ? error : requestNotSentError(error));
     }
 
     return new Promise<unknown>((resolve, reject) => {

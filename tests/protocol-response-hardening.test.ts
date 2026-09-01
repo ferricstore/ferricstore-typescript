@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import { protocolErrorMessage } from "../src/protocol-error-message.js";
+import { durableMutationMayHaveCommitted } from "../src/client-durable-step.js";
 import {
   COMPACT_KV_MGET_FIXED,
   COMPACT_OK_LIST,
@@ -10,6 +11,7 @@ import {
   decodeResponse,
   encodeValue,
   tryPipelineCommand,
+  unwrapPipelineResponse,
   type ResponseDecodeHints,
   type ResponseFrame
 } from "../src/protocol.js";
@@ -124,6 +126,32 @@ describe("native response hardening", () => {
 
     expect(protocolErrorMessage(1, raw)).toHaveLength(4_096);
     expect(selectedBytes).toBeLessThanOrEqual(16_384);
+  });
+
+  it("treats a future native response status as an uncertain outcome", () => {
+    const error = captureError(() => decodeResponse(
+      response(OPCODES.flowStepContinue, 65_000, encodeValue({
+        message: "future status",
+        retryable: true,
+        safe_to_retry: true
+      })),
+      OPCODES.flowStepContinue
+    ));
+
+    expect(error).toMatchObject({ retryable: false, safeToRetry: false });
+    expect(error.message).toMatch(/unknown native response status 65000/iu);
+    expect(durableMutationMayHaveCommitted(error)).toBe(true);
+  });
+
+  it("does not return a future native pipeline item status as a successful value", () => {
+    const error = captureError(() => unwrapPipelineResponse([
+      ["ok", "confirmed"],
+      ["future_status", { safe_to_retry: true }]
+    ]));
+
+    expect(error).toMatchObject({ retryable: false, safeToRetry: false });
+    expect(error.message).toMatch(/unknown native pipeline status/iu);
+    expect(durableMutationMayHaveCommitted(error)).toBe(true);
   });
 });
 

@@ -6,12 +6,14 @@ import {
   FerricStoreClient,
   FerricStoreError,
   HTTPAdapter,
+  HTTPTransportError,
   COMMAND_OPCODES,
   httpCommandDisposition
 } from "../src/index.js";
 import { decodeHTTPEnvelope, encodeHTTPCommands } from "../src/http-envelope.js";
 import { normalizeHTTPOptions } from "../src/http-options.js";
 import { HTTPTransport } from "../src/http-transport.js";
+import { durableMutationMayHaveCommitted } from "../src/client-durable-step.js";
 
 const servers: (http.Server | http2.Http2Server)[] = [];
 const serverSessions = new Set<http2.ServerHttp2Session>();
@@ -493,6 +495,149 @@ test("request bounds stop nested traversal before allocating an oversized JSON e
   }
 });
 
+test("local HTTP request failures are marked unsent and make no network exchange", async () => {
+  let requests = 0;
+  const server = await startHttpServer(async (_request, response) => {
+    requests += 1;
+    json(response, 200, success("unexpected"));
+  });
+  const adapter = await HTTPAdapter.fromUrl(url(server), {
+    maxBatchItems: 1,
+    maxRequestBytes: 128
+  });
+  try {
+    for (const operation of [
+      async () => await adapter.executePipeline?.([["PING"], ["PING"]]),
+      async () => await adapter.executeCommand(
+        "ECHO",
+        Array.from({ length: 100 }, () => Buffer.alloc(0))
+      ),
+      async () => await adapter.executeCommand("AUTH", "default", "secret")
+    ]) {
+      const error = await rejected(operation);
+      expect(error).toBeInstanceOf(HTTPTransportError);
+      expect(error).toMatchObject({
+        requestDisposition: "unsent",
+        retryable: false,
+        safeToRetry: true
+      });
+      expect(durableMutationMayHaveCommitted(error)).toBe(false);
+    }
+    expect(requests).toBe(0);
+  } finally {
+    await adapter.close();
+  }
+
+  const closedError = await rejected(async () => await adapter.executeCommand("PING"));
+  expect(closedError).toMatchObject({ requestDisposition: "unsent", safeToRetry: true });
+  expect(requests).toBe(0);
+});
+
+test("HTTP 408 remains uncertain after the server received the mutation", async () => {
+  let requests = 0;
+  const server = await startHttpServer(async (request, response) => {
+    requests += 1;
+    await body(request);
+    json(response, 408, {
+      error: { message: "upstream deadline elapsed", safe_to_retry: true }
+    });
+  });
+  const adapter = await HTTPAdapter.fromUrl(url(server));
+  try {
+    const error = await rejected(async () => await adapter.executeCommand("SET", "key", "value"));
+    expect(error).toMatchObject({
+      requestDisposition: "possibly_sent",
+      retryable: true,
+      safeToRetry: false,
+      statusCode: 408
+    });
+    expect(durableMutationMayHaveCommitted(error)).toBe(true);
+    expect(requests).toBe(1);
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("definite HTTP rejections and explicit retry guarantees do not become unknown outcomes", async () => {
+  const responses = [
+    { status: 401, envelope: { error: { message: "unauthenticated" } } },
+    {
+      status: 503,
+      envelope: {
+        error: {
+          code: "overloaded",
+          message: "admission rejected the command",
+          safe_to_retry: true
+        }
+      }
+    }
+  ];
+  const server = await startHttpServer(async (request, response) => {
+    await body(request);
+    const next = responses.shift();
+    if (next == null) throw new Error("unexpected request");
+    json(response, next.status, next.envelope);
+  });
+  const adapter = await HTTPAdapter.fromUrl(url(server));
+  try {
+    for (const expectedStatus of [401, 503]) {
+      const error = await rejected(async () => await adapter.executeCommand("SET", "key", "value"));
+      expect(error).toMatchObject({
+        requestDisposition: "possibly_sent",
+        safeToRetry: true,
+        statusCode: expectedStatus
+      });
+      expect(durableMutationMayHaveCommitted(error)).toBe(false);
+    }
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("HTTP/1.1 truncated response after receipt stays uncertain and is not replayed", async () => {
+  let effects = 0;
+  const server = await startHttpServer(async (request, response) => {
+    await body(request);
+    effects += 1;
+    response.writeHead(200, {
+      "content-length": "1000",
+      "content-type": "application/json"
+    });
+    response.write('{"encoding":"ferricstore-json-v1","results":[');
+    response.socket?.destroy();
+  });
+  const adapter = await HTTPAdapter.fromUrl(url(server));
+  try {
+    const error = await rejected(async () => await adapter.executeCommand("SET", "key", "value"));
+    expect(error).toMatchObject({ retryable: true, safeToRetry: false });
+    expect(effects).toBe(1);
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("HTTP/2 reset after receipt stays uncertain and is not replayed", async () => {
+  let effects = 0;
+  const server = startHttp2Server();
+  server.on("stream", (stream) => {
+    stream.on("error", () => undefined);
+    stream.on("data", () => undefined);
+    stream.on("end", () => {
+      effects += 1;
+      stream.close(http2.constants.NGHTTP2_INTERNAL_ERROR);
+    });
+  });
+  await listen(server);
+  const adapter = await HTTPAdapter.fromUrl(url(server), { http2: true });
+  try {
+    const error = await rejected(async () => await adapter.executeCommand("SET", "key", "value"));
+    expect(error).toMatchObject({ retryable: true, safeToRetry: false });
+    expect(effects).toBe(1);
+  } finally {
+    await adapter.close();
+  }
+});
+
 test("request encoding budget never rejects a body at its exact encoded size", () => {
   const commands = [Array.from({ length: 100 }, () => new Map())];
   const body = encodeHTTPCommands(commands);
@@ -838,6 +983,16 @@ function json(response: http.ServerResponse, status: number, value: unknown): vo
 
 async function delay(ms: number): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function rejected(action: () => Promise<unknown>): Promise<Error> {
+  try {
+    await action();
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw error;
+  }
+  throw new Error("expected operation to reject");
 }
 
 function decodeTestValue(value: unknown): unknown {

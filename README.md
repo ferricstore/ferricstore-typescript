@@ -232,6 +232,11 @@ unclassified failures are treated conservatively as possibly sent.
 timeouts while waiting for a local flow-control or write-queue slot are
 `"unsent"`, while a request whose frame entered the socket is
 `"possibly_sent"`. Do not automatically retry a possibly-sent mutation.
+HTTP `408` responses, truncated responses, stream resets, and other failures
+after dispatch are also treated as uncertain even if an intermediary labels
+them retry-safe. Local HTTP validation, encoding, size-limit, closed-client,
+and unsupported-command failures are marked `"unsent"` and perform no network
+exchange.
 `autoReconnect` accepts `maxRetries`, `baseDelayMs`, `maxDelayMs`, and
 `jitterPct`; backoff is applied only after a reconnect attempt itself fails.
 
@@ -379,6 +384,43 @@ Handlers return explicit durable outcomes:
 - `fail({ error })`
 
 FerricFlow does not replay TypeScript handler code. Workers claim a durable state, run normal code, then write the next state through the FerricFlow API.
+
+For chainable state changes, pass the current claim directly to `advance()`.
+It reads the workflow identity, logical state, lease token, and fencing token
+from the claim and returns the renewed claim:
+
+```ts
+job = await flow.advance(job, { toState: "schedule_warning" });
+```
+
+Use `step()` when a closure result must be journaled with the transition:
+
+```ts
+const stepped = await flow.step(job, {
+  name: "charge-customer:v1",
+  run: async () => await stripe.charges.create(
+    { amount: 150, currency: "usd", customer: customerId },
+    { idempotencyKey: `${job.id}:charge-customer:v1` }
+  ),
+  toState: "schedule_warning"
+});
+job = stepped.job;
+```
+
+The step name must remain stable across retries. A committed result is returned
+without running the closure again. A worker can still stop after an external
+effect succeeds but before FerricStore commits the result, so external systems
+still need the same stable provider idempotency key. The closure runs in the
+calling worker's JavaScript execution context; the SDK does not move it to a
+global thread pool.
+
+`nowMs` is an explicit client timestamp sent with a command. When omitted, the
+SDK samples the client wall clock separately for each request. It is intended
+mainly for deterministic tests and is not a server-response timestamp or a
+transport timeout. `timeoutMs`, by contrast, is the client-side request
+deadline. For a command that intentionally blocks on the server, its declared
+server wait is added to that client deadline; an unbounded server wait has no
+response timer.
 
 Per-job `run()` workers cap every claim to currently available concurrency. They continuously refill slots by default, so if five of ten jobs finish and their terminal writes are acknowledged, one client-side `claim(limit: 5)` can start five replacements while the other five continue. Queue completions produced in the same event-loop turn remain batched. A slot stays occupied through its `complete`, `retry`, or `fail` acknowledgement; the worker never exceeds its local concurrency limit.
 

@@ -6,6 +6,9 @@ import { tryDecodeCompactResponse } from "./protocol-compact-response.js";
 import { protocolErrorMessage } from "./protocol-error-message.js";
 import { decodeValue } from "./protocol-value.js";
 
+const KNOWN_NATIVE_RESPONSE_STATUSES = new Set([0, 1, 2, 3, 4, 5, 6]);
+type PipelineStatus = "auth" | "bad_request" | "busy" | "error" | "noperm" | "ok" | "reroute";
+
 export function decodeResponse(
   frame: wire.ResponseFrame,
   expectedOpcode: number,
@@ -34,6 +37,13 @@ export function decodeResponse(
     customPayload
   );
   if (status === wire.STATUS_OK) return value;
+  if (!KNOWN_NATIVE_RESPONSE_STATUSES.has(status)) {
+    throw new FerricStoreError(`unknown native response status ${status}`, {
+      raw: value,
+      retryable: false,
+      safeToRetry: false
+    });
+  }
   const message = protocolErrorMessage(status, value);
   throw classifyServerError(message, value, undefined, status);
 }
@@ -81,11 +91,22 @@ export function unwrapPipelineResponse(
           continue;
         }
         const error = classifyServerError(
-          protocolErrorMessage(status === "busy" ? 4 : 1, payload),
+          protocolErrorMessage(pipelineStatusCode(status), payload),
           payload,
           undefined,
           status
         );
+        if (options.throwOnItemError !== false) throw error;
+        out[index] = error;
+        continue;
+      }
+      if (pipelineStatusToken(item[0]) != null) {
+        const unknown = pipelineStatusToken(item[0]) ?? "unknown";
+        const error = new FerricStoreError(`unknown native pipeline status ${JSON.stringify(unknown)}`, {
+          raw: item,
+          retryable: false,
+          safeToRetry: false
+        });
         if (options.throwOnItemError !== false) throw error;
         out[index] = error;
         continue;
@@ -96,10 +117,29 @@ export function unwrapPipelineResponse(
   return out;
 }
 
-function pipelineStatus(value: unknown): "busy" | "error" | "ok" | null {
+function pipelineStatus(value: unknown): PipelineStatus | null {
+  const status = pipelineStatusToken(value);
+  if (status == null) return null;
+  return status === "ok" || status === "error" || status === "auth" ||
+    status === "noperm" || status === "busy" || status === "reroute" || status === "bad_request"
+    ? status
+    : null;
+}
+
+function pipelineStatusToken(value: unknown): string | null {
   if (typeof value !== "string" && !Buffer.isBuffer(value) && !(value instanceof Uint8Array)) return null;
-  const status = asText(value).toLowerCase();
-  return status === "ok" || status === "busy" || status === "error" ? status : null;
+  return asText(value).toLowerCase();
+}
+
+function pipelineStatusCode(status: Exclude<PipelineStatus, "ok">): number {
+  switch (status) {
+    case "error": return 1;
+    case "auth": return 2;
+    case "noperm": return 3;
+    case "busy": return 4;
+    case "reroute": return 5;
+    case "bad_request": return 6;
+  }
 }
 
 function decodeResponseValue(

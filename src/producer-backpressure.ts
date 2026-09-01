@@ -1,4 +1,4 @@
-import { FerricStoreError, OverloadedError } from "./errors.js";
+import { OverloadedError, RequestNotSentError } from "./errors.js";
 import { sleep } from "./internal.js";
 import type { BackpressurePolicy } from "./types.js";
 
@@ -29,5 +29,5 @@ export async function executeProducerWriteWithBackpressure(
 function throwIfClosed(signal: AbortSignal): void {
   if (!signal.aborted) return;
   if (signal.reason instanceof Error) throw signal.reason;
-  throw new FerricStoreError("FerricStore client is closed", { raw: signal.reason });
+  throw new RequestNotSentError("FerricStore client is closed", { raw: signal.reason });
 }

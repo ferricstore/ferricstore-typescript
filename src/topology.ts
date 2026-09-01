@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { FerricStoreError } from "./errors.js";
+import { FerricStoreError, RequestNotSentError } from "./errors.js";
 import type { Command, CommandArgument } from "./internal.js";
 import {
   assertCommandHasStableConnectionState,
@@ -444,6 +444,6 @@ export class TopologyNativeAdapterPool implements CommandExecutor {
       this.lastSuccessfulRefreshKey);
   }
   private assertOpen(): void {
-    if (this.closed) throw new FerricStoreError("FerricStore topology adapter pool is closed");
+    if (this.closed) throw new RequestNotSentError("FerricStore topology adapter pool is closed");
   }
 }

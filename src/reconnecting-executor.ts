@@ -5,7 +5,7 @@ import {
   type ExecutePipelineOptions,
   type ReconnectOptions
 } from "./adapters.js";
-import { ConnectionClosedError, FerricStoreError } from "./errors.js";
+import { ConnectionClosedError, FerricStoreError, RequestNotSentError } from "./errors.js";
 import { sleep, type Command, type CommandArgument } from "./internal.js";
 import { snapshotCommandArguments } from "./command-snapshot.js";
 import {
@@ -71,9 +71,9 @@ export class ReconnectingExecutor implements CommandExecutor {
     const snapshot = snapshotPipelineCommands(commands);
     const snapshotOptions = snapshotPipelineOptions(options) ?? {};
     for (const command of snapshot) assertCommandHasStableConnectionState(command);
-    if (this.closed) throw new FerricStoreError("FerricStore client is closed");
+    if (this.closed) throw new RequestNotSentError("FerricStore client is closed");
     const initialExecutor = await this.executorPromise;
-    if (this.closed) throw new FerricStoreError("FerricStore client is closed");
+    if (this.closed) throw new RequestNotSentError("FerricStore client is closed");
     if (initialExecutor.executePipeline == null) {
       return await executeCommandArraysIndividually(
         async (command) => await this.executeCommandArgs(command),
@@ -99,9 +99,9 @@ export class ReconnectingExecutor implements CommandExecutor {
     const snapshot = snapshotPipelineCommands(commands);
     const snapshotOptions = snapshotPipelineOptions(options) ?? {};
     for (const command of snapshot) assertCommandHasStableConnectionState(command);
-    if (this.closed) throw new FerricStoreError("FerricStore client is closed");
+    if (this.closed) throw new RequestNotSentError("FerricStore client is closed");
     const initialExecutor = await this.executorPromise;
-    if (this.closed) throw new FerricStoreError("FerricStore client is closed");
+    if (this.closed) throw new RequestNotSentError("FerricStore client is closed");
     if (initialExecutor.executeFusedPipeline == null) return undefined;
     try {
       return await initialExecutor.executeFusedPipeline(snapshot, snapshotOptions);
@@ -137,7 +137,7 @@ export class ReconnectingExecutor implements CommandExecutor {
       return;
     }
     this.closed = true;
-    this.retryAbortController.abort(new FerricStoreError("FerricStore client is closed"));
+    this.retryAbortController.abort(new RequestNotSentError("FerricStore client is closed"));
     const executorPromise = this.executorPromise;
     const reconnectPromise = this.reconnectPromise;
     this.closePromise = (async () => {
@@ -164,7 +164,7 @@ export class ReconnectingExecutor implements CommandExecutor {
     let executor = await this.executorPromise;
     let retries = 0;
     for (;;) {
-      if (this.closed) throw new FerricStoreError("FerricStore client is closed");
+      if (this.closed) throw new RequestNotSentError("FerricStore client is closed");
       try {
         return await operation(executor);
       } catch (error) {
@@ -194,18 +194,18 @@ export class ReconnectingExecutor implements CommandExecutor {
     try {
       await sleep(Math.min(this.maxDelayMs, base + jitter), this.retryAbortController.signal);
     } catch (error) {
-      if (this.closed) throw new FerricStoreError("FerricStore client is closed", { cause: error });
+      if (this.closed) throw new RequestNotSentError("FerricStore client is closed", { cause: error });
       throw error;
     }
   }
 
   private async reconnect(staleExecutor: CommandExecutor): Promise<CommandExecutor> {
-    if (this.closed) throw new FerricStoreError("FerricStore client is closed");
+    if (this.closed) throw new RequestNotSentError("FerricStore client is closed");
     const competingReconnect = this.reconnectPromise;
     if (competingReconnect != null) return await competingReconnect;
     const observedExecutorPromise = this.executorPromise;
     const currentExecutor = await observedExecutorPromise.catch(() => undefined);
-    if (this.closed) throw new FerricStoreError("FerricStore client is closed");
+    if (this.closed) throw new RequestNotSentError("FerricStore client is closed");
     if (this.reconnectPromise != null) return await this.reconnectPromise;
     if (this.executorPromise !== observedExecutorPromise) return await this.executorPromise;
     if (currentExecutor != null && currentExecutor !== staleExecutor) return currentExecutor;
@@ -214,7 +214,7 @@ export class ReconnectingExecutor implements CommandExecutor {
       const nextExecutor = await this.createExecutor(this.retryAbortController.signal);
       if (this.closed) {
         await Promise.resolve(nextExecutor.close?.()).catch(() => undefined);
-        throw new FerricStoreError("FerricStore client is closed");
+        throw new RequestNotSentError("FerricStore client is closed");
       }
       this.executorPromise = Promise.resolve(nextExecutor);
       return nextExecutor;

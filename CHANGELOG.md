@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+### Fixed
+
+- Treat HTTP response loss, HTTP 408, and unknown future native statuses as
+  uncertain durable-mutation outcomes while classifying provably local HTTP
+  validation and encoding failures as unsent.
+- Preserve confirmed durable-step outcomes when internal continuation
+  notifications fail, and make npm release retries verify immutable package
+  integrity instead of attempting a duplicate publish.
+
 ## [0.13.0] - 2026-08-31
 
 ### Added

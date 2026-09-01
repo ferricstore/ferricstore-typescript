@@ -5,6 +5,10 @@ on:
     tags:
       - "v*.*.*"
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   integration:
     name: live integration ${{ matrix.server }}
@@ -128,7 +132,33 @@ jobs:
           fi
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: npm publish --provenance --access public
+      - name: Publish once or verify an immutable retry
+        run: |
+          package_name="$(jq -r '.name' package.json)"
+          package_version="$(jq -r '.version' package.json)"
+          pack_json="$(npm pack --json)"
+          tarball="$(jq -r '.[0].filename' <<<"${pack_json}")"
+          local_integrity="$(jq -r '.[0].integrity' <<<"${pack_json}")"
+
+          set +e
+          registry_output="$(npm view "${package_name}@${package_version}" dist.integrity --json 2>&1)"
+          registry_status=$?
+          set -e
+
+          if [ "${registry_status}" -eq 0 ]; then
+            registry_integrity="$(jq -r 'if type == "string" then . else empty end' <<<"${registry_output}")"
+            if [ -z "${registry_integrity}" ] || [ "${registry_integrity}" != "${local_integrity}" ]; then
+              echo "npm ${package_name}@${package_version} already exists with different package integrity."
+              exit 1
+            fi
+            echo "npm ${package_name}@${package_version} is already published with matching integrity; skipping upload."
+          elif grep -q "E404" <<<"${registry_output}"; then
+            npm publish "${tarball}" --provenance --access public
+          else
+            echo "Unable to determine whether npm ${package_name}@${package_version} already exists."
+            echo "${registry_output}"
+            exit "${registry_status}"
+          fi
   release:
     name: create GitHub release
     needs: npm

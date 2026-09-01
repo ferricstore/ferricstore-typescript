@@ -126,7 +126,7 @@ export async function runDurableStep<TResult>(
       throw new FerricStoreError("committed durable step result is missing");
     }
     const replayedJob = claimedItemFromRecord(validated);
-    hooks.replayed?.(replayedJob);
+    notifyWithoutReplacingOutcome(hooks.replayed, replayedJob);
     return { job: replayedJob, result: entry.value as TResult };
   }
 
@@ -140,11 +140,21 @@ export async function runDurableStep<TResult>(
       values: { ...continuation.values, [resultName]: result }
     });
   } catch (error) {
-    hooks.commitFailed?.(error);
+    notifyWithoutReplacingOutcome(hooks.commitFailed, error);
     throw error;
   }
-  hooks.committed?.(refreshed);
+  notifyWithoutReplacingOutcome(hooks.committed, refreshed);
   return { job: refreshed, result };
+}
+
+function notifyWithoutReplacingOutcome<T>(callback: ((value: T) => void) | undefined, value: T): void {
+  try {
+    callback?.(value);
+  } catch {
+    // The command outcome is authoritative. A local continuation notification
+    // must never turn a confirmed commit, replay, or mutation failure into a
+    // different result.
+  }
 }
 
 function normalizeStepResult(client: FerricStoreClient, value: unknown): unknown {
