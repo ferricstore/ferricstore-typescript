@@ -575,6 +575,30 @@ describe("durable workflow steps", () => {
     expect(executor.calls).toEqual([]);
   });
 
+  it("rejects malformed Unicode step names before they can collide in the journal", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.step(claimed(), {
+      name: "charge:\uD800",
+      run: () => "never",
+      toState: "charged"
+    })).rejects.toThrow("name must contain valid Unicode");
+    expect(executor.calls).toEqual([]);
+  });
+
+  it("rejects whitespace-only step names before validating the lease", async () => {
+    const executor = new FakeExecutor();
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.step(claimed(), {
+      name: "   ",
+      run: () => "never",
+      toState: "charged"
+    })).rejects.toThrow("name must not be blank");
+    expect(executor.calls).toEqual([]);
+  });
+
   it("reserves the journal value name from caller mutations", async () => {
     const executor = new FakeExecutor();
     const client = new FerricStoreClient(executor);
