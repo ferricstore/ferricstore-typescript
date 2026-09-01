@@ -34,7 +34,7 @@ covers every public adapter class and option.
 
 ## Compatibility
 
-TypeScript SDK `0.13.1` requires FerricStore server `0.11.4` or newer. With
+TypeScript SDK `0.13.2` requires FerricStore server `0.11.4` or newer. With
 FerricStore 0.11.11 it negotiates compact Stream mode 34 for homogeneous auto-ID
 `XADD` pipelines and compact Pub/Sub mode 35 for homogeneous `PUBLISH`
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
@@ -413,6 +413,16 @@ effect succeeds but before FerricStore commits the result, so external systems
 still need the same stable provider idempotency key. The closure runs in the
 calling worker's JavaScript execution context; the SDK does not move it to a
 global thread pool.
+
+A waiting workflow does not occupy a worker. Persist a timer, signal, approval,
+or scheduled state and return the waiting transition so the current claim is
+released. When the wait condition is satisfied, any available worker can acquire
+a fresh lease and continue from the stored state. If no worker is
+running, the workflow remains durable until one becomes available.
+
+`stepContinue()` remains available only as a deprecated low-level migration API.
+Use `advance(job, { toState })` for a state-only transition and
+`step(job, { name, run, toState })` when the closure result must be journaled.
 
 `nowMs` is an explicit client timestamp sent with a command. When omitted, the
 SDK samples the client wall clock separately for each request. It is intended

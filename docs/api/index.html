@@ -31,7 +31,7 @@ The generated
 <a href="https://unpkg.com/@ferricstore/ferricstore/docs/agent-api/modules.html">agent framework API reference</a>
 covers every public adapter class and option.</p>
 <h2 id="compatibility" class="tsd-anchor-link">Compatibility<a href="#compatibility" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
-<p>TypeScript SDK <code>0.13.1</code> requires FerricStore server <code>0.11.4</code> or newer. With
+<p>TypeScript SDK <code>0.13.2</code> requires FerricStore server <code>0.11.4</code> or newer. With
 FerricStore 0.11.11 it negotiates compact Stream mode 34 for homogeneous auto-ID
 <code>XADD</code> pipelines and compact Pub/Sub mode 35 for homogeneous <code>PUBLISH</code>
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
@@ -239,6 +239,14 @@ effect succeeds but before FerricStore commits the result, so external systems
 still need the same stable provider idempotency key. The closure runs in the
 calling worker's JavaScript execution context; the SDK does not move it to a
 global thread pool.</p>
+<p>A waiting workflow does not occupy a worker. Persist a timer, signal, approval,
+or scheduled state and return the waiting transition so the current claim is
+released. When the wait condition is satisfied, any available worker can acquire
+a fresh lease and continue from the stored state. If no worker is
+running, the workflow remains durable until one becomes available.</p>
+<p><code>stepContinue()</code> remains available only as a deprecated low-level migration API.
+Use <code>advance(job, { toState })</code> for a state-only transition and
+<code>step(job, { name, run, toState })</code> when the closure result must be journaled.</p>
 <p><code>nowMs</code> is an explicit client timestamp sent with a command. When omitted, the
 SDK samples the client wall clock separately for each request. It is intended
 mainly for deterministic tests and is not a server-response timestamp or a
