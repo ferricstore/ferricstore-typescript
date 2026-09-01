@@ -14,6 +14,11 @@ The format is based on Keep a Changelog, and this project follows semver once it
 - Preserve confirmed durable-step outcomes when internal continuation
   notifications fail, and make npm release retries verify immutable package
   integrity instead of attempting a duplicate publish.
+- Reject whitespace-only and malformed-Unicode durable step names before lease
+  validation or network I/O, and keep worker lease coordination out of the
+  public `WorkflowContext` constructor.
+- Refresh the locked LangGraph and TypeScript ESLint patch releases while
+  preserving the Node.js 22 and TypeScript 6 compatibility floors.
 
 ## [0.13.0] - 2026-08-31
 

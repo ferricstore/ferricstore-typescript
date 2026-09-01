@@ -97,6 +97,8 @@ export async function runDurableStep<TResult>(
   const run = options.run;
   const continuation = snapshotAdvanceOptions(options);
   assertNonEmptyString(name, "name");
+  if (name.trim().length === 0) throw new TypeError("name must not be blank");
+  if (!name.isWellFormed()) throw new TypeError("name must contain valid Unicode");
   assertNonEmptyString(continuation.toState, "toState");
   if (typeof run !== "function") throw new TypeError("run must be a function");
 

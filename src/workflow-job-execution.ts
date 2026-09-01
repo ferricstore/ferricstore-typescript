@@ -9,9 +9,10 @@ import {
 } from "./outcomes.js";
 import type { ClaimedItem, FlowRecord, WorkerConfig } from "./types.js";
 import { LeaseRenewalGuard, workerErrorPayload } from "./worker-internal.js";
-import { WorkflowContext } from "./workflow-context.js";
+import type { WorkflowContext } from "./workflow-context.js";
 import { applyWorkflowOutcome } from "./workflow-outcome-application.js";
 import type { StateRegistration } from "./workflow-types.js";
+import { WorkerWorkflowContext } from "./workflow-worker-context.js";
 
 /** @internal Execute one workflow handler with lease-safe durable-mutation handoff. */
 export async function executeWorkflowJob(
@@ -22,7 +23,7 @@ export async function executeWorkflowJob(
   guard: LeaseRenewalGuard
 ): Promise<void> {
   guard.assertActive();
-  const ctx = new WorkflowContext(workflow, job, registration.name, guard.job, {
+  const ctx = new WorkerWorkflowContext(workflow, job, registration.name, guard.job, {
     pause: async () => await guard.pauseForLeaseMutation(),
     resume: (refreshed) => guard.resumeWith(refreshed)
   });

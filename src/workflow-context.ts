@@ -22,15 +22,10 @@ import {
   type FlowRecord
 } from "./types.js";
 import type { Workflow } from "./workflow.js";
+import type { MutationCoordinator } from "./workflow-worker-context.js";
 import { valueRefToString } from "./workflow-utilities.js";
 
 const MISSING_VALUE = Symbol("ferricstore.missingValue");
-
-/** @internal Coordinates lease renewal around an atomic lease-rotating write. */
-export interface WorkflowMutationCoordinator {
-  pause(): Promise<void>;
-  resume(job: ClaimedItem): void;
-}
 
 export class WorkflowContext {
   readonly workflow: Workflow;
@@ -41,20 +36,25 @@ export class WorkflowContext {
   private leaseJob: ClaimedItem;
   private mutationFailure?: unknown;
   private mutationPhase: "idle" | "committing" | "uncertain" = "idle";
+  private mutationCoordinator?: MutationCoordinator;
   private readonly valueCache = new Map<string, unknown>();
 
   constructor(
     workflow: Workflow,
     job: FlowRecord | ClaimedItem,
-    stateName: string,
-    leaseJob: ClaimedItem = job,
-    private readonly mutationCoordinator?: WorkflowMutationCoordinator
+    stateName: string
   ) {
     this.workflow = workflow;
     this.job = job;
-    this.leaseJob = leaseJob;
+    this.leaseJob = job;
     this.currentStateName = stateName;
     this.flow = new WorkflowFlowCommands(this);
+  }
+
+  /** @internal */
+  protected configureWorkerMutation(leaseJob: ClaimedItem, coordinator: MutationCoordinator): void {
+    this.leaseJob = leaseJob;
+    this.mutationCoordinator = coordinator;
   }
 
   get client(): FerricStoreClient {

@@ -5,7 +5,9 @@ import {
   FlowWrongStateError,
   JsonCodec,
   WorkflowClient,
+  WorkflowContext,
   complete,
+  type ClaimedItem,
   type CommandArgument,
   type CommandExecutor
 } from "../src/index.js";
@@ -14,6 +16,19 @@ import { FakeExecutor } from "./fake-executor.js";
 const STEP_NAME = "charge-customer:v1";
 const STEP_VALUE_NAME =
   "__ferricstore_step__:sha256:ea8eb3a35639b63a2fd520c0ec03b3c5508553f55f02f6e52e8ac5d9e37121b7";
+
+function assertWorkerCoordinatorIsNotPublic(
+  workflow: ReturnType<WorkflowClient["workflow"]>,
+  job: ClaimedItem
+): void {
+  // @ts-expect-error Worker lease coordination is not part of the public constructor.
+  new WorkflowContext(workflow, job, "created", job, {
+    pause: async () => undefined,
+    resume: () => undefined
+  });
+}
+
+void assertWorkerCoordinatorIsNotPublic;
 
 describe("WorkflowContext durable mutations", () => {
   it("runs a durable step, returns an applied outcome, and releases the refreshed claim", async () => {

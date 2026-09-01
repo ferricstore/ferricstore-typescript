@@ -43,6 +43,8 @@ export default tseslint.config(
     rules: {
       "@typescript-eslint/no-confusing-void-expression": ["error", { ignoreArrowShorthand: true }],
       "@typescript-eslint/no-invalid-void-type": "off",
+      // `void value` documents intentional compile-time-only references and option stripping.
+      "@typescript-eslint/no-meaningless-void-operator": "off",
       "@typescript-eslint/no-non-null-assertion": "error",
       "@typescript-eslint/no-redundant-type-constituents": "off",
       "@typescript-eslint/no-unnecessary-condition": "off",
