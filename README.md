@@ -34,13 +34,15 @@ covers every public adapter class and option.
 
 ## Compatibility
 
-TypeScript SDK `0.13.2` requires FerricStore server `0.11.4` or newer. With
+TypeScript SDK `0.13.3` requires FerricStore server `0.11.4` or newer. With
 FerricStore 0.11.11 it negotiates compact Stream mode 34 for homogeneous auto-ID
 `XADD` pipelines and compact Pub/Sub mode 35 for homogeneous `PUBLISH`
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
 Capabilities and response-size limits are negotiated
 per connection from the HELLO-shaped startup response rather than inferred from
-a server version table.
+a server version table. Durable rewind reason attribution requires FerricStore
+OSS `0.11.19` or newer; older supported servers still perform the rewind state
+transition without persisting the reason reference.
 
 ESM:
 
@@ -60,7 +62,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  quay.io/ferricstore/ferricstore:0.11.17@sha256:b1f260a5f01c8976c31daa828e375c8bb2e173f66e8ffc384b548a8b3d223230
+  quay.io/ferricstore/ferricstore:0.11.19@sha256:6275175c71a75f2d2a47c30c47a6561f994d8a5e31570fc8bd11a9f6ebcb6b31
 ```
 
 ## Query durable runs
@@ -150,7 +152,7 @@ Run the complete HTTP-compatible integration surface through a real TLS
 listener with ACL authentication using:
 
 ```bash
-FERRICSTORE_IMAGE=quay.io/ferricstore/ferricstore:0.11.17@sha256:b1f260a5f01c8976c31daa828e375c8bb2e173f66e8ffc384b548a8b3d223230 \
+FERRICSTORE_IMAGE=quay.io/ferricstore/ferricstore:0.11.19@sha256:6275175c71a75f2d2a47c30c47a6561f994d8a5e31570fc8bd11a9f6ebcb6b31 \
   npm run test:integration:http
 ```
 

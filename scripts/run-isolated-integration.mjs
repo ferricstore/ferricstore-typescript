@@ -24,6 +24,10 @@ const groups = [
     "covers Flow state-machine repair and index commands"
   ],
   [
+    "rewind reason persistence",
+    "tests/integration/live-rewind-reason.test.ts"
+  ],
+  [
     "Flow governance",
     "tests/integration/live-governance-workflow.test.ts",
     "covers fused Flow, schedule, query, and governance helpers"

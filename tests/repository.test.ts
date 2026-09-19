@@ -3,10 +3,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.17";
+const testedServerVersion = "0.11.19";
 const testedServerImage =
-  "quay.io/ferricstore/ferricstore:0.11.17" +
-  "@sha256:b1f260a5f01c8976c31daa828e375c8bb2e173f66e8ffc384b548a8b3d223230";
+  "quay.io/ferricstore/ferricstore:0.11.19" +
+  "@sha256:6275175c71a75f2d2a47c30c47a6561f994d8a5e31570fc8bd11a9f6ebcb6b31";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -110,7 +110,7 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.13.2");
+    expect(metadata.version).toBe("0.13.3");
     expect(metadata.ferricstore).toEqual({
       minimumServerVersion: "0.11.4",
       nativeProtocolVersion: 1
@@ -134,6 +134,30 @@ describe("core compatibility CI", () => {
         /ghcr\.io\/ferricstore\/ferricstore:0\.11\.4@sha256:[0-9a-f]{64}/u
       );
     }
+  });
+
+  it("skips rewind persistence only on the two reviewed historical server lanes", () => {
+    const skipExpression =
+      "FERRICSTORE_SKIP_REWIND_REASON_PERSISTENCE: ${{ matrix.server == 'release-0.11.4' || matrix.server == 'pinned-core' }}";
+    const testWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
+    const releaseWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/release.yml`, "utf8");
+    for (const source of [testWorkflow, releaseWorkflow]) {
+      const integration = workflowJob(source, "integration");
+      expect(integration).toContain(skipExpression);
+      expect(integration).toContain("server: release-0.11.19");
+    }
+
+    const historicalLanes = new Set(["release-0.11.4", "pinned-core"]);
+    expect(["release-0.11.4", "pinned-core"].map((server) => historicalLanes.has(server))).toEqual([
+      true,
+      true
+    ]);
+    expect(["release-0.11.19", "future-release"].map((server) => historicalLanes.has(server))).toEqual([
+      false,
+      false
+    ]);
+    expect(readFileSync(`${repositoryRoot}/tests/integration/live-rewind-reason.test.ts`, "utf8"))
+      .toContain("FERRICSTORE_SKIP_REWIND_REASON_PERSISTENCE === \"true\"");
   });
 
   it("compares generated TypeDoc output without depending on zlib bytes", () => {

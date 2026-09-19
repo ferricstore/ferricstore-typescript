@@ -191,6 +191,8 @@ describe("FerricStoreClient Flow search and claim hydration", () => {
       30_000,
       "LIMIT",
       1,
+      "RETURN",
+      "RECORDS",
       "PAYLOAD"
     ]);
   });

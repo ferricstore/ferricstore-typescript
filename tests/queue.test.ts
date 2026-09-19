@@ -1028,7 +1028,7 @@ describe("Queue", () => {
       worker: "worker-1"
     }).runOnce(() => undefined);
 
-    expect(executor.calls[0]).not.toContain("RETURN");
+    expect(executor.calls[0]).toEqual(expect.arrayContaining(["RETURN", "RECORDS"]));
     expect(executor.calls[0]).toContain("NOPAYLOAD");
     expect(executor.calls[0]).toContain("VALUE");
   });

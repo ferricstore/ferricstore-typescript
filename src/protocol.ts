@@ -276,7 +276,7 @@ export function buildProtocolCommand(
   }
   if (command === "FLOW.REWIND") {
     return flow.flowCommandExecWithRouting(command, commandArgs, 1, new Set([
-      "NOW", "PARTITION", "TO_EVENT", "EXPECT_STATE"
+      "NOW", "PARTITION", "TO_EVENT", "EXPECT_STATE", "REASON"
     ]));
   }
   if (command === "FLOW.COMPLETE_MANY") {

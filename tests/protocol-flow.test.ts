@@ -463,6 +463,40 @@ describe("native Flow protocol codec", () => {
         type: "email"
       }
     });
+
+    const rewind = buildProtocolCommand([
+      "FLOW.REWIND",
+      "flow-1",
+      "NOW",
+      3000,
+      "PARTITION",
+      "tenant-a",
+      "TO_EVENT",
+      "100-1",
+      "EXPECT_STATE",
+      "completed",
+      "REASON",
+      Buffer.from("operator rollback")
+    ]);
+    expect(rewind).toMatchObject({
+      opcode: OPCODES.commandExec,
+      payload: {
+        args: [
+          "flow-1",
+          "NOW",
+          3000,
+          "PARTITION",
+          "tenant-a",
+          "TO_EVENT",
+          "100-1",
+          "EXPECT_STATE",
+          "completed",
+          "REASON",
+          Buffer.from("operator rollback")
+        ],
+        command: "FLOW.REWIND"
+      }
+    });
   });
 
   it("moves request context out of generic command-exec args", () => {

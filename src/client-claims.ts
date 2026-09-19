@@ -90,6 +90,8 @@ export class FerricStoreClaimClient extends FerricStoreMutationClient {
     }
     if (jobOnly) {
       append(args, "RETURN", compactClaimReturnMode(captured.includeState === true, captured.includeAttributes === true));
+    } else {
+      args.push("RETURN", "RECORDS");
     }
     append(args, "BLOCK", captured.blockMs);
     appendPayloadRead(args, captured.payload, captured.payloadMaxBytes);
@@ -174,6 +176,8 @@ export class FerricStoreClaimClient extends FerricStoreMutationClient {
     append(args, "PRIORITY", captured.priority);
     if (jobOnly) {
       append(args, "RETURN", compactClaimReturnMode(true, captured.includeAttributes === true));
+    } else {
+      args.push("RETURN", "RECORDS");
     }
     appendPayloadRead(args, captured.payload, captured.payloadMaxBytes);
     appendValueReturn(args, { values: captured.values, valueMaxBytes: captured.valueMaxBytes });

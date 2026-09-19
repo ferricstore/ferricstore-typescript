@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-image="${FERRICSTORE_IMAGE:-quay.io/ferricstore/ferricstore:0.11.17@sha256:b1f260a5f01c8976c31daa828e375c8bb2e173f66e8ffc384b548a8b3d223230}"
+image="${FERRICSTORE_IMAGE:-quay.io/ferricstore/ferricstore:0.11.19@sha256:6275175c71a75f2d2a47c30c47a6561f994d8a5e31570fc8bd11a9f6ebcb6b31}"
 container="ferricstore-typescript-http-integration-$$"
 tls_dir="$(mktemp -d /tmp/ferricstore-typescript-http-integration.XXXXXX)"
 username="sdk-http"
@@ -74,4 +74,6 @@ authenticated="$(curl --silent --show-error --output /dev/null --write-out '%{ht
   exit 1
 }
 
-env NODE_EXTRA_CA_CERTS="$tls_dir/ca.pem" FERRICSTORE_INTEGRATION=1 FERRICSTORE_URL="https://127.0.0.1:$port" FERRICSTORE_USERNAME="$username" FERRICSTORE_PASSWORD="$password" FERRICSTORE_CA_FILE="$tls_dir/ca.pem" FERRICSTORE_HTTP2="$http2" npm exec -- vitest run tests/integration --exclude tests/integration/deployment.test.ts
+# ACL LOAD in live.test.ts invalidates every native session on the shared server;
+# use the canonical serialized runner for this multi-file integration sweep.
+env NODE_EXTRA_CA_CERTS="$tls_dir/ca.pem" FERRICSTORE_INTEGRATION=1 FERRICSTORE_URL="https://127.0.0.1:$port" FERRICSTORE_USERNAME="$username" FERRICSTORE_PASSWORD="$password" FERRICSTORE_CA_FILE="$tls_dir/ca.pem" FERRICSTORE_HTTP2="$http2" npm run test:integration -- --exclude tests/integration/deployment.test.ts

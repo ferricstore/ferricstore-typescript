@@ -114,7 +114,9 @@ describe("FerricStoreClient legacy claim hydration", () => {
       ["fencing_token", 7],
       ["version", 2],
       ["payload", Buffer.from("payload")],
-      ["values", new Map([["profile", Buffer.from("profile")]])]
+      ["values", new Map([["profile", Buffer.from("profile")]])],
+      ["attributes", new Map([["tenant", Buffer.from("acme")]])],
+      ["state_meta", new Map([["running", new Map([["attempt", Buffer.from("1")]])]])]
     ]);
     const executor = new FakeExecutor([[claimed], [claimed]]);
     const client = new FerricStoreClient(executor);
@@ -132,11 +134,22 @@ describe("FerricStoreClient legacy claim hydration", () => {
       worker: "worker-1"
     });
 
-    expect(job).toMatchObject({ id: "order-1", payload: Buffer.from("payload") });
-    expect(reclaimed).toMatchObject({ id: "order-1", values: { profile: Buffer.from("profile") } });
-    expect(executor.calls[0]).not.toContain("RETURN");
+    expect(job).toMatchObject({
+      attributes: { tenant: Buffer.from("acme") },
+      id: "order-1",
+      payload: Buffer.from("payload"),
+      stateMeta: { running: { attempt: Buffer.from("1") } }
+    });
+    expect(reclaimed).toMatchObject({
+      attributes: { tenant: Buffer.from("acme") },
+      id: "order-1",
+      stateMeta: { running: { attempt: Buffer.from("1") } },
+      values: { profile: Buffer.from("profile") }
+    });
+    expect(executor.calls[0]).toEqual(expect.arrayContaining(["RETURN", "RECORDS"]));
     expect(executor.calls[0]).toContain("PAYLOAD");
-    expect(executor.calls[1]).not.toContain("RETURN");
+    expect(executor.calls[1]).toEqual(expect.arrayContaining(["RETURN", "RECORDS"]));
     expect(executor.calls[1]).toContain("VALUE");
+    expect(executor.calls).toHaveLength(2);
   });
 });

@@ -616,7 +616,7 @@ describe("Workflow", () => {
 
     await workflow.worker({ states: ["charged"], worker: "worker-1" }).runOnce();
 
-    expect(executor.calls[0]).not.toContain("RETURN");
+    expect(executor.calls[0]).toEqual(expect.arrayContaining(["RETURN", "RECORDS"]));
     expect(executor.calls[0]).toContain("PAYLOAD");
     expect(executor.calls[0]).toContain("VALUE");
   });
