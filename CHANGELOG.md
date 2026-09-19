@@ -6,6 +6,19 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-09-19
+
+### Fixed
+
+- Request full records explicitly for record-mode Flow claims and reclaims,
+  preserving selected values and metadata without changing compact worker claims.
+- Encode rewind reasons with the configured codec and allow the supported
+  `REASON` field through native command validation.
+- Add unit and live-server coverage for policy roundtrips, complete claim
+  records and durable rewind attribution.
+- Serialize integration files sharing an ACL-mutating server so session
+  invalidation cannot break unrelated concurrent tests.
+
 ## [0.13.2] - 2026-09-01
 
 ### Fixed

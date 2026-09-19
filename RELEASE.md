@@ -17,8 +17,8 @@ Releases are published to npm from GitHub Actions when a version tag is pushed.
 4. Create the version tag:
 
    ```bash
-   git tag v0.12.2
-   git push origin main --tags
+   git tag v0.13.3
+   git push origin v0.13.3
    ```
 
 5. GitHub Actions verifies the tag matches the package version and checked-out
