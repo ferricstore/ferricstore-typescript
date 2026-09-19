@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import {
   append,
   appendBool,
+  appendEncoded,
   appendNamedValues,
   appendValueReturn,
   arrayResponse,
@@ -38,6 +39,7 @@ export class FerricStoreFlowSupportClient extends FerricStoreFlowQueryClient {
     partitionKey?: string;
     toEvent?: string;
     expectState?: string;
+    reason?: unknown;
     nowMs?: number;
     returnRecord?: boolean;
   } = {}): Promise<FlowRecord | Buffer | unknown> {
@@ -47,6 +49,7 @@ export class FerricStoreFlowSupportClient extends FerricStoreFlowQueryClient {
     append(args, "PARTITION", partitionKey);
     append(args, "TO_EVENT", options.toEvent);
     append(args, "EXPECT_STATE", options.expectState);
+    appendEncoded(args, "REASON", this.codec, options.reason);
     const response = await this.commandArgs(args);
     if (returnRecord) {
       return await this.recordOrGet(response, id, partitionKey);

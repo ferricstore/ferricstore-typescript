@@ -29,6 +29,10 @@ npm run test:integration
 docker compose down -v
 ```
 
+The integration runner keeps test files serial because the shared native server
+is deliberately reconfigured by the `ACL LOAD` coverage in `live.test.ts`,
+which closes other active sessions. Unit tests remain file-parallel.
+
 ## Design Rules
 
 - Keep the SDK thin over FerricStore RESP commands.

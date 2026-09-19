@@ -91,7 +91,7 @@
     "pack:dry-run": "npm pack --dry-run",
     "test": "vitest run tests/*.test.ts",
     "test:exports": "node scripts/check-package-exports.mjs",
-    "test:integration": "vitest run tests/integration",
+    "test:integration": "vitest run tests/integration --no-file-parallelism",
     "test:integration:http": "scripts/run-http-integration.sh",
     "test:integration:isolated": "node scripts/run-isolated-integration.mjs",
     "test:integration:deployment": "vitest run tests/integration/deployment.test.ts",

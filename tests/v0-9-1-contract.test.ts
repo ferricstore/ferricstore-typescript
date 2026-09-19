@@ -9,7 +9,8 @@ import {
   StalePolicyGenerationError,
   WorkflowClient,
   classifyServerError,
-  type FlowPolicySnapshot
+  type FlowPolicySnapshot,
+  type RetryPolicy
 } from "../src/index.js";
 import { buildProtocolCommand, OPCODES } from "../src/protocol.js";
 import { FakeExecutor } from "./fake-executor.js";
@@ -103,6 +104,84 @@ describe("FerricStore 0.9.1 TypeScript contract", () => {
     });
     expectTypeOf(snapshot).toEqualTypeOf<FlowPolicySnapshot>();
     expectTypeOf(snapshot.generation).toEqualTypeOf<number>();
+  });
+
+  it("encodes flat retry policy fields as nested native payloads for type and state scopes", async () => {
+    const executor = new FakeExecutor([policyResponse()]);
+    const client = new FerricStoreClient(executor);
+    const retry = {
+      maxRetries: 1,
+      backoff: "none",
+      baseMs: 0,
+      maxMs: 0,
+      jitterPct: 0,
+      exhaustedTo: "failed"
+    } satisfies RetryPolicy;
+
+    await client.installPolicy("order", {
+      retry,
+      states: { queued: { retry } }
+    });
+
+    expect(executor.calls[0]).toEqual([
+      "FLOW.POLICY.SET",
+      "order",
+      "MAX_RETRIES", 1,
+      "BACKOFF", "none",
+      "BASE_MS", 0,
+      "MAX_MS", 0,
+      "JITTER_PCT", 0,
+      "EXHAUSTED_TO", "failed",
+      "STATE", "queued",
+      "MAX_RETRIES", 1,
+      "BACKOFF", "none",
+      "BASE_MS", 0,
+      "MAX_MS", 0,
+      "JITTER_PCT", 0,
+      "EXHAUSTED_TO", "failed"
+    ]);
+    expect(buildProtocolCommand(executor.calls[0] ?? [])).toMatchObject({
+      opcode: OPCODES.flowPolicySet,
+      payload: {
+        retry: {
+          max_retries: 1,
+          backoff: { kind: "none", base_ms: 0, max_ms: 0, jitter_pct: 0 },
+          exhausted_to: "failed"
+        },
+        states: {
+          queued: {
+            retry: {
+              max_retries: 1,
+              backoff: { kind: "none", base_ms: 0, max_ms: 0, jitter_pct: 0 },
+              exhausted_to: "failed"
+            }
+          }
+        }
+      }
+    });
+  });
+
+  it("encodes rewind reasons as REASON values", async () => {
+    const executor = new FakeExecutor([Buffer.from("OK")]);
+    const client = new FerricStoreClient(executor);
+
+    await client.rewind("flow-1", {
+      expectState: "completed",
+      nowMs: 100,
+      partitionKey: "tenant-a",
+      reason: "operator rollback",
+      toEvent: "100-1"
+    });
+
+    expect(executor.calls[0]).toEqual([
+      "FLOW.REWIND",
+      "flow-1",
+      "NOW", 100,
+      "PARTITION", "tenant-a",
+      "TO_EVENT", "100-1",
+      "EXPECT_STATE", "completed",
+      "REASON", Buffer.from("operator rollback")
+    ]);
   });
 
   it("uses the dedicated native opcode and structured policy payload", () => {

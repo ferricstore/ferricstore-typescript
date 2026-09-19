@@ -14,6 +14,9 @@ function expectImmutableFerricStoreImages(contents: string): void {
 describe("TLS HTTP release gate", () => {
   it("is owned by CI, release, and user documentation", () => {
     const runner = repositoryFile("scripts/run-http-integration.sh");
+    const packageJson = JSON.parse(repositoryFile("package.json")) as {
+      scripts?: Record<string, string>;
+    };
     expectImmutableFerricStoreImages(runner);
     for (const required of [
       "FERRICSTORE_HTTP_TLS_ENABLED=true",
@@ -28,10 +31,13 @@ describe("TLS HTTP release gate", () => {
       "sdk-http-denied",
       "ACL authorization probe unexpectedly allowed SET",
       "unauthenticated HTTP request returned",
-      "vitest run tests/integration"
+      "npm run test:integration -- --exclude tests/integration/deployment.test.ts"
     ]) {
       expect(runner).toContain(required);
     }
+    expect(packageJson.scripts?.["test:integration"]).toBe(
+      "vitest run tests/integration --no-file-parallelism"
+    );
 
     for (const workflow of [".github/workflows/test.yml", ".github/workflows/release.yml"]) {
       const contents = repositoryFile(workflow);

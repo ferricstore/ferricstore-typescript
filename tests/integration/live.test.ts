@@ -6,7 +6,8 @@ import {
   NativeAdapter,
   RawCodec,
   StalePolicyGenerationError,
-  type CommandArgument
+  type CommandArgument,
+  type FlowRecord
 } from "../../src/index.js";
 import {
   binaryStateMeta,
@@ -429,20 +430,26 @@ describe("FerricStore integration", () => {
 
     try {
       await flow.create(createdId, {
+        attributes: { tenant: "acme" },
         nowMs: now,
         partitionKey,
         payload: Buffer.from("created-payload"),
         runAtMs: now,
+        stateMeta: { phase: "created" },
         state: "created",
-        type
+        type,
+        values: { attempt: "created" }
       });
       await flow.create(chargedId, {
+        attributes: { tenant: "acme" },
         nowMs: now,
         partitionKey,
         payload: Buffer.from("charged-payload"),
         runAtMs: now,
+        stateMeta: { phase: "charged" },
         state: "charged",
-        type
+        type,
+        values: { attempt: "charged" }
       });
 
       const jobs = await flow.claimDue(type, {
@@ -450,6 +457,7 @@ describe("FerricStore integration", () => {
         limit: 2,
         nowMs: now + 1,
         partitionKey,
+        values: ["attempt"],
         states: ["created", "charged"],
         worker: "ts-sdk-multi-state-worker"
       });
@@ -458,7 +466,20 @@ describe("FerricStore integration", () => {
       expect(
         jobs.map((job) => (job.payload as Buffer).toString("utf8")).sort()
       ).toEqual(["charged-payload", "created-payload"]);
+      for (const job of jobs) {
+        const record = job as FlowRecord;
+        expect(record.attributes?.tenant).toEqual(Buffer.from("acme"));
+        const currentStateMeta = record.stateMeta?.[record.runState ?? "unknown"];
+        const phase = currentStateMeta != null && typeof currentStateMeta === "object"
+          ? (currentStateMeta as Record<string, unknown>).phase
+          : undefined;
+        expect(Buffer.isBuffer(phase)).toBe(true);
+        expect(Buffer.isBuffer(record.values?.attempt)).toBe(true);
+      }
       expect(calls.filter((call) => call[0] === "FLOW.CLAIM_DUE")).toHaveLength(1);
+      expect(calls.find((call) => call[0] === "FLOW.CLAIM_DUE")).toEqual(expect.arrayContaining([
+        "RETURN", "RECORDS"
+      ]));
       expect(calls.some((call) => call[0] === "FLOW.GET")).toBe(false);
       for (const job of jobs) {
         await flow.complete(job.id, {
@@ -468,6 +489,64 @@ describe("FerricStore integration", () => {
           partitionKey
         });
       }
+
+      const reclaimId = `${partitionKey}:reclaim`;
+      await flow.create(reclaimId, {
+        attributes: { tenant: "acme" },
+        nowMs: now + 10,
+        partitionKey,
+        payload: Buffer.from("reclaim-payload"),
+        runAtMs: now + 10,
+        state: "created",
+        stateMeta: { phase: "reclaim" },
+        type,
+        values: { attempt: "reclaim" }
+      });
+      await expect(flow.claimDue(type, {
+        jobOnly: true,
+        leaseMs: 1,
+        limit: 1,
+        nowMs: now + 11,
+        partitionKey,
+        payload: true,
+        state: "created",
+        values: ["attempt"],
+        worker: "ts-sdk-reclaim-worker"
+      })).resolves.toEqual([expect.objectContaining({
+        id: reclaimId,
+        values: { attempt: Buffer.from("reclaim") }
+      })]);
+      const reclaimed = await flow.reclaim(type, {
+        jobOnly: true,
+        leaseMs: 30_000,
+        limit: 1,
+        nowMs: now + 13,
+        partitionKey,
+        payload: true,
+        values: ["attempt"],
+        worker: "ts-sdk-reclaim-worker-2"
+      });
+      const reclaimedRecord = reclaimed[0] as FlowRecord | undefined;
+      expect(reclaimedRecord?.attributes?.tenant).toEqual(Buffer.from("acme"));
+      expect(reclaimedRecord?.id).toBe(reclaimId);
+      const reclaimedStateMeta = reclaimedRecord?.stateMeta?.created;
+      const reclaimedPhase = reclaimedStateMeta != null && typeof reclaimedStateMeta === "object"
+        ? (reclaimedStateMeta as Record<string, unknown>).phase
+        : undefined;
+      expect(Buffer.isBuffer(reclaimedPhase)).toBe(true);
+      expect(reclaimedRecord?.values?.attempt).toEqual(Buffer.from("reclaim"));
+      expect(calls.filter((call) => call[0] === "FLOW.GET")).toHaveLength(0);
+      expect(calls.filter((call) => call[0] === "FLOW.RECLAIM").at(-1)).toEqual(expect.arrayContaining([
+        "RETURN", "RECORDS"
+      ]));
+      const reclaimedJob = reclaimed[0];
+      if (reclaimedJob == null || !("leaseToken" in reclaimedJob)) throw new Error("expected reclaimed record");
+      await flow.complete(reclaimId, {
+        fencingToken: reclaimedJob.fencingToken,
+        leaseToken: reclaimedJob.leaseToken,
+        nowMs: now + 14,
+        partitionKey
+      });
     } finally {
       await flow.close();
     }
@@ -541,10 +620,42 @@ describe("FerricStore integration", () => {
       const initial = await flow.installPolicy(type, {
         maxActiveMs: 1_000,
         retentionTtlMs: 86_400_123,
-        states: { queued: { mode: "fifo" } }
+        retry: {
+          maxRetries: 1,
+          backoff: "fixed",
+          baseMs: 1,
+          maxMs: 2,
+          jitterPct: 0,
+          exhaustedTo: "failed"
+        },
+        states: {
+          queued: {
+            mode: "fifo",
+            retry: {
+              maxRetries: 1,
+              backoff: "fixed",
+              baseMs: 1,
+              maxMs: 2,
+              jitterPct: 0,
+              exhaustedTo: "failed"
+            }
+          }
+        }
       });
       expect(initial.retention.ttlMs).toBe(86_400_123);
-      expect(initial.states?.queued?.retention.ttlMs).toBe(86_400_123);
+      expect(initial.retry).toMatchObject({
+        backoff: { baseMs: 1, jitterPct: 0, kind: "fixed", maxMs: 2 },
+        exhaustedTo: "failed",
+        maxRetries: 1
+      });
+      expect(initial.states?.queued).toMatchObject({
+        mode: "fifo",
+        retry: {
+          backoff: { baseMs: 1, jitterPct: 0, kind: "fixed", maxMs: 2 },
+          exhaustedTo: "failed",
+          maxRetries: 1
+        }
+      });
       const patched = await flow.installPolicy(type, {
         expectedGeneration: initial.generation,
         maxActiveMs: 2_000
