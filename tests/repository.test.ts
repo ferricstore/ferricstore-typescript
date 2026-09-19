@@ -136,6 +136,30 @@ describe("core compatibility CI", () => {
     }
   });
 
+  it("skips rewind persistence only on the two reviewed historical server lanes", () => {
+    const skipExpression =
+      "FERRICSTORE_SKIP_REWIND_REASON_PERSISTENCE: ${{ matrix.server == 'release-0.11.4' || matrix.server == 'pinned-core' }}";
+    const testWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
+    const releaseWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/release.yml`, "utf8");
+    for (const source of [testWorkflow, releaseWorkflow]) {
+      const integration = workflowJob(source, "integration");
+      expect(integration).toContain(skipExpression);
+      expect(integration).toContain("server: release-0.11.17");
+    }
+
+    const historicalLanes = new Set(["release-0.11.4", "pinned-core"]);
+    expect(["release-0.11.4", "pinned-core"].map((server) => historicalLanes.has(server))).toEqual([
+      true,
+      true
+    ]);
+    expect(["release-0.11.17", "future-release"].map((server) => historicalLanes.has(server))).toEqual([
+      false,
+      false
+    ]);
+    expect(readFileSync(`${repositoryRoot}/tests/integration/live-rewind-reason.test.ts`, "utf8"))
+      .toContain("FERRICSTORE_SKIP_REWIND_REASON_PERSISTENCE === \"true\"");
+  });
+
   it("compares generated TypeDoc output without depending on zlib bytes", () => {
     const metadata = JSON.parse(readFileSync(`${repositoryRoot}/package.json`, "utf8")) as {
       scripts?: Record<string, string>;

@@ -37,7 +37,9 @@ FerricStore 0.11.11 it negotiates compact Stream mode 34 for homogeneous auto-ID
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
 Capabilities and response-size limits are negotiated
 per connection from the HELLO-shaped startup response rather than inferred from
-a server version table.</p>
+a server version table. Durable rewind reason attribution requires FerricStore
+OSS <code>0.11.19</code> or newer; older supported servers still perform the rewind state
+transition without persisting the reason reference.</p>
 <p>ESM:</p>
 <pre><code class="ts"><span class="hl-4">import</span><span class="hl-1"> { </span><span class="hl-5">FerricStoreClient</span><span class="hl-1">, </span><span class="hl-5">JsonCodec</span><span class="hl-1"> } </span><span class="hl-4">from</span><span class="hl-1"> </span><span class="hl-2">&quot;@ferricstore/ferricstore&quot;</span><span class="hl-1">;</span>
 </code><button type="button">Copy</button></pre>
