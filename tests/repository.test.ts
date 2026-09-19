@@ -3,10 +3,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.17";
+const testedServerVersion = "0.11.19";
 const testedServerImage =
-  "quay.io/ferricstore/ferricstore:0.11.17" +
-  "@sha256:b1f260a5f01c8976c31daa828e375c8bb2e173f66e8ffc384b548a8b3d223230";
+  "quay.io/ferricstore/ferricstore:0.11.19" +
+  "@sha256:6275175c71a75f2d2a47c30c47a6561f994d8a5e31570fc8bd11a9f6ebcb6b31";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -144,7 +144,7 @@ describe("core compatibility CI", () => {
     for (const source of [testWorkflow, releaseWorkflow]) {
       const integration = workflowJob(source, "integration");
       expect(integration).toContain(skipExpression);
-      expect(integration).toContain("server: release-0.11.17");
+      expect(integration).toContain("server: release-0.11.19");
     }
 
     const historicalLanes = new Set(["release-0.11.4", "pinned-core"]);
@@ -152,7 +152,7 @@ describe("core compatibility CI", () => {
       true,
       true
     ]);
-    expect(["release-0.11.17", "future-release"].map((server) => historicalLanes.has(server))).toEqual([
+    expect(["release-0.11.19", "future-release"].map((server) => historicalLanes.has(server))).toEqual([
       false,
       false
     ]);
