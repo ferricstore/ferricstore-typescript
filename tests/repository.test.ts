@@ -3,10 +3,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.11.19";
+const testedServerVersion = "0.11.20";
 const testedServerImage =
-  "quay.io/ferricstore/ferricstore:0.11.19" +
-  "@sha256:6275175c71a75f2d2a47c30c47a6561f994d8a5e31570fc8bd11a9f6ebcb6b31";
+  "quay.io/ferricstore/ferricstore:0.11.20" +
+  "@sha256:aeec52c27c3afb6e462f659c16b75898d9e9fd6833c8830194f7252ef4916e4f";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -110,7 +110,7 @@ describe("core compatibility CI", () => {
       readFileSync(`${repositoryRoot}/src/native-protocol-manifest.json`, "utf8")
     ) as { magic?: string; requestVersion?: number };
 
-    expect(metadata.version).toBe("0.13.3");
+    expect(metadata.version).toBe("0.13.4");
     expect(metadata.ferricstore).toEqual({
       minimumServerVersion: "0.11.4",
       nativeProtocolVersion: 1
@@ -144,7 +144,7 @@ describe("core compatibility CI", () => {
     for (const source of [testWorkflow, releaseWorkflow]) {
       const integration = workflowJob(source, "integration");
       expect(integration).toContain(skipExpression);
-      expect(integration).toContain("server: release-0.11.19");
+      expect(integration).toContain("server: release-0.11.20");
     }
 
     const historicalLanes = new Set(["release-0.11.4", "pinned-core"]);
@@ -152,7 +152,7 @@ describe("core compatibility CI", () => {
       true,
       true
     ]);
-    expect(["release-0.11.19", "future-release"].map((server) => historicalLanes.has(server))).toEqual([
+    expect(["release-0.11.20", "future-release"].map((server) => historicalLanes.has(server))).toEqual([
       false,
       false
     ]);
