@@ -5,6 +5,7 @@ import { expect } from "vitest";
 import {
   HTTPAdapter,
   FerricStoreClient,
+  JsonCodec,
   NativeAdapter,
   type CommandExecutor,
   type FerricStoreClientFromUrlOptions,
@@ -112,6 +113,24 @@ export async function waitForAclProjection<T>(
   }
 
   throw new Error("ACL catalog projection did not become ready", { cause: lastError });
+}
+
+export async function reconnectNativeAclSession(flow: FerricStoreClient): Promise<FerricStoreClient> {
+  let current = flow;
+  await eventually(
+    async () => {
+      await current.close();
+      current = await integrationClient({ codec: new JsonCodec() });
+      return await waitForAclProjection(
+        async () => await current.aclWhoami(),
+        { intervalMs: 25, timeoutMs: 250 }
+      );
+    },
+    (username) => username === "default",
+    "ACL session did not recover after catalog reload",
+    { intervalMs: 25, timeoutMs: 5_000 }
+  );
+  return current;
 }
 
 export function text(value: unknown): string {
