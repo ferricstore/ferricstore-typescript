@@ -24,6 +24,7 @@ import {
   httpIntegration,
   integrationClient,
   integrationExecutor,
+  reconnectNativeAclSession,
   suffix,
   text,
   url,
@@ -1141,14 +1142,20 @@ describe("FerricStore integration", () => {
       }
       await expectSupportedOrKnownServerError(flow.aclSave());
       if (!httpIntegration()) {
+        let aclLoadConnectionClosed = false;
         const aclLoad = await expectSupportedOrKnownServerError(
-          flow.aclLoad(),
+          flow.aclLoad().catch((error: unknown) => {
+            aclLoadConnectionClosed = error instanceof Error && /connection closed/i.test(error.message);
+            throw error;
+          }),
           /unsupported|unknown|not supported|not enabled|invalid|no config file|connection closed/i
         );
-        if (aclLoad != null) {
+        // ACL LOAD invalidates native sessions; reconnect until the new session sees the projection.
+        if (aclLoad != null || aclLoadConnectionClosed) {
+          flow = await reconnectNativeAclSession(flow);
+        } else {
           await flow.close();
           flow = await integrationClient({ codec: new JsonCodec() });
-          await expect(waitForAclProjection(async () => await flow.aclWhoami())).resolves.toBe("default");
         }
       }
       await expectSupportedOrKnownServerError(

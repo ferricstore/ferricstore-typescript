@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-09-20
+
+### Changed
+
+- Validate the SDK release gates against FerricStore OSS `0.11.20`, pinned to
+  immutable manifest `sha256:aeec52c27c3afb6e462f659c16b75898d9e9fd6833c8830194f7252ef4916e4f`.
+
 ## [0.13.3] - 2026-09-19
 
 ### Fixed

@@ -34,7 +34,7 @@ covers every public adapter class and option.
 
 ## Compatibility
 
-TypeScript SDK `0.13.3` requires FerricStore server `0.11.4` or newer. With
+TypeScript SDK `0.13.4` requires FerricStore server `0.11.4` or newer. With
 FerricStore 0.11.11 it negotiates compact Stream mode 34 for homogeneous auto-ID
 `XADD` pipelines and compact Pub/Sub mode 35 for homogeneous `PUBLISH`
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
@@ -62,7 +62,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  quay.io/ferricstore/ferricstore:0.11.19@sha256:6275175c71a75f2d2a47c30c47a6561f994d8a5e31570fc8bd11a9f6ebcb6b31
+  quay.io/ferricstore/ferricstore:0.11.20@sha256:aeec52c27c3afb6e462f659c16b75898d9e9fd6833c8830194f7252ef4916e4f
 ```
 
 ## Query durable runs
@@ -152,7 +152,7 @@ Run the complete HTTP-compatible integration surface through a real TLS
 listener with ACL authentication using:
 
 ```bash
-FERRICSTORE_IMAGE=quay.io/ferricstore/ferricstore:0.11.19@sha256:6275175c71a75f2d2a47c30c47a6561f994d8a5e31570fc8bd11a9f6ebcb6b31 \
+FERRICSTORE_IMAGE=quay.io/ferricstore/ferricstore:0.11.20@sha256:aeec52c27c3afb6e462f659c16b75898d9e9fd6833c8830194f7252ef4916e4f \
   npm run test:integration:http
 ```
 
