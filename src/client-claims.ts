@@ -36,6 +36,7 @@ import {
   type ClaimedItem,
   type FlowRecord
 } from "./types.js";
+import { validateFlowBlockMs } from "./flow-block-validation.js";
 
 type ClaimHydrationOptions = Pick<
   ClaimDueOptions,
@@ -59,6 +60,7 @@ export class FerricStoreClaimClient extends FerricStoreMutationClient {
     reusableAfterAwait = false
   ): { readonly args: CommandArgument[]; readonly jobOnly: boolean; readonly options: ClaimDueOptions } {
     const captured = snapshotClaimOptions(options, reusableAfterAwait);
+    validateFlowBlockMs(captured.blockMs);
     if (captured.state != null && captured.states != null) {
       throw new Error("state and states are mutually exclusive");
     }

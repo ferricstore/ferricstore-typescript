@@ -36,6 +36,10 @@ import {
   withFlowPartitionRouting
 } from "./protocol-flow-routing.js";
 export * from "./protocol-flow-routing.js";
+import {
+  validateFlowBlockMs,
+  validateRawFlowClaimBlockOptions
+} from "./flow-block-validation.js";
 
 export function flowCreatePayload(args: readonly CommandArgument[]): wire.ProtocolCommand | undefined {
   if (args.length < 7) return undefined;
@@ -176,6 +180,7 @@ export function flowClaimDuePayload(
   allowCompact: boolean
 ): wire.ProtocolCommand | undefined {
   if (args.length < 1) return undefined;
+  validateRawFlowClaimBlockOptions(args);
   const options = parseFlowOptions(args, 1, args.length, {
     allowed: new Set([
       "STATE",
@@ -202,6 +207,7 @@ export function flowClaimDuePayload(
     readValues: true
   });
   if (options == null) return undefined;
+  validateFlowBlockMs(options.block_ms);
   const returnMode = options.return == null ? "" : core.asText(options.return).toUpperCase();
   if (!returnMode.startsWith("JOBS_COMPACT")) {
     const fallback = Array.isArray(options.states)

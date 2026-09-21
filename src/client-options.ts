@@ -142,7 +142,7 @@ export interface ClaimDueOptions {
   limit?: number;
   priority?: number;
   nowMs?: number;
-  blockMs?: number;
+  /** FLOW.CLAIM_DUE server block interval in integer milliseconds, from 0 through 4_294_967_295. */ blockMs?: number;
   reclaimExpired?: boolean;
   reclaimRatio?: number;
   jobOnly?: boolean;

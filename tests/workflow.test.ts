@@ -5,10 +5,13 @@ import type { CommandArgument } from "../src/internal.js";
 import {
   nextWorkerIdleSleepMs,
   runContinuousWorkerPool,
+  workerClaimBlockMs,
   workerIdleSleepMs,
   workerMaxIdleSleepMs
 } from "../src/worker-internal.js";
 import { FakeExecutor, fakeFlowPolicySnapshot } from "./fake-executor.js";
+
+const BLOCK_MS_ERROR = "blockMs must be a safe non-negative integer no greater than 4294967295";
 
 describe("Workflow", () => {
   it("fails fast when a worker has no effective states", async () => {
@@ -628,6 +631,67 @@ describe("Workflow", () => {
     expect(workerMaxIdleSleepMs({ maxIdleSleepMs: 10 }, 250)).toBe(250);
   });
 
+  it("validates worker blocking durations against the FLOW.CLAIM_DUE range", () => {
+    const controller = new AbortController();
+    const maxBlockMs = 4_294_967_295;
+
+    expect(workerClaimBlockMs({ blockMs: 0 }, true)).toBe(0);
+    expect(workerClaimBlockMs({ blockMs: 1.9 }, false)).toBeUndefined();
+    expect(workerClaimBlockMs({ blockMs: 250 }, true)).toBe(250);
+    expect(workerClaimBlockMs({ blockMs: 250, abortPollMs: 25, signal: controller.signal }, true)).toBe(25);
+    expect(workerClaimBlockMs({ blockMs: 0, abortPollMs: 25, signal: controller.signal }, true)).toBe(25);
+    expect(workerClaimBlockMs({ blockMs: 0, abortPollMs: maxBlockMs + 1, signal: controller.signal }, true)).toBe(maxBlockMs);
+    expect(workerClaimBlockMs({ blockMs: maxBlockMs }, true)).toBe(maxBlockMs);
+    expect(workerClaimBlockMs({ blockMs: maxBlockMs, abortPollMs: 25, signal: controller.signal }, true)).toBe(25);
+
+    for (const blockMs of [
+      0.5,
+      1.9,
+      -1,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      maxBlockMs + 1,
+      Number.MAX_SAFE_INTEGER + 1
+    ]) {
+      expectInvalidWorkerBlockMs(blockMs);
+      expectInvalidWorkerBlockMs(blockMs, controller.signal);
+      expect(workerClaimBlockMs({ blockMs }, false)).toBeUndefined();
+    }
+  });
+
+  it("caps abortable workflow claims and rejects invalid blocking configuration before dispatch", async () => {
+    const controller = new AbortController();
+    let claimArgs: CommandArgument[] | undefined;
+    const executor: CommandExecutor = {
+      async executeCommand(...args: CommandArgument[]): Promise<unknown> {
+        claimArgs = args;
+        controller.abort();
+        return [];
+      }
+    };
+    const workflow = new WorkflowClient(new FerricStoreClient(executor)).workflow({ type: "order" });
+    workflow.state("queued", () => complete());
+
+    await workflow.worker({
+      abortPollMs: 25,
+      blockMs: 250,
+      signal: controller.signal,
+      states: ["queued"],
+      worker: "worker-1"
+    }).runOnce();
+    const blockIndex = claimArgs?.indexOf("BLOCK") ?? -1;
+    expect(claimArgs?.[blockIndex + 1]).toBe(25);
+
+    const invalidExecutor = new FakeExecutor();
+    const invalidWorkflow = new WorkflowClient(new FerricStoreClient(invalidExecutor)).workflow({ type: "order" });
+    invalidWorkflow.state("queued", () => complete());
+    await expect(invalidWorkflow.worker({ blockMs: 0.5, states: ["queued"] }).runOnce()).rejects.toThrow(
+      new TypeError(BLOCK_MS_ERROR)
+    );
+    expect(invalidExecutor.calls).toEqual([]);
+  });
+
   it("advances zero idle delay into positive backoff unless zero is the configured cap", () => {
     expect(nextWorkerIdleSleepMs(0, 5_000)).toBe(1);
     expect(nextWorkerIdleSleepMs(1, 5_000)).toBe(2);
@@ -707,6 +771,20 @@ function workflowFlow(id: string, fencingToken: number, state = "charged"): Map<
     ["lease_token", Buffer.from(`lease-${fencingToken}`)],
     ["fencing_token", fencingToken]
   ]);
+}
+
+function expectInvalidWorkerBlockMs(blockMs: number, signal?: AbortSignal): void {
+  let thrown: unknown;
+  try {
+    workerClaimBlockMs({
+      blockMs,
+      ...(signal == null ? {} : { signal })
+    }, true);
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(TypeError);
+  expect(thrown).toMatchObject({ message: BLOCK_MS_ERROR });
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {

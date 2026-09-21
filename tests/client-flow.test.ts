@@ -11,6 +11,16 @@ import type { CommandExecutor } from "../src/adapters.js";
 import { FakeExecutor, fakeFlowPolicySnapshot } from "./fake-executor.js";
 
 describe("FerricStoreClient Flow and administration", () => {
+  it.each([-1, 4_294_967_296])("rejects direct claimDue BLOCK %s before custom executor dispatch", async (blockMs) => {
+    const executor = new FakeExecutor([[]]);
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.claimDue("email", { blockMs, worker: "worker-1" })).rejects.toThrow(
+      "blockMs must be a safe non-negative integer no greater than 4294967295"
+    );
+    expect(executor.calls).toEqual([]);
+  });
+
   it("rejects TTLs on named Flow values before dispatch", async () => {
     const executor = new FakeExecutor();
     const client = new FerricStoreClient(executor, { codec: new JsonCodec() });

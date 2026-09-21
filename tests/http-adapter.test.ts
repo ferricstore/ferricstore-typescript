@@ -17,6 +17,30 @@ import { durableMutationMayHaveCommitted } from "../src/client-durable-step.js";
 
 const servers: (http.Server | http2.Http2Server)[] = [];
 const serverSessions = new Set<http2.ServerHttp2Session>();
+const BLOCK_MS_ERROR = "blockMs must be a safe non-negative integer no greater than 4294967295";
+const INVALID_RAW_BLOCK_MS_VALUES = [
+  -1,
+  0.5,
+  Number.NaN,
+  Number.POSITIVE_INFINITY,
+  Number.NEGATIVE_INFINITY,
+  4_294_967_296,
+  Number.MAX_SAFE_INTEGER + 1,
+  BigInt(Number.MAX_SAFE_INTEGER) + 1n,
+  "0.5",
+  "NaN",
+  "Infinity",
+  "4294967296",
+  "9007199254740992"
+] as const;
+const MALFORMED_FALLBACK_BLOCK_VALUES = [
+  false,
+  null,
+  { malformed: true },
+  Buffer.from("not-a-number"),
+  "0x10",
+  " 10 "
+] as const;
 
 afterEach(async () => {
   for (const session of serverSessions) session.destroy();
@@ -104,6 +128,138 @@ test("HTTP transport uses structured native descriptors when the command has a t
     await adapter.close();
   }
 });
+
+test.each([-1, 4_294_967_296])("rejects direct FLOW.CLAIM_DUE BLOCK %s before HTTP dispatch", async (blockMs) => {
+  let requests = 0;
+  const server = await startHttpServer(async (request, response) => {
+    requests += 1;
+    await body(request);
+    json(response, 200, success([]));
+  });
+  const adapter = await HTTPAdapter.fromUrl(url(server));
+  const client = new FerricStoreClient(adapter);
+  try {
+    await expect(client.claimDue("email", {
+      blockMs,
+      worker: "worker-1"
+    })).rejects.toThrow("blockMs must be a safe non-negative integer no greater than 4294967295");
+    expect(requests).toBe(0);
+  } finally {
+    await adapter.close();
+  }
+});
+
+test.each(INVALID_RAW_BLOCK_MS_VALUES)("rejects raw FLOW.CLAIM_DUE BLOCK %s before HTTP preparation", async (blockMs) => {
+  let requests = 0;
+  const server = await startHttpServer(async (request, response) => {
+    requests += 1;
+    await body(request);
+    json(response, 200, success([]));
+  });
+  const adapter = await HTTPAdapter.fromUrl(url(server));
+  try {
+    await expectRawBlockError(async () => await adapter.executeCommand(
+      "FLOW.CLAIM_DUE",
+      "email",
+      "WORKER", "worker-1",
+      "BLOCK", blockMs,
+      "RETURN", "JOBS_COMPACT"
+    ));
+    expect(requests).toBe(0);
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("rejects raw FLOW.CLAIM_DUE BLOCK when an unsupported option forces HTTP fallback", async () => {
+  let requests = 0;
+  const server = await startHttpServer(async (request, response) => {
+    requests += 1;
+    await body(request);
+    json(response, 200, success([]));
+  });
+  const adapter = await HTTPAdapter.fromUrl(url(server));
+  try {
+    await expectRawBlockError(async () => await adapter.executeCommand(
+      "FLOW.CLAIM_DUE",
+      "email",
+      "UNSUPPORTED_OPTION", "value",
+      "BLOCK", 0.5
+    ));
+    expect(requests).toBe(0);
+  } finally {
+    await adapter.close();
+  }
+});
+
+test.each(["BLOCK", "BLOCK_MS"])(
+  "rejects odd-position %s after an unsupported option before HTTP dispatch",
+  async (blockOption) => {
+    let requests = 0;
+    const server = await startHttpServer(async (request, response) => {
+      requests += 1;
+      await body(request);
+      json(response, 200, success([]));
+    });
+    const adapter = await HTTPAdapter.fromUrl(url(server));
+    try {
+      await expectRawBlockError(async () => await adapter.executeCommand(
+        "FLOW.CLAIM_DUE",
+        "email",
+        "UNSUPPORTED_OPTION",
+        blockOption,
+        0.5
+      ));
+      expect(requests).toBe(0);
+    } finally {
+      await adapter.close();
+    }
+  }
+);
+
+test.each(["BLOCK", "BLOCK_MS"])(
+  "rejects missing %s successors after an unsupported option before HTTP dispatch",
+  async (blockOption) => {
+    let requests = 0;
+    const server = await startHttpServer(async (request, response) => {
+      requests += 1;
+      await body(request);
+      json(response, 200, success([]));
+    });
+    const adapter = await HTTPAdapter.fromUrl(url(server));
+    try {
+      await expectRawBlockError(async () => await adapter.executeCommand(
+        "FLOW.CLAIM_DUE", "email", "UNSUPPORTED_OPTION", blockOption
+      ));
+      expect(requests).toBe(0);
+    } finally {
+      await adapter.close();
+    }
+  }
+);
+
+test.each(["BLOCK", "BLOCK_MS"])(
+  "rejects arbitrary %s successors after an unsupported option before HTTP dispatch",
+  async (blockOption) => {
+    let requests = 0;
+    const server = await startHttpServer(async (request, response) => {
+      requests += 1;
+      await body(request);
+      json(response, 200, success([]));
+    });
+    const adapter = await HTTPAdapter.fromUrl(url(server));
+    try {
+      for (const blockMs of MALFORMED_FALLBACK_BLOCK_VALUES) {
+        await expectRawBlockError(async () => await adapter.executeCommand(
+          "FLOW.CLAIM_DUE", "email", "UNSUPPORTED_OPTION", blockOption, blockMs
+        ));
+      }
+      expect(requests).toBe(0);
+    } finally {
+      await adapter.close();
+    }
+  }
+);
 
 test("one SDK pipeline is one HTTP request and preserves ordered item errors", async () => {
   let requests = 0;
@@ -983,6 +1139,13 @@ function json(response: http.ServerResponse, status: number, value: unknown): vo
 
 async function delay(ms: number): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function expectRawBlockError(action: () => Promise<unknown>): Promise<void> {
+  const error = await rejected(action);
+  expect(error).toBeInstanceOf(HTTPTransportError);
+  expect(error.message).toBe(BLOCK_MS_ERROR);
+  expect(error.cause).toBeInstanceOf(TypeError);
 }
 
 async function rejected(action: () => Promise<unknown>): Promise<Error> {

@@ -267,10 +267,19 @@ is normalized to a finite, non-negative integer; non-finite values use the safe
 worker-mode default. If an asynchronous completion fails after earlier writes
 succeed, <code>QueueCompletionError.completed</code> reports every successful completion
 drained by the same call, regardless of where the failed completion appeared.</p>
-<p>When a worker combines <code>blockMs</code> with an <code>AbortSignal</code>, native long polls are
-bounded by <code>abortPollMs</code> (default <code>1_000</code>) so shutdown is observed without
-abandoning an in-flight claim that may already have leased work. Finite server
-blocking time is added to the transport timeout rather than consuming it.</p>
+<p>Worker <code>blockMs</code> values must be safe non-negative integers from <code>0</code> through
+<code>4_294_967_295</code>; invalid values fail before a blocking claim is dispatched. When
+a worker combines <code>blockMs</code> with an <code>AbortSignal</code>, native long polls are bounded
+by <code>abortPollMs</code> (default <code>1_000</code>) so shutdown is observed without abandoning an
+in-flight claim that may already have leased work. Finite server blocking time
+is added to the transport timeout rather than consuming it. Raw
+<code>FLOW.CLAIM_DUE</code> <code>BLOCK</code> and <code>BLOCK_MS</code> arguments use the same validation before
+native or HTTP preparation.
+For malformed raw commands, recognized option/value pairs are skipped before an
+unsupported tail is scanned for <code>BLOCK</code>/<code>BLOCK_MS</code>; every subsequent marker is
+treated as an option and its successor is validated. This intentionally fails
+closed when arbitrary malformed tail data happens to equal <code>BLOCK</code>. Explicit
+<code>COMMAND_EXEC</code> wrappers and custom executors remain opaque escape hatches.</p>
 <p>Unpartitioned <code>enqueueMany</code> calls group items in linear time, preserve caller
 result order, keep chunks for the same auto-partition sequential, and dispatch
 different partitions with bounded concurrency. The defaults above match the
