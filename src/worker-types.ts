@@ -54,6 +54,7 @@ export interface WorkerConfig {
   /** Include Flow attributes in compact worker claims. Defaults to false. */
   claimAttributes?: boolean;
   valueMaxBytes?: number;
+  /** FLOW.CLAIM_DUE server block interval in integer milliseconds, from 0 through 4_294_967_295. */
   blockMs?: number;
   /** Maximum server block interval while signal is present, bounding safe shutdown latency. */
   abortPollMs?: number;

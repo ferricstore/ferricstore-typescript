@@ -34,7 +34,7 @@ covers every public adapter class and option.
 
 ## Compatibility
 
-TypeScript SDK `0.13.4` requires FerricStore server `0.11.4` or newer. With
+TypeScript SDK `0.13.5` requires FerricStore server `0.11.4` or newer. With
 FerricStore 0.11.11 it negotiates compact Stream mode 34 for homogeneous auto-ID
 `XADD` pipelines and compact Pub/Sub mode 35 for homogeneous `PUBLISH`
 pipelines. Native wire protocol v1 and the generic fallback are unchanged.
@@ -62,7 +62,7 @@ const { FerricStoreClient, JsonCodec } = require("@ferricstore/ferricstore");
 docker run -p 6388:6388 \
   -e FERRICSTORE_PROTECTED_MODE=false \
   -v ferricstore_data:/data \
-  quay.io/ferricstore/ferricstore:0.11.20@sha256:aeec52c27c3afb6e462f659c16b75898d9e9fd6833c8830194f7252ef4916e4f
+  quay.io/ferricstore/ferricstore:0.11.21@sha256:d297c91414ecf206671685d6e74efcec715e5f14a96c5cef09ac5d8c4664c74b
 ```
 
 ## Query durable runs
@@ -152,7 +152,7 @@ Run the complete HTTP-compatible integration surface through a real TLS
 listener with ACL authentication using:
 
 ```bash
-FERRICSTORE_IMAGE=quay.io/ferricstore/ferricstore:0.11.20@sha256:aeec52c27c3afb6e462f659c16b75898d9e9fd6833c8830194f7252ef4916e4f \
+FERRICSTORE_IMAGE=quay.io/ferricstore/ferricstore:0.11.21@sha256:d297c91414ecf206671685d6e74efcec715e5f14a96c5cef09ac5d8c4664c74b \
   npm run test:integration:http
 ```
 
@@ -449,10 +449,19 @@ worker-mode default. If an asynchronous completion fails after earlier writes
 succeed, `QueueCompletionError.completed` reports every successful completion
 drained by the same call, regardless of where the failed completion appeared.
 
-When a worker combines `blockMs` with an `AbortSignal`, native long polls are
-bounded by `abortPollMs` (default `1_000`) so shutdown is observed without
-abandoning an in-flight claim that may already have leased work. Finite server
-blocking time is added to the transport timeout rather than consuming it.
+Worker `blockMs` values must be safe non-negative integers from `0` through
+`4_294_967_295`; invalid values fail before a blocking claim is dispatched. When
+a worker combines `blockMs` with an `AbortSignal`, native long polls are bounded
+by `abortPollMs` (default `1_000`) so shutdown is observed without abandoning an
+in-flight claim that may already have leased work. Finite server blocking time
+is added to the transport timeout rather than consuming it. Raw
+`FLOW.CLAIM_DUE` `BLOCK` and `BLOCK_MS` arguments use the same validation before
+native or HTTP preparation.
+For malformed raw commands, recognized option/value pairs are skipped before an
+unsupported tail is scanned for `BLOCK`/`BLOCK_MS`; every subsequent marker is
+treated as an option and its successor is validated. This intentionally fails
+closed when arbitrary malformed tail data happens to equal `BLOCK`. Explicit
+`COMMAND_EXEC` wrappers and custom executors remain opaque escape hatches.
 
 Unpartitioned `enqueueMany` calls group items in linear time, preserve caller
 result order, keep chunks for the same auto-partition sequential, and dispatch

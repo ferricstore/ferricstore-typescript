@@ -12,6 +12,8 @@ import type { CommandExecutor } from "../src/adapters.js";
 import { sleep, type Command, type CommandArgument } from "../src/internal.js";
 import { FakeExecutor } from "./fake-executor.js";
 
+const BLOCK_MS_ERROR = "blockMs must be a safe non-negative integer no greater than 4294967295";
+
 describe("Queue", () => {
   it("rejects an invalid runtime worker exception policy before claiming", () => {
     const executor = new FakeExecutor([[flow("email-1", 1)]]);
@@ -340,6 +342,7 @@ describe("Queue", () => {
 
     const task = queue.worker({
       batchSize: 1,
+      blockMs: 250,
       concurrency: 1,
       leaseRenewal: false,
       signal: controller.signal,
@@ -361,6 +364,7 @@ describe("Queue", () => {
       "FLOW.COMPLETE_MANY",
       "FLOW.CLAIM_DUE"
     ]);
+    expect(pipelineCalls[0]?.[1]).not.toContain("BLOCK");
   });
 
   it("drains replacement leases returned after shutdown begins", async () => {
@@ -646,6 +650,35 @@ describe("Queue", () => {
     const blockIndex = claimArgs?.indexOf("BLOCK") ?? -1;
     expect(blockIndex).toBeGreaterThanOrEqual(0);
     expect(claimArgs?.[blockIndex + 1]).toBe(25);
+  });
+
+  it("caps valid queue claims and rejects invalid blocking configuration before dispatch", async () => {
+    const controller = new AbortController();
+    let claimArgs: CommandArgument[] | undefined;
+    const executor: CommandExecutor = {
+      async executeCommand(...args: CommandArgument[]): Promise<unknown> {
+        claimArgs = args;
+        controller.abort();
+        return [];
+      }
+    };
+    const queue = new QueueClient(new FerricStoreClient(executor)).queue("email");
+
+    await queue.worker({
+      abortPollMs: 25,
+      blockMs: 250,
+      signal: controller.signal,
+      worker: "worker-1"
+    }).runOnce(() => undefined);
+    const blockIndex = claimArgs?.indexOf("BLOCK") ?? -1;
+    expect(claimArgs?.[blockIndex + 1]).toBe(25);
+
+    const invalidExecutor = new FakeExecutor();
+    const invalidQueue = new QueueClient(new FerricStoreClient(invalidExecutor)).queue("email");
+    await expect(invalidQueue.worker({ blockMs: 0.5, worker: "worker-1" }).runOnce(() => undefined)).rejects.toThrow(
+      new TypeError(BLOCK_MS_ERROR)
+    );
+    expect(invalidExecutor.calls).toEqual([]);
   });
 
   it("stops refilling on a raised handler error and drains active siblings", async () => {

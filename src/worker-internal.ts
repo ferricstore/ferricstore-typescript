@@ -5,6 +5,7 @@ import {
 } from "./types.js";
 import { setLongTimeout, sleep, type LongTimer } from "./internal.js";
 import { snapshotWorkerConfig } from "./worker-config.js";
+import { MAX_FLOW_BLOCK_MS, validateFlowBlockMs } from "./flow-block-validation.js";
 export { LeaseRenewalError, LeaseRenewalGuard } from "./worker-lease-guard.js";
 
 const DEFAULT_FLOW_MANY_BATCH_LIMIT = 1_000;
@@ -99,11 +100,11 @@ export function workerClaimBlockMs(options: WorkerConfig, useBlocking: boolean):
   if (!useBlocking || options.blockMs == null) {
     return undefined;
   }
-  if (options.signal == null || !Number.isFinite(options.blockMs) || options.blockMs < 0) {
-    return options.blockMs;
-  }
-  const abortPollMs = positiveInteger(options.abortPollMs, 1_000);
-  return options.blockMs === 0 ? abortPollMs : Math.min(Math.trunc(options.blockMs), abortPollMs);
+  validateFlowBlockMs(options.blockMs);
+  const blockMs = options.blockMs;
+  if (options.signal == null) return blockMs;
+  const abortPollMs = Math.min(positiveInteger(options.abortPollMs, 1_000), MAX_FLOW_BLOCK_MS);
+  return blockMs === 0 ? abortPollMs : Math.min(blockMs, abortPollMs);
 }
 
 export function workerMaxIdleSleepMs(options: WorkerConfig, idleSleepMs = workerIdleSleepMs(options)): number {
