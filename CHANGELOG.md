@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.13.5] - 2026-09-22
+
+### Fixed
+
+- Validate `FLOW.CLAIM_DUE` `BLOCK` and `BLOCK_MS` values as safe non-negative
+  integer milliseconds through `4_294_967_295` before native or HTTP dispatch,
+  including malformed fallback tails, and cap abortable worker polling to the
+  same server range.
+
+### Changed
+
+- Validate the SDK release gates against FerricStore OSS `0.11.21`, pinned to
+  immutable manifest `sha256:d297c91414ecf206671685d6e74efcec715e5f14a96c5cef09ac5d8c4664c74b`.
+
 ## [0.13.4] - 2026-09-20
 
 ### Changed

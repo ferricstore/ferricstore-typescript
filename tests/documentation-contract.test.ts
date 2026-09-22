@@ -12,7 +12,7 @@ describe("public durable workflow documentation", () => {
     );
 
     for (const required of [
-      "TypeScript SDK `0.13.4` requires FerricStore server",
+      "TypeScript SDK `0.13.5` requires FerricStore server",
       "The step name must remain stable across retries",
       "external systems still need the same stable provider idempotency key",
       "A waiting workflow does not occupy a worker",
