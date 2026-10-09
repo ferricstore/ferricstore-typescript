@@ -9,7 +9,9 @@ The format is based on Keep a Changelog, and this project follows semver once it
 ### Changed
 
 - Refresh current-server integration and documentation pins to immutable
-  FerricStore OSS `0.11.23`. The `0.11.4` compatibility floor remains unchanged.
+  FerricStore OSS `0.11.24`. The `0.11.4` compatibility floor remains unchanged.
+- Refresh locked verification dependencies to resolve the MCP client,
+  brace-expansion, Markdown parser, and source-map security advisories.
 
 ## [0.13.5] - 2026-09-22
 
