@@ -47,6 +47,14 @@ export class FerricStoreAdministrationClient extends FerricStoreClientBase {
     return await this.command("CLUSTER.ROLE");
   }
 
+  async clusterFeatures(): Promise<Record<string, unknown>> {
+    return parseKvResponse(await this.command("CLUSTER.FEATURES"));
+  }
+
+  async clusterFeaturesRaise(level: number): Promise<Record<string, unknown>> {
+    return parseKvResponse(await this.command("CLUSTER.FEATURES.RAISE", level));
+  }
+
   async clusterJoin(node: string, options: { replace?: boolean } = {}): Promise<boolean> {
     return okResponse(await this.command(
       "CLUSTER.JOIN",

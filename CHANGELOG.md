@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+### Added
+
+- `clusterFeatures()` and `clusterFeaturesRaise(level)` for FerricStore 0.12.0
+  cluster feature levels, and the `CLUSTER.FEATURES` (0x0311) and
+  `CLUSTER.FEATURES.RAISE` (0x0312) entries in `COMMAND_OPCODES`. Servers
+  before 0.12.0 do not have these commands.
+
 ### Changed
 
 - Refresh current-server integration and documentation pins to immutable

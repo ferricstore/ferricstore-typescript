@@ -147,6 +147,14 @@ export function ok(value: unknown): boolean {
   return value === true || value === 1 || value === "OK" || (Buffer.isBuffer(value) && value.toString("utf8") === "OK");
 }
 
+// CLUSTER.FEATURES arrived in server 0.12.0. A raise to level 0 is always
+// rejected, so it exercises the command without changing the cluster.
+export async function expectClusterFeatureLevels(flow: FerricStoreClient): Promise<void> {
+  const features = await flow.clusterFeatures();
+  expect(Number(features.supported)).toBeGreaterThanOrEqual(Number(features.active));
+  await expect(flow.clusterFeaturesRaise(0)).rejects.toThrow(/feature level must be a positive integer/);
+}
+
 export async function expectSupportedOrKnownServerError<T>(
   promise: Promise<T>,
   pattern = /unsupported|unknown|not supported|not enabled|invalid|not[_ ]found|password|cluster|no config file|shard index/i
