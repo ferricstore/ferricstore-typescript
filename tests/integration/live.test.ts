@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  COMMAND_OPCODES,
   FerricStoreClient,
   JsonCodec,
   NativeAdapter,
@@ -17,6 +16,7 @@ import {
   deletePrefixedKeys,
   eventually,
   expectStateMeta,
+  expectClusterFeatureLevels,
   expectSupportedOrKnownServerError,
   fenced,
   field,
@@ -30,13 +30,15 @@ import {
   url,
   waitForAclProjection
 } from "./live-support.js";
+import { expectSdkOpcodesMatchServer } from "../server-command-versions.js";
 
 const nativeProtocolCommands = new Set<string>(
   `
     ACL APPEND AUTH BF.ADD BF.CARD BF.EXISTS BF.INFO BF.MADD BF.MEXISTS BF.RESERVE
     BGSAVE BITCOUNT BITOP BITPOS BLMOVE BLMPOP BLPOP BRPOP CAS CF.ADD CF.ADDNX
     CF.COUNT CF.DEL CF.EXISTS CF.INFO CF.MEXISTS CF.RESERVE CLIENT CLUSTER.DEMOTE
-    CLUSTER.FAILOVER CLUSTER.HEALTH CLUSTER.JOIN CLUSTER.KEYSLOT CLUSTER.LEAVE
+    CLUSTER.FAILOVER CLUSTER.FEATURES CLUSTER.FEATURES.RAISE CLUSTER.HEALTH CLUSTER.JOIN
+    CLUSTER.KEYSLOT CLUSTER.LEAVE
     CLUSTER.PROMOTE CLUSTER.ROLE CLUSTER.SLOTS CLUSTER.STATS CLUSTER.STATUS
     CMS.INCRBY CMS.INFO CMS.INITBYDIM CMS.INITBYPROB CMS.MERGE CMS.QUERY COMMAND
     CONFIG COPY DBSIZE DEBUG DECR DECRBY DEL DISCARD ECHO EXEC EXISTS EXPIRE
@@ -305,7 +307,7 @@ describe("FerricStore integration", () => {
     const flow = await integrationClient({ codec: new RawCodec() });
 
     try {
-      expect(optionsOpcodeTable(await flow.command("OPTIONS"))).toEqual(COMMAND_OPCODES);
+      expectSdkOpcodesMatchServer(optionsOpcodeTable(await flow.command("OPTIONS")));
     } finally {
       await flow.close();
     }
@@ -1170,6 +1172,9 @@ describe("FerricStore integration", () => {
       await expect(flow.clusterSlots()).resolves.toBeDefined();
       await expect(flow.clusterStatus()).resolves.toBeTypeOf("object");
       await expect(flow.clusterRole()).resolves.toBeDefined();
+      if (commandCatalogNames(await flow.command("COMMAND")).has("CLUSTER.FEATURES")) {
+        await expectClusterFeatureLevels(flow);
+      }
       await expectSupportedOrKnownServerError(flow.clusterJoin("invalid-node"));
       await expectSupportedOrKnownServerError(flow.clusterFailover(9_999, "invalid-node"));
       await expectSupportedOrKnownServerError(flow.clusterPromote("invalid-node"));

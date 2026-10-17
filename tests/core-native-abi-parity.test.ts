@@ -2,9 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { expectSdkOpcodesMatchServer } from "./server-command-versions.js";
 
 import {
-  COMMAND_OPCODES,
   COMPACT_BINARY_LIST_LIST,
   COMPACT_BINARY_MAP_LIST,
   COMPACT_FLOW_CANCEL_MANY_OK_REQUEST,
@@ -190,7 +190,7 @@ describe.skipIf(!coreAvailable)("FerricStore core native ABI parity", () => {
   const nif = coreAvailable ? readFileSync(nifPath, "utf8") : "";
 
   it("matches the complete native command opcode table", () => {
-    expect(COMMAND_OPCODES).toEqual(commandOpcodes(commands));
+    expectSdkOpcodesMatchServer(commandOpcodes(commands));
   });
 
   it("matches every compact wire tag", () => {
