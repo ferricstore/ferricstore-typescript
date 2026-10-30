@@ -174,6 +174,32 @@ export function registerStoreFlowIntegrationTests(): void {
       await expect(flow.zset.zpopmin(zset, 1)).resolves.not.toHaveLength(0);
       await expect(flow.zset.zpopmax(zset, 1)).resolves.not.toHaveLength(0);
 
+      // Servers before the sorted-set algebra commands do not list them.
+      const catalog = await flow.command("COMMAND");
+      const catalogNames = new Set(
+        (Array.isArray(catalog) ? catalog : []).map((entry: unknown) =>
+          Array.isArray(entry) ? text(entry[0]).toUpperCase() : ""
+        )
+      );
+      if (catalogNames.has("ZUNIONSTORE")) {
+        const zsetA = `${prefix}zset-a`;
+        const zsetB = `${prefix}zset-b`;
+        await expect(flow.command("ZADD", zsetA, 1, "a", 2, "b")).resolves.toBe(2);
+        await expect(flow.command("ZADD", zsetB, 3, "b", 4, "c")).resolves.toBe(2);
+        await expect(flow.command("ZUNION", 2, zsetA, zsetB, "WITHSCORES")).resolves.toHaveLength(6);
+        await expect(flow.command("ZINTER", 2, zsetA, zsetB)).resolves.toHaveLength(1);
+        await expect(flow.command("ZDIFF", 2, zsetA, zsetB)).resolves.toHaveLength(1);
+        await expect(flow.command("ZINTERCARD", 2, zsetA, zsetB, "LIMIT", 10)).resolves.toBe(1);
+        await expect(
+          flow.command("ZUNIONSTORE", `${prefix}zunion`, 2, zsetA, zsetB, "WEIGHTS", 1, 2)
+        ).resolves.toBe(3);
+        await expect(
+          flow.command("ZINTERSTORE", `${prefix}zinter`, 2, zsetA, zsetB, "AGGREGATE", "MAX")
+        ).resolves.toBe(1);
+        await expect(flow.command("ZDIFFSTORE", `${prefix}zdiff`, 2, zsetA, zsetB)).resolves.toBe(1);
+        await expect(flow.command("ZRANGESTORE", `${prefix}zrange`, zsetA, 0, -1)).resolves.toBe(2);
+      }
+
       const stream = `${prefix}stream`;
       const streamId = text(await flow.stream.xadd(stream, "*", { field: "value" }));
       await expect(flow.stream.xlen(stream)).resolves.toBeGreaterThanOrEqual(1);

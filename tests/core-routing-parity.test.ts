@@ -111,7 +111,14 @@ describe.skipIf(!coreAvailable)("FerricStore core routing parity", () => {
       ["TDIGEST.MERGE", ["TDIGEST.MERGE", first, 1, second]],
       ["UNLINK", ["UNLINK", first, second]],
       ["XREAD", ["XREAD", "STREAMS", first, second, "0", "0"]],
-      ["XREADGROUP", ["XREADGROUP", "GROUP", "group", "consumer", "STREAMS", first, second, ">", ">"]]
+      ["XREADGROUP", ["XREADGROUP", "GROUP", "group", "consumer", "STREAMS", first, second, ">", ">"]],
+      ["ZDIFF", ["ZDIFF", 2, first, second]],
+      ["ZDIFFSTORE", ["ZDIFFSTORE", first, 1, second]],
+      ["ZINTER", ["ZINTER", 2, first, second, "WITHSCORES"]],
+      ["ZINTERCARD", ["ZINTERCARD", 2, first, second, "LIMIT", 1]],
+      ["ZINTERSTORE", ["ZINTERSTORE", first, 2, second, first, "AGGREGATE", "MAX"]],
+      ["ZUNION", ["ZUNION", 2, first, second]],
+      ["ZUNIONSTORE", ["ZUNIONSTORE", first, 2, second, first, "WEIGHTS", 1, 2]]
     ];
     for (const name of twoKeyCommands) commands.push([name, [name, first, second]]);
     for (const name of trailingArgumentMultiKeyCommands) {

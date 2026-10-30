@@ -111,12 +111,24 @@ export function routingKeyArguments(
   }
   if (allArgumentMultiKeyCommands.has(name)) return { handled: true, keys: args.slice(1) };
   if (name === "BLMPOP") return { handled: true, keys: countedKeys(args, 2, 3) };
-  if (name === "SINTERCARD") return { handled: true, keys: countedKeys(args, 1, 2) };
-  if (name === "CMS.MERGE" || name === "TDIGEST.MERGE") {
+  if (countedKeyCommands.has(name)) return { handled: true, keys: countedKeys(args, 1, 2) };
+  if (destinationCountedKeyCommands.has(name)) {
     return { handled: true, keys: countedKeys(args, 2, 3, true) };
   }
   return { handled: false };
 }
+
+/** `numkeys key [key ...] [options]`. */
+const countedKeyCommands = new Set(["SINTERCARD", "ZDIFF", "ZINTER", "ZINTERCARD", "ZUNION"]);
+
+/** `destination numkeys key [key ...] [options]`. */
+const destinationCountedKeyCommands = new Set([
+  "CMS.MERGE",
+  "TDIGEST.MERGE",
+  "ZDIFFSTORE",
+  "ZINTERSTORE",
+  "ZUNIONSTORE"
+]);
 
 /** Specialized forms deliberately excluded from the first-key parity catalog. */
 export const specializedRoutingCommandNames = new Set([
@@ -124,9 +136,8 @@ export const specializedRoutingCommandNames = new Set([
   "BLMPOP",
   "MSET",
   "MSETNX",
-  "SINTERCARD",
-  "CMS.MERGE",
-  "TDIGEST.MERGE",
+  ...countedKeyCommands,
+  ...destinationCountedKeyCommands,
   "XREAD",
   "XREADGROUP",
   ...twoKeyCommands,
