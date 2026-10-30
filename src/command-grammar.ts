@@ -110,7 +110,9 @@ export function routingKeyArguments(
     return { handled: true, keys: args.length >= 3 ? args.slice(1, -1) : [] };
   }
   if (allArgumentMultiKeyCommands.has(name)) return { handled: true, keys: args.slice(1) };
-  if (name === "BLMPOP") return { handled: true, keys: countedKeys(args, 2, 3) };
+  if (name === "BLMPOP" || name === "BZMPOP") {
+    return { handled: true, keys: countedKeys(args, 2, 3) };
+  }
   if (countedKeyCommands.has(name)) return { handled: true, keys: countedKeys(args, 1, 2) };
   if (destinationCountedKeyCommands.has(name)) {
     return { handled: true, keys: countedKeys(args, 2, 3, true) };
@@ -141,6 +143,7 @@ const destinationCountedKeyCommands = new Set([
 export const specializedRoutingCommandNames = new Set([
   "BITOP",
   "BLMPOP",
+  "BZMPOP",
   "MSET",
   "MSETNX",
   ...countedKeyCommands,

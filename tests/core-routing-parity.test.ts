@@ -101,6 +101,7 @@ describe.skipIf(!coreAvailable)("FerricStore core routing parity", () => {
     const commands: (readonly [string, readonly (string | number)[]])[] = [
       ["BITOP", ["BITOP", "AND", first, second]],
       ["BLMPOP", ["BLMPOP", 0, 2, first, second, "LEFT"]],
+      ["BZMPOP", ["BZMPOP", 0, 2, first, second, "MIN"]],
       ["CMS.MERGE", ["CMS.MERGE", first, 1, second]],
       ["DEL", ["DEL", first, second]],
       ["EXISTS", ["EXISTS", first, second]],
