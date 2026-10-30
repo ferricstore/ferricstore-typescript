@@ -210,6 +210,13 @@ export function registerStoreFlowIntegrationTests(): void {
         await expect(flow.command("ZREMRANGEBYSCORE", zlex, "-inf", "(0")).resolves.toBe(0);
         await expect(flow.command("ZMPOP", 1, zlex, "MIN", "COUNT", 2)).resolves.toHaveLength(2);
       }
+      if (catalogNames.has("BZMPOP")) {
+        const zblock = `${prefix}zblock`;
+        await expect(flow.command("ZADD", zblock, 1, "a", 2, "b", 3, "c")).resolves.toBe(3);
+        await expect(flow.command("BZPOPMIN", zblock, 1)).resolves.toHaveLength(3);
+        await expect(flow.command("BZPOPMAX", zblock, 1)).resolves.toHaveLength(3);
+        await expect(flow.command("BZMPOP", 1, 1, zblock, "MIN")).resolves.toHaveLength(2);
+      }
 
       const stream = `${prefix}stream`;
       const streamId = text(await flow.stream.xadd(stream, "*", { field: "value" }));

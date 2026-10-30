@@ -373,7 +373,9 @@ export const twoKeyCommands = new Set([
 
 export const trailingArgumentMultiKeyCommands = new Set([
   "BLPOP",
-  "BRPOP"
+  "BRPOP",
+  "BZPOPMAX",
+  "BZPOPMIN"
 ]);
 
 export const allArgumentMultiKeyCommands = new Set([
