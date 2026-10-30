@@ -199,6 +199,17 @@ export function registerStoreFlowIntegrationTests(): void {
         await expect(flow.command("ZDIFFSTORE", `${prefix}zdiff`, 2, zsetA, zsetB)).resolves.toBe(1);
         await expect(flow.command("ZRANGESTORE", `${prefix}zrange`, zsetA, 0, -1)).resolves.toBe(2);
       }
+      if (catalogNames.has("ZMPOP")) {
+        const zlex = `${prefix}zlex`;
+        await expect(flow.command("ZADD", zlex, 0, "a", 0, "b", 0, "c", 0, "d")).resolves.toBe(4);
+        await expect(flow.command("ZRANGEBYLEX", zlex, "[b", "+")).resolves.toHaveLength(3);
+        await expect(flow.command("ZREVRANGEBYLEX", zlex, "+", "-", "LIMIT", 0, 1)).resolves.toHaveLength(1);
+        await expect(flow.command("ZLEXCOUNT", zlex, "-", "+")).resolves.toBe(4);
+        await expect(flow.command("ZREMRANGEBYLEX", zlex, "[d", "+")).resolves.toBe(1);
+        await expect(flow.command("ZREMRANGEBYRANK", zlex, 0, 0)).resolves.toBe(1);
+        await expect(flow.command("ZREMRANGEBYSCORE", zlex, "-inf", "(0")).resolves.toBe(0);
+        await expect(flow.command("ZMPOP", 1, zlex, "MIN", "COUNT", 2)).resolves.toHaveLength(2);
+      }
 
       const stream = `${prefix}stream`;
       const streamId = text(await flow.stream.xadd(stream, "*", { field: "value" }));

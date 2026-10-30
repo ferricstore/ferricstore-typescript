@@ -119,7 +119,14 @@ export function routingKeyArguments(
 }
 
 /** `numkeys key [key ...] [options]`. */
-const countedKeyCommands = new Set(["SINTERCARD", "ZDIFF", "ZINTER", "ZINTERCARD", "ZUNION"]);
+const countedKeyCommands = new Set([
+  "SINTERCARD",
+  "ZDIFF",
+  "ZINTER",
+  "ZINTERCARD",
+  "ZMPOP",
+  "ZUNION"
+]);
 
 /** `destination numkeys key [key ...] [options]`. */
 const destinationCountedKeyCommands = new Set([
