@@ -361,7 +361,8 @@ export const twoKeyCommands = new Set([
   "RENAME",
   "RENAMENX",
   "RPOPLPUSH",
-  "SMOVE"
+  "SMOVE",
+  "ZRANGESTORE"
 ]);
 
 export const trailingArgumentMultiKeyCommands = new Set([
