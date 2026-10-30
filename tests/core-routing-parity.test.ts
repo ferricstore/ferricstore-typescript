@@ -117,6 +117,7 @@ describe.skipIf(!coreAvailable)("FerricStore core routing parity", () => {
       ["ZINTER", ["ZINTER", 2, first, second, "WITHSCORES"]],
       ["ZINTERCARD", ["ZINTERCARD", 2, first, second, "LIMIT", 1]],
       ["ZINTERSTORE", ["ZINTERSTORE", first, 2, second, first, "AGGREGATE", "MAX"]],
+      ["ZMPOP", ["ZMPOP", 2, first, second, "MIN", "COUNT", 2]],
       ["ZUNION", ["ZUNION", 2, first, second]],
       ["ZUNIONSTORE", ["ZUNIONSTORE", first, 2, second, first, "WEIGHTS", 1, 2]]
     ];
