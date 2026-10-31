@@ -229,6 +229,23 @@ export function registerStoreFlowIntegrationTests(): void {
       await expect(flow.stream.xgroupCreate(stream, group, "0")).resolves.toBe(true);
       await expect(flow.stream.xreadgroup(group, "consumer", [{ id: ">", key: stream }], { count: 1 })).resolves.toBeDefined();
       await expect(flow.stream.xack(stream, group, streamId)).resolves.toBeGreaterThanOrEqual(0);
+      if (catalogNames.has("XCLAIM")) {
+        await expect(flow.command("XPENDING", stream, group)).resolves.toBeDefined();
+        await expect(flow.command("XPENDING", stream, group, "-", "+", 10)).resolves.toBeDefined();
+        await expect(flow.command("XINFO", "GROUPS", stream)).resolves.not.toHaveLength(0);
+        await expect(flow.command("XINFO", "CONSUMERS", stream, group)).resolves.toBeDefined();
+        // The writes run from cluster feature level 11.
+        const claimed = await flow
+          .command("XCLAIM", stream, group, "bob", 0, streamId, "JUSTID")
+          .catch((error: unknown) => error);
+        if (claimed instanceof Error) {
+          expect(claimed.message).toContain("feature level 11");
+        } else {
+          await expect(flow.command("XAUTOCLAIM", stream, group, "carol", 0, "0-0", "JUSTID")).resolves.toHaveLength(3);
+          await expect(flow.command("XGROUP", "CREATECONSUMER", stream, group, "dave")).resolves.toBe(1);
+          await expect(flow.command("XSETID", stream, streamId)).resolves.toBeDefined();
+        }
+      }
       await expect(flow.stream.xtrim(stream, "MAXLEN", 10, true)).resolves.toBeGreaterThanOrEqual(0);
       await expect(flow.stream.xdel(stream, streamId)).resolves.toBeGreaterThanOrEqual(0);
 
