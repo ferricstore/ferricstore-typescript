@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ferricstore/ferricstore
-          ref: b1bbbfc8b8fa905ac6502ce33991d91696c2e257
+          ref: 6266c12c59b5015755234a5ad71c46976af4e0a7
           path: ferricstore-core
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -77,7 +77,7 @@ jobs:
             image: quay.io/ferricstore/ferricstore:0.12.0@sha256:407cf38131e44c1702d03abfabe7406ede3696998df4b1748b7b7121f9504503
           - node-version: 22.22.0
             server: pinned-core
-            image: quay.io/ferricstore/ferricstore:ci-b1bbbfc8b8fa905ac6502ce33991d91696c2e257@sha256:deef3be91bee00249dfc340832ac14d0412f544d47e3311bc65c74ffecf7a357
+            image: quay.io/ferricstore/ferricstore:ci-6266c12c59b5015755234a5ad71c46976af4e0a7@sha256:b02123f1564b05347d577aa72853122a4c4074838b15a0d1b1914af5b0b33612
     env:
       FERRICSTORE_IMAGE: ${{ matrix.image }}
       FERRICSTORE_SKIP_REWIND_REASON_PERSISTENCE: ${{ matrix.server == 'release-0.11.4' || matrix.server == 'pinned-core' }}
