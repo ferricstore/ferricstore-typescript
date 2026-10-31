@@ -8,6 +8,11 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ### Added
 
+- `spublish(channel, message)`, `pubsubShardChannels(pattern?)` and
+  `pubsubShardNumSub(...channels)` for FerricStore's sharded Pub/Sub. As with
+  SUBSCRIBE, this multiplexed client does not subscribe: SSUBSCRIBE and
+  SUNSUBSCRIBE are refused before they are sent.
+
 - `clusterFeatures()` and `clusterFeaturesRaise(level)` for FerricStore 0.12.0
   cluster feature levels, and the `CLUSTER.FEATURES` (0x0311) and
   `CLUSTER.FEATURES.RAISE` (0x0312) entries in `COMMAND_OPCODES`. Servers
