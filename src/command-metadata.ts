@@ -1,5 +1,5 @@
 /** Central command classifications shared by routing, batching, and connection policy. */
-export { flowStateIdCommands } from "./command-metadata-flow.js";
+export { flowScheduleCommands, flowStateIdCommands } from "./command-metadata-flow.js";
 
 export const safeAutoBatchCommands = new Set([
   "DEL",
@@ -191,10 +191,13 @@ export const firstKeyCommands = new Set([
   "BF.CARD",
   "BF.EXISTS",
   "BF.INFO",
+  "BF.INSERT",
   "BF.MADD",
   "BF.MEXISTS",
   "BF.RESERVE",
   "BITCOUNT",
+  "BITFIELD",
+  "BITFIELD_RO",
   "BITPOS",
   "CAS",
   "CF.ADD",
@@ -203,6 +206,8 @@ export const firstKeyCommands = new Set([
   "CF.DEL",
   "CF.EXISTS",
   "CF.INFO",
+  "CF.INSERT",
+  "CF.INSERTNX",
   "CF.MEXISTS",
   "CF.RESERVE",
   "CMS.INCRBY",
@@ -216,10 +221,10 @@ export const firstKeyCommands = new Set([
   "EXPIREAT",
   "EXPIRETIME",
   "EXTEND",
+  "FERRICSTORE.KEY_INFO",
   "FETCH_OR_COMPUTE",
   "FETCH_OR_COMPUTE_ERROR",
   "FETCH_OR_COMPUTE_RESULT",
-  "FERRICSTORE.KEY_INFO",
   "GEOADD",
   "GEODIST",
   "GEOHASH",
@@ -234,6 +239,7 @@ export const firstKeyCommands = new Set([
   "HDEL",
   "HEXISTS",
   "HEXPIRE",
+  "HEXPIREAT",
   "HEXPIRETIME",
   "HGET",
   "HGETALL",
@@ -244,8 +250,11 @@ export const firstKeyCommands = new Set([
   "HKEYS",
   "HLEN",
   "HMGET",
+  "HMSET",
   "HPERSIST",
   "HPEXPIRE",
+  "HPEXPIREAT",
+  "HPEXPIRETIME",
   "HPTTL",
   "HRANDFIELD",
   "HSCAN",
@@ -284,18 +293,18 @@ export const firstKeyCommands = new Set([
   "RPUSHX",
   "SADD",
   "SCARD",
-  "SISMEMBER",
-  "SMEMBERS",
-  "SMISMEMBER",
-  "SREM",
-  "SPOP",
-  "SRANDMEMBER",
-  "SSCAN",
   "SET",
   "SETBIT",
   "SETEX",
   "SETNX",
   "SETRANGE",
+  "SISMEMBER",
+  "SMEMBERS",
+  "SMISMEMBER",
+  "SPOP",
+  "SRANDMEMBER",
+  "SREM",
+  "SSCAN",
   "STRLEN",
   "TDIGEST.ADD",
   "TDIGEST.BYRANK",
@@ -339,10 +348,10 @@ export const firstKeyCommands = new Set([
   "ZMSCORE",
   "ZPOPMAX",
   "ZPOPMIN",
+  "ZRANDMEMBER",
   "ZRANGE",
   "ZRANGEBYLEX",
   "ZRANGEBYSCORE",
-  "ZRANDMEMBER",
   "ZRANK",
   "ZREM",
   "ZREMRANGEBYLEX",
@@ -367,6 +376,7 @@ export const twoKeyCommands = new Set([
   "BLMOVE",
   "COPY",
   "GEOSEARCHSTORE",
+  "LCS",
   "LMOVE",
   "RENAME",
   "RENAMENX",
@@ -390,7 +400,8 @@ export const allArgumentMultiKeyCommands = new Set([
   "SINTER",
   "SINTERSTORE",
   "SUNION",
-  "SUNIONSTORE"
+  "SUNIONSTORE",
+  "TOUCH"
 ]);
 
 export const typeScopedFlowCommands = new Set([
@@ -407,17 +418,6 @@ export const typeScopedFlowCommands = new Set([
   "FLOW.SCHEDULE.FIRE_DUE",
   "FLOW.SCHEDULE.LIST",
   "FLOW.STATS"
-]);
-
-export const flowScheduleCommands = new Set([
-  "FLOW.SCHEDULE.CREATE",
-  "FLOW.SCHEDULE.DELETE",
-  "FLOW.SCHEDULE.FIRE",
-  "FLOW.SCHEDULE.FIRE_DUE",
-  "FLOW.SCHEDULE.GET",
-  "FLOW.SCHEDULE.LIST",
-  "FLOW.SCHEDULE.PAUSE",
-  "FLOW.SCHEDULE.RESUME"
 ]);
 
 export const flowApprovalIdCommands = new Set([

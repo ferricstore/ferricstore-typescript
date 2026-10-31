@@ -20,3 +20,14 @@ export const flowStateIdCommands = new Set([
   "FLOW.STEP_CONTINUE",
   "FLOW.TRANSITION"
 ]);
+
+export const flowScheduleCommands = new Set([
+  "FLOW.SCHEDULE.CREATE",
+  "FLOW.SCHEDULE.DELETE",
+  "FLOW.SCHEDULE.FIRE",
+  "FLOW.SCHEDULE.FIRE_DUE",
+  "FLOW.SCHEDULE.GET",
+  "FLOW.SCHEDULE.LIST",
+  "FLOW.SCHEDULE.PAUSE",
+  "FLOW.SCHEDULE.RESUME"
+]);
