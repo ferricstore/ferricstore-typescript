@@ -261,7 +261,7 @@ export function registerStoreFlowIntegrationTests(): void {
           return reply;
         };
         const hash = `${prefix}gap-hash`;
-        await expect(flow.command("HMSET", hash, "a", "1", "b", "2")).resolves.toBe("OK");
+        expect(text(await flow.command("HMSET", hash, "a", "1", "b", "2"))).toBe("OK");
         await expect(flow.command("TOUCH", hash, `${prefix}gap-missing`)).resolves.toBe(1);
         const time = await flow.command("TIME") as unknown[];
         expect(Number(text(time[0]))).toBeGreaterThan(0);
@@ -275,8 +275,8 @@ export function registerStoreFlowIntegrationTests(): void {
         expect([null, 3]).toContain(await level12("SORT", list, "STORE", `${prefix}gap-sorted`));
         const popped = await flow.command("LMPOP", 2, `${prefix}gap-empty`, list, "LEFT") as unknown[];
         expect(text(popped[0])).toBe(list);
-        await expect(flow.command("SET", `${prefix}gap-a`, "ohmytext")).resolves.toBe("OK");
-        await expect(flow.command("SET", `${prefix}gap-b`, "mynewtext")).resolves.toBe("OK");
+        expect(text(await flow.command("SET", `${prefix}gap-a`, "ohmytext"))).toBe("OK");
+        expect(text(await flow.command("SET", `${prefix}gap-b`, "mynewtext"))).toBe("OK");
         expect(text(await flow.command("LCS", `${prefix}gap-a`, `${prefix}gap-b`))).toBe("mytext");
         const bits = `${prefix}gap-bits`;
         await expect(flow.command("BITFIELD", bits, "GET", "u8", 0)).resolves.toEqual([0]);
