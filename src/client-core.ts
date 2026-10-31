@@ -228,6 +228,19 @@ export class FerricStoreClientCore extends FerricStoreAdministrationClient {
     return integer(await this.command("PUBSUB", "NUMPAT"));
   }
 
+  /** SPUBLISH: publishes to a shard channel, a namespace apart from PUBLISH's. */
+  async spublish(channel: string, message: CommandArgument): Promise<number> {
+    return integer(await this.command("SPUBLISH", channel, message));
+  }
+
+  async pubsubShardChannels(pattern?: string): Promise<unknown[]> {
+    return arrayResponse(await this.command("PUBSUB", "SHARDCHANNELS", ...(pattern == null ? [] : [pattern])));
+  }
+
+  async pubsubShardNumSub(...channels: string[]): Promise<unknown[]> {
+    return arrayResponse(await this.commandArgs(concatCommandArgs(["PUBSUB", "SHARDNUMSUB"], channels)));
+  }
+
   async aclSetUser(username: string, rules: string | readonly string[]): Promise<boolean> {
     return okResponse(
       await this.commandArgs(concatCommandArgs(["ACL", "SETUSER", username], ruleArgs(rules)))

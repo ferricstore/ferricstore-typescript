@@ -29,7 +29,10 @@ const nonDataSpecializedCommands = new Set([
   "PUBLISH",
   "PUBSUB",
   "PUNSUBSCRIBE",
+  "SPUBLISH",
+  "SSUBSCRIBE",
   "SUBSCRIBE",
+  "SUNSUBSCRIBE",
   "UNSUBSCRIBE",
   "WATCH"
 ]);

@@ -286,6 +286,21 @@ describe("FerricStoreClient administration and response validation", () => {
     ]);
   });
 
+  it("builds shard channel Pub/Sub helper commands", async () => {
+    const executor = new FakeExecutor([1, ["orders"], ["orders", 1]]);
+    const client = new FerricStoreClient(executor);
+
+    await expect(client.spublish("orders", "hello")).resolves.toBe(1);
+    await expect(client.pubsubShardChannels("ord*")).resolves.toEqual(["orders"]);
+    await expect(client.pubsubShardNumSub("orders")).resolves.toEqual(["orders", 1]);
+
+    expect(executor.calls).toEqual([
+      ["SPUBLISH", "orders", "hello"],
+      ["PUBSUB", "SHARDCHANNELS", "ord*"],
+      ["PUBSUB", "SHARDNUMSUB", "orders"]
+    ]);
+  });
+
   it("rejects unsupported native CLIENT tracking helpers without dispatch", async () => {
     const executor = new FakeExecutor();
     const client = new FerricStoreClient(executor);
