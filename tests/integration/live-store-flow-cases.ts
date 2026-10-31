@@ -249,6 +249,46 @@ export function registerStoreFlowIntegrationTests(): void {
       await expect(flow.stream.xtrim(stream, "MAXLEN", 10, true)).resolves.toBeGreaterThanOrEqual(0);
       await expect(flow.stream.xdel(stream, streamId)).resolves.toBeGreaterThanOrEqual(0);
 
+      if (catalogNames.has("LCS")) {
+        // SORT ... STORE and BITFIELD's writes run from cluster feature level
+        // 12; below it each is refused, and every one is still sent.
+        const level12 = async (...args: (string | number)[]): Promise<unknown> => {
+          const reply = await flow.command(...(args as [string, ...(string | number)[]])).catch((error: unknown) => error);
+          if (reply instanceof Error) {
+            expect(reply.message).toContain("feature level 12");
+            return null;
+          }
+          return reply;
+        };
+        const hash = `${prefix}gap-hash`;
+        await expect(flow.command("HMSET", hash, "a", "1", "b", "2")).resolves.toBe("OK");
+        await expect(flow.command("TOUCH", hash, `${prefix}gap-missing`)).resolves.toBe(1);
+        const time = await flow.command("TIME") as unknown[];
+        expect(Number(text(time[0]))).toBeGreaterThan(0);
+        await expect(flow.command("HEXPIREAT", hash, 4_000_000_000, "FIELDS", 1, "a")).resolves.toEqual([1]);
+        await expect(flow.command("HPEXPIREAT", hash, 4_000_000_000_000, "FIELDS", 1, "b")).resolves.toEqual([1]);
+        await expect(flow.command("HPEXPIRETIME", hash, "FIELDS", 1, "b")).resolves.toEqual([4_000_000_000_000]);
+        const list = `${prefix}gap-list`;
+        await expect(flow.command("RPUSH", list, "3", "1", "2")).resolves.toBe(3);
+        expect((await flow.command("SORT", list) as unknown[]).map(text)).toEqual(["1", "2", "3"]);
+        expect((await flow.command("SORT_RO", list, "DESC", "ALPHA") as unknown[]).map(text)).toEqual(["3", "2", "1"]);
+        expect([null, 3]).toContain(await level12("SORT", list, "STORE", `${prefix}gap-sorted`));
+        const popped = await flow.command("LMPOP", 2, `${prefix}gap-empty`, list, "LEFT") as unknown[];
+        expect(text(popped[0])).toBe(list);
+        await expect(flow.command("SET", `${prefix}gap-a`, "ohmytext")).resolves.toBe("OK");
+        await expect(flow.command("SET", `${prefix}gap-b`, "mynewtext")).resolves.toBe("OK");
+        expect(text(await flow.command("LCS", `${prefix}gap-a`, `${prefix}gap-b`))).toBe("mytext");
+        const bits = `${prefix}gap-bits`;
+        await expect(flow.command("BITFIELD", bits, "GET", "u8", 0)).resolves.toEqual([0]);
+        const written = await level12("BITFIELD", bits, "SET", "u8", 0, 7);
+        expect(written === null || JSON.stringify(written) === "[0]").toBe(true);
+        await expect(flow.command("BITFIELD_RO", bits, "GET", "u8", 0)).resolves.toBeDefined();
+        await expect(flow.command("BF.INSERT", `${prefix}gap-bf`, "CAPACITY", 100, "ITEMS", "a")).resolves.toEqual([1]);
+        await expect(flow.command("CF.INSERT", `${prefix}gap-cf`, "ITEMS", "a")).resolves.toEqual([1]);
+        await expect(flow.command("CF.INSERTNX", `${prefix}gap-cf`, "ITEMS", "a", "b")).resolves.toEqual([0, 1]);
+        await expect(flow.command("LATENCY", "LATEST")).resolves.toBeDefined();
+      }
+
       const bitmap = `${prefix}bitmap`;
       await expect(flow.bitmap.setbit(bitmap, 7, 1)).resolves.toBe(0);
       await expect(flow.bitmap.getbit(bitmap, 7)).resolves.toBe(1);

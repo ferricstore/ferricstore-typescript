@@ -92,6 +92,8 @@ export function routingKeyArguments(
     return { handled: true, keys };
   }
   if (name === "BITOP") return { handled: true, keys: bitopKeys(args) };
+  if (name === "SORT") return { handled: true, keys: sortKeys(args) };
+  if (name === "SORT_RO") return { handled: true, keys: args.slice(1, 2) };
   if (twoKeyCommands.has(name)) {
     return { handled: true, keys: args.length >= 3 ? args.slice(1, 3) : [] };
   }
@@ -122,6 +124,7 @@ export function routingKeyArguments(
 
 /** `numkeys key [key ...] [options]`. */
 const countedKeyCommands = new Set([
+  "LMPOP",
   "SINTERCARD",
   "ZDIFF",
   "ZINTER",
@@ -142,6 +145,8 @@ const destinationCountedKeyCommands = new Set([
 /** Specialized forms deliberately excluded from the first-key parity catalog. */
 export const specializedRoutingCommandNames = new Set([
   "BITOP",
+  "SORT",
+  "SORT_RO",
   "BLMPOP",
   "BZMPOP",
   "MSET",
@@ -159,6 +164,26 @@ export const specializedRoutingCommandNames = new Set([
   "MGET",
   "UNLINK"
 ]);
+
+/** SORT's key and its STORE destination, skipping its other options' values. */
+function sortKeys(args: readonly CommandArgument[]): readonly CommandArgument[] {
+  if (args.length < 2) return [];
+  const keys: CommandArgument[] = [args[1]];
+  for (let index = 2; index < args.length; ) {
+    const token = commandToken(args[index]);
+    if (token === "STORE" && index + 1 < args.length) {
+      keys.push(args[index + 1]);
+      index += 2;
+    } else if (token === "BY" || token === "GET") {
+      index += 2;
+    } else if (token === "LIMIT") {
+      index += 3;
+    } else {
+      index += 1;
+    }
+  }
+  return keys;
+}
 
 function bitopKeys(args: readonly CommandArgument[]): readonly CommandArgument[] {
   return args.length < 4 ? [] : args.slice(2);
