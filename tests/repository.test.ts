@@ -206,10 +206,10 @@ describe("core compatibility CI", () => {
   });
 
   it("pins parity and pinned-core integration to the reviewed OSS revision", () => {
-    const revision = "0db53f328e7b7c7371ed455c7ea8e40dbf82c90f";
+    const revision = "b1bbbfc8b8fa905ac6502ce33991d91696c2e257";
     const image =
       `quay.io/ferricstore/ferricstore:ci-${revision}` +
-      "@sha256:177880c6deb12006dbf8f4f78ca45a9c335fafbdc8e855f592350a56d20cd763";
+      "@sha256:deef3be91bee00249dfc340832ac14d0412f544d47e3311bc65c74ffecf7a357";
     const testWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
     const releaseWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/release.yml`, "utf8");
 
@@ -232,7 +232,7 @@ describe("core compatibility CI", () => {
       "u"
     ).exec(compose)?.[0];
 
-    expect(coreRevision).toBe("0db53f328e7b7c7371ed455c7ea8e40dbf82c90f");
+    expect(coreRevision).toBe("b1bbbfc8b8fa905ac6502ce33991d91696c2e257");
     expect(releaseImage).toBe(testedServerImage);
     expect(compose).toMatch(immutableImage);
     expect(integrationJob).toMatch(immutableImage);
