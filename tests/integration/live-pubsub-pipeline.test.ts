@@ -27,7 +27,7 @@ describe("FerricStore compact Pub/Sub pipeline integration", () => {
       try {
         published = await client.spublish(channel, "shard");
       } catch (error) {
-        // Servers before sharded Pub/Sub (the 0.11 and 0.12.0 release images).
+        // Servers before sharded Pub/Sub (the 0.11.4 compatibility image).
         if (/unknown command/i.test(String(error))) context.skip();
         throw error;
       }
