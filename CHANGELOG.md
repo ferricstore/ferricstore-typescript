@@ -6,7 +6,17 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-01
+
 ### Added
+
+- Routing and live coverage for the commands FerricStore 0.12.16 and 0.12.17
+  added: ZUNION, ZINTER, ZDIFF and their STORE forms, ZINTERCARD, ZRANGESTORE,
+  ZRANGEBYLEX, ZREVRANGEBYLEX, ZLEXCOUNT, ZREMRANGEBYRANK/SCORE/LEX, ZMPOP,
+  BZPOPMIN, BZPOPMAX and BZMPOP, the stream group commands XPENDING, XCLAIM,
+  XAUTOCLAIM and XSETID, and HMSET, TOUCH, TIME, LATENCY, LMPOP, LCS, SORT,
+  SORT_RO, BITFIELD, BITFIELD_RO, HEXPIREAT, HPEXPIREAT, HPEXPIRETIME,
+  BF.INSERT, CF.INSERT and CF.INSERTNX.
 
 - `spublish(channel, message)`, `pubsubShardChannels(pattern?)` and
   `pubsubShardNumSub(...channels)` for FerricStore's sharded Pub/Sub. As with
@@ -24,8 +34,6 @@ The format is based on Keep a Changelog, and this project follows semver once it
   FerricStore OSS 0.12.17 image (the `release-0.12.17` CI lane), so CI
   exercises SPUBLISH and the other commands it added. The 0.11.4
   compatibility lane is unchanged.
-- Refresh current-server integration and documentation pins to immutable
-  FerricStore OSS `0.12.0`. The `0.11.4` compatibility floor remains unchanged.
 - Refresh locked verification dependencies to resolve the MCP client,
   brace-expansion, Markdown parser, and source-map security advisories.
 
