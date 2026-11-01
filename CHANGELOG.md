@@ -20,6 +20,10 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ### Changed
 
+- Current-server integration and documentation pins move to the immutable
+  FerricStore OSS 0.12.17 image (the `release-0.12.17` CI lane), so CI
+  exercises SPUBLISH and the other commands it added. The 0.11.4
+  compatibility lane is unchanged.
 - Refresh current-server integration and documentation pins to immutable
   FerricStore OSS `0.12.0`. The `0.11.4` compatibility floor remains unchanged.
 - Refresh locked verification dependencies to resolve the MCP client,
