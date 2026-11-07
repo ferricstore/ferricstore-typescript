@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-07
+
 ### Changed
 
 - Test against the immutable FerricStore OSS 0.12.18 image (from 0.12.17).
