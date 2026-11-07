@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+### Changed
+
+- Test against the immutable FerricStore OSS 0.12.18 image (from 0.12.17).
+  The 0.11.4 compatibility floor remains unchanged.
+
 ## [0.14.0] - 2026-11-01
 
 ### Added
