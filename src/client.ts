@@ -110,6 +110,7 @@ export { completeJobsResultError } from "./client-helpers.js";
 export { ClaimHydrationError, FlowBatchError } from "./client-errors.js";
 export { groupAutoPartitionItems } from "./client-grouping.js";
 import { valueMGetEntries } from "./client-values.js";
+import { readChildResults, type ChildGroupResults } from "./flow-child-results.js";
 export { valueMGetEntries } from "./client-values.js";
 import {
   nativeAdapterOptions,
@@ -206,6 +207,15 @@ export class FerricStoreClient extends FerricStoreProducerClient {
     return (await valueMGetEntries(this, refs, options)).map((entry) =>
       entry.found ? entry.value : null
     );
+  }
+
+  /** Reads a parent's child group: each child's status and decoded result or error. */
+  async childResults<TResult = unknown>(parentId: string, options: {
+    partitionKey?: string;
+    groupId?: string;
+    maxBytes?: number;
+  } = {}): Promise<ChildGroupResults<TResult> | undefined> {
+    return await readChildResults<TResult>(this, parentId, options);
   }
 
   async signal(id: string, options: {

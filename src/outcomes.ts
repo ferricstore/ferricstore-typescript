@@ -1,9 +1,10 @@
-import type { ClaimedItem, StateMeta } from "./types.js";
+import type { ChildSpec, ClaimedItem, MaxActiveMs, StateMeta } from "./types.js";
 import type { CommandArgument } from "./internal.js";
 
 const OUTCOME_BRAND = Symbol("ferricstore.outcome");
 const ALREADY_APPLIED_BRAND = Symbol("ferricstore.alreadyApplied");
 const REPLAYED_STEP_BRAND = Symbol("ferricstore.replayedStep");
+const WAIT_FOR_CHILDREN_BRAND = Symbol("ferricstore.waitForChildren");
 
 export type Outcome = TransitionOutcome | CompleteOutcome | RetryOutcome | FailOutcome;
 
@@ -68,6 +69,26 @@ export interface FailOutcome extends NamedValueMutation {
   readonly ttlMs?: number;
 }
 
+/**
+ * Spawns a child group and parks the parent in `waitState` in one fenced
+ * command. FerricStore moves the parent to `success` or `failure` when the
+ * group resolves; a worker then reads the children with `childResults()`.
+ */
+export interface WaitForChildrenOutcome {
+  readonly kind: "wait_for_children";
+  readonly children: readonly ChildSpec[];
+  readonly waitState: string;
+  readonly success: string;
+  readonly failure: string;
+  readonly groupId?: string;
+  readonly wait?: "all" | "any";
+  readonly onChildFailed?: "fail_parent" | "ignore";
+  readonly onParentClosed?: "cancel_children" | "abandon_children";
+  readonly maxActiveMs?: MaxActiveMs;
+  readonly values?: Record<string, unknown>;
+  readonly valueRefs?: Record<string, string>;
+}
+
 export function transition(
   toState: string,
   options: Omit<TransitionOutcome, "kind" | "toState"> = {}
@@ -85,6 +106,43 @@ export function retry(options: Omit<RetryOutcome, "kind"> = {}): RetryOutcome {
 
 export function fail(options: Omit<FailOutcome, "kind"> = {}): FailOutcome {
   return brandOutcome({ ...options, kind: "fail" });
+}
+
+export function waitForChildren(
+  children: readonly ChildSpec[],
+  options: Omit<WaitForChildrenOutcome, "kind" | "children">
+): WaitForChildrenOutcome {
+  if (children.length === 0) {
+    throw new TypeError("waitForChildren children must be non-empty");
+  }
+  for (let index = 0; index < children.length; index += 1) {
+    if (!Object.hasOwn(children, index) || children[index] == null) {
+      throw new TypeError("waitForChildren children must be dense");
+    }
+  }
+  for (const name of ["waitState", "success", "failure"] as const) {
+    const state = options[name];
+    if (typeof state !== "string" || state.length === 0) {
+      throw new TypeError(`waitForChildren ${name} must be a non-empty string`);
+    }
+  }
+  if (options.wait != null && options.wait !== "all" && options.wait !== "any") {
+    throw new TypeError("waitForChildren wait must be 'all' or 'any'");
+  }
+  const outcome: WaitForChildrenOutcome = { ...options, children: Array.from(children), kind: "wait_for_children" };
+  Object.defineProperty(outcome, "kind", {
+    configurable: false,
+    enumerable: true,
+    value: "wait_for_children",
+    writable: false
+  });
+  Object.defineProperty(outcome, WAIT_FOR_CHILDREN_BRAND, {
+    configurable: false,
+    enumerable: false,
+    value: true,
+    writable: false
+  });
+  return outcome;
 }
 
 /** @internal Create a marker only after the corresponding mutation commits. */
@@ -123,6 +181,13 @@ export function isOutcome(value: unknown): value is Outcome {
     return typeof outcome.toState === "string";
   }
   return outcome.kind === "complete" || outcome.kind === "retry" || outcome.kind === "fail";
+}
+
+export function isWaitForChildrenOutcome(value: unknown): value is WaitForChildrenOutcome {
+  return typeof value === "object" && value != null &&
+    Object.hasOwn(value, WAIT_FOR_CHILDREN_BRAND) &&
+    (value as Record<PropertyKey, unknown>)[WAIT_FOR_CHILDREN_BRAND] === true &&
+    (value as Partial<WaitForChildrenOutcome>).kind === "wait_for_children";
 }
 
 export function isAlreadyAppliedOutcome(value: unknown): value is AlreadyAppliedOutcome {

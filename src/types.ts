@@ -141,6 +141,8 @@ export interface FlowRecord<TPayload = unknown> {
   rootFlowId?: string;
   correlationId?: string;
   maxActiveMs?: number;
+  /** A terminal Flow's decoded result, when the read returned it (for example `get(id, { full: true })`). */
+  result?: unknown;
   error?: unknown;
   failureReason?: string;
   valueRefs?: Record<string, unknown>;
@@ -229,6 +231,7 @@ export function flowRecordFromResp<TPayload = unknown>(
     field(value, "max_active_ms"),
     "FLOW record max_active_ms"
   );
+  const result = field(value, "result");
   const rawError = field(value, "error");
   const error = flowError(rawError, codec);
   const failureReason = optionalResponseString(field(rawError, "reason"), "FLOW record error reason");
@@ -247,6 +250,7 @@ export function flowRecordFromResp<TPayload = unknown>(
     rootFlowId: optionalResponseString(field(value, "root_flow_id"), "FLOW record root_flow_id"),
     correlationId: optionalResponseString(field(value, "correlation_id"), "FLOW record correlation_id"),
     ...(maxActiveMs == null ? {} : { maxActiveMs }),
+    ...(result == null ? {} : { result: decodePayload(codec, result) }),
     ...(error == null ? {} : { error }),
     ...(failureReason == null ? {} : { failureReason }),
     valueRefs: optionalMapField(value, "value_refs", "FLOW record"),

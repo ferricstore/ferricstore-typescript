@@ -1,38 +1,74 @@
-import { FerricStoreClient, JsonCodec, WorkflowClient, complete, transition } from "../src/index.js";
+// Fan-out and fan-in: an image Flow starts one resize child per size, waits
+// for all of them without holding a worker, then reads their results.
+import { fileURLToPath } from "node:url";
+import {
+  FerricStoreClient,
+  JsonCodec,
+  WorkflowClient,
+  complete,
+  fail,
+  waitForChildren,
+  type FlowRecord
+} from "../src/index.js";
+import { runUntilTerminal } from "./drive-workers.js";
 
-const flow = await FerricStoreClient.fromUrl(process.env.FERRICSTORE_URL ?? "ferric://127.0.0.1:6388", {
-  codec: new JsonCodec()
-});
+export const SIZES = ["small", "large"] as const;
 
-const workflows = new WorkflowClient(flow);
+interface ResizeJob {
+  imageId: string;
+  size: string;
+}
 
-const image = workflows.workflow({
-  initialState: "received",
-  type: "image",
-  worker: "image-parent-worker-1"
-});
+export function defineImageWorkflows(workflows: WorkflowClient) {
+  const image = workflows.workflow({ initialState: "received", type: "image", worker: "image-worker-1" });
+  const resize = workflows.workflow({ initialState: "queued", type: "resize", worker: "resize-worker-1" });
 
-image.state("received", async (ctx) => {
-  await ctx.flow.spawnChildren(
-    [
-      { id: `${ctx.id}:small`, type: "resize", payload: { imageId: ctx.id, size: "small" } },
-      { id: `${ctx.id}:large`, type: "resize", payload: { imageId: ctx.id, size: "large" } }
-    ],
-    { wait: "all" }
+  // Creating the children and parking the parent in "waiting_for_resizes" is
+  // one fenced command. The parent holds no lease while it waits.
+  image.state("received", (ctx) =>
+    waitForChildren(
+      SIZES.map((size) => ({ id: `${ctx.id}:${size}`, payload: { imageId: ctx.id, size }, type: "resize" })),
+      { failure: "resize_failed", groupId: "resizes", success: "resized", waitState: "waiting_for_resizes" }
+    )
   );
 
-  return transition("waiting_for_resizes");
-});
+  // Each child is an ordinary Flow with its own lease, retries, and history.
+  resize.state("queued", (ctx) => {
+    const { imageId, size } = ctx.payload as ResizeJob;
+    return complete({ result: { size, url: `s3://images/${imageId}/${size}.jpg` } });
+  });
 
-image.state("waiting_for_resizes", async () => {
-  return complete({ result: { fanoutStarted: true } });
-});
+  // FerricStore moves the parent here once every child has completed.
+  image.state("resized", async (ctx) => {
+    const resizes = await ctx.flow.childResults<{ size: string; url: string }>("resizes");
+    return complete({ result: { urls: resizes.children.map((child) => child.result?.url) } });
+  });
 
-await image.start("image-1", {
-  idempotent: true,
-  payload: { uploadId: "upload-1" }
-});
+  // With the default onChildFailed: "fail_parent", the first failed child
+  // moves the parent here and cancels the children still running.
+  image.state("resize_failed", async (ctx) => {
+    const resizes = await ctx.flow.childResults("resizes");
+    const failed = resizes.children.filter((child) => child.status === "failed").map((child) => child.id);
+    return fail({ error: { failed, message: "resize failed" } });
+  });
 
-console.log(await image.worker({ batchSize: 5, states: ["received", "waiting_for_resizes"] }).runOnce());
+  return { image, resize };
+}
 
-await flow.close();
+export async function processImage(flow: FerricStoreClient, imageId: string): Promise<FlowRecord> {
+  const { image, resize } = defineImageWorkflows(new WorkflowClient(flow));
+  await image.start(imageId, { idempotent: true, payload: { uploadId: "upload-1" } });
+  return await runUntilTerminal(flow, imageId, [
+    image.worker({ states: ["received", "resized", "resize_failed"] }),
+    resize.worker({ states: ["queued"] })
+  ]);
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const flow = await FerricStoreClient.fromUrl(process.env.FERRICSTORE_URL ?? "ferric://127.0.0.1:6388", {
+    codec: new JsonCodec()
+  });
+  const record = await processImage(flow, "image-1");
+  console.log(record.state, record.result);
+  await flow.close();
+}

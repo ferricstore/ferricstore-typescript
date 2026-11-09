@@ -34,7 +34,8 @@ import {
 } from "./worker-internal.js";
 import { createWorkflowStateRegistration } from "./workflow-registration.js";
 import { snapshotFlowClientOptions } from "./flow-client-options.js";
-export { WorkflowContext, WorkflowFlowCommands } from "./workflow-context.js";
+export { WorkflowContext } from "./workflow-context.js";
+export { WorkflowFlowCommands } from "./workflow-flow-commands.js";
 import { executeWorkflowJob } from "./workflow-job-execution.js";
 import { resolveWorkflowStates, type ResolvedWorkflowState } from "./workflow-utilities.js";
 import type {
