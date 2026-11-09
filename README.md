@@ -524,6 +524,8 @@ image.state("resized", async (ctx) => {
   reads any parent's group.
 - If the spawn response is lost and the same group is sent again, the server
   treats it as already applied instead of creating a second set of children.
+- Fan-in needs FerricStore 0.11.19 or newer. Older servers never make a parent
+  claimable again after its group resolves.
 
 [examples/fanout.ts](examples/fanout.ts) is the complete program.
 

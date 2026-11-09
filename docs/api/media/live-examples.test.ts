@@ -4,6 +4,10 @@ import { processImage } from "../../examples/fanout.js";
 import { syncTenant, type TenantSyncActivities } from "../../examples/tenant-sync.js";
 import { integrationClient, suffix } from "./live-support.js";
 
+// Servers before 0.11.19 never make a parent claimable again after its child
+// group resolves, so fan-in cannot finish on them.
+const skipChildJoinResume = process.env.FERRICSTORE_SKIP_CHILD_JOIN_RESUME === "true";
+
 function activities(changes: Record<string, number>, findingsPerChange: number): TenantSyncActivities & {
   calls: string[];
 } {
@@ -28,7 +32,7 @@ function activities(changes: Record<string, number>, findingsPerChange: number):
 }
 
 describe("documented examples against a live server", () => {
-  it("fans out resize children and fans their results back in", async () => {
+  it.skipIf(skipChildJoinResume)("fans out resize children and fans their results back in", async () => {
     const flow = await integrationClient({ codec: new JsonCodec() });
     try {
       const imageId = `ts-example-image-${suffix()}`;
@@ -72,7 +76,7 @@ describe("documented examples against a live server", () => {
     }
   });
 
-  it("runs the tenant sync through every branch of the ported Temporal workflow", async () => {
+  it.skipIf(skipChildJoinResume)("runs the tenant sync through every branch of the ported Temporal workflow", async () => {
     const flow = await integrationClient({ codec: new JsonCodec() });
     try {
       const risky = activities({ github: 3, okta: 0 }, 2);

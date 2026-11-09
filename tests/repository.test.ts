@@ -160,6 +160,16 @@ describe("core compatibility CI", () => {
       .toContain("FERRICSTORE_SKIP_REWIND_REASON_PERSISTENCE === \"true\"");
   });
 
+  it("skips child-join fan-in only on the server lane that predates it", () => {
+    const skipExpression = "FERRICSTORE_SKIP_CHILD_JOIN_RESUME: ${{ matrix.server == 'release-0.11.4' }}";
+    for (const workflow of ["test.yml", "release.yml"]) {
+      const source = readFileSync(`${repositoryRoot}/.github/workflows/${workflow}`, "utf8");
+      expect(workflowJob(source, "integration")).toContain(skipExpression);
+    }
+    expect(readFileSync(`${repositoryRoot}/tests/integration/live-examples.test.ts`, "utf8"))
+      .toContain("FERRICSTORE_SKIP_CHILD_JOIN_RESUME === \"true\"");
+  });
+
   it("compares generated TypeDoc output without depending on zlib bytes", () => {
     const metadata = JSON.parse(readFileSync(`${repositoryRoot}/package.json`, "utf8")) as {
       scripts?: Record<string, string>;

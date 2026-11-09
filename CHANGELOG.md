@@ -12,6 +12,8 @@ The format is based on Keep a Changelog, and this project follows semver once it
   outcome that spawns a child group and parks the parent in one fenced
   command. Spawning with `ctx.flow.spawnChildren()` and then returning a
   transition raced with children that finished first.
+  Fan-in needs FerricStore 0.11.19 or newer: older servers never make a
+  parent claimable again after its group resolves.
 - `client.childResults(parentId, options)` and `ctx.flow.childResults(groupId)`
   read a child group's summary and each child's status and decoded result or
   error, in one `FLOW.GET` and one `FLOW.VALUE.MGET`.
