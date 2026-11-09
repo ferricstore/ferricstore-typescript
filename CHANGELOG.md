@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-09
+
 ### Added
 
 - `waitForChildren(children, { waitState, success, failure })`, a workflow
