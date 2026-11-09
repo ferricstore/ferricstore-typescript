@@ -169,8 +169,10 @@ export {
   fail,
   isAlreadyAppliedOutcome,
   isOutcome,
+  isWaitForChildrenOutcome,
   retry,
   transition,
+  waitForChildren,
   type AlreadyAppliedOutcome,
   type AppliedStepOutcome,
   type ReplayedStepResult,
@@ -180,8 +182,10 @@ export {
   type NamedValueMutation,
   type Outcome,
   type RetryOutcome,
-  type TransitionOutcome
+  type TransitionOutcome,
+  type WaitForChildrenOutcome
 } from "./outcomes.js";
+export type { ChildGroupResults, ChildResult, ChildStatus } from "./flow-child-results.js";
 export type { Command, CommandArgument } from "./internal.js";
 export { LeaseRenewalError } from "./worker-internal.js";
 export { COMMAND_OPCODES } from "./protocol.js";

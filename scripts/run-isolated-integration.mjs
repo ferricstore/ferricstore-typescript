@@ -4,6 +4,7 @@ const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const groups = [
   ["agent framework persistence", "tests/integration/live-agent-persistence.test.ts"],
   ["core SDK", "tests/integration/live.test.ts"],
+  ["documented examples", "tests/integration/live-examples.test.ts"],
   ["compact Stream multi-topic pipeline", "tests/integration/live-stream-pipeline.test.ts"],
   ["compact Pub/Sub pipeline", "tests/integration/live-pubsub-pipeline.test.ts"],
   ["Flow retention cleanup", "tests/integration/live-retention.test.ts"],

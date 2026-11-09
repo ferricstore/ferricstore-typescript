@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-image="${FERRICSTORE_IMAGE:-quay.io/ferricstore/ferricstore:0.12.18@sha256:e98e6ef91e028965598a2ed1b68981bab826a64749d97f6fecd6ecd4687bd3e1}"
+image="${FERRICSTORE_IMAGE:-quay.io/ferricstore/ferricstore:0.12.19@sha256:91364b8a9f1e20fc530154068c9a0dedbf11b2d134b92692b258feeb784eff7d}"
 container="ferricstore-typescript-http-integration-$$"
 tls_dir="$(mktemp -d /tmp/ferricstore-typescript-http-integration.XXXXXX)"
 username="sdk-http"

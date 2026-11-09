@@ -5,12 +5,13 @@ import {
   isAlreadyAppliedOutcome,
   isOutcome,
   isReplayedStepResult,
+  isWaitForChildrenOutcome,
   retry
 } from "./outcomes.js";
 import type { ClaimedItem, FlowRecord, WorkerConfig } from "./types.js";
 import { LeaseRenewalGuard, workerErrorPayload } from "./worker-internal.js";
 import type { WorkflowContext } from "./workflow-context.js";
-import { applyWorkflowOutcome } from "./workflow-outcome-application.js";
+import { applyWaitForChildren, applyWorkflowOutcome } from "./workflow-outcome-application.js";
 import type { StateRegistration } from "./workflow-types.js";
 import { WorkerWorkflowContext } from "./workflow-worker-context.js";
 
@@ -57,6 +58,10 @@ export async function executeWorkflowJob(
   }
   if (isOutcome(value)) {
     await applyWorkflowOutcome(workflow.client, ctx, value, registration.returnRecord);
+    return;
+  }
+  if (isWaitForChildrenOutcome(value)) {
+    await applyWaitForChildren(workflow.client, ctx, value);
     return;
   }
   if (ctx.hasAppliedMutation) {

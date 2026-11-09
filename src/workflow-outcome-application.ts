@@ -1,5 +1,12 @@
 import type { FerricStoreClient } from "./client.js";
-import type { CompleteOutcome, FailOutcome, Outcome, RetryOutcome, TransitionOutcome } from "./outcomes.js";
+import type {
+  CompleteOutcome,
+  FailOutcome,
+  Outcome,
+  RetryOutcome,
+  TransitionOutcome,
+  WaitForChildrenOutcome
+} from "./outcomes.js";
 import { WorkflowContext } from "./workflow-context.js";
 
 export async function applyWorkflowOutcome(
@@ -22,6 +29,28 @@ export async function applyWorkflowOutcome(
       await applyFail(client, ctx, outcome, returnRecord);
       return;
   }
+}
+
+export async function applyWaitForChildren(
+  client: FerricStoreClient,
+  ctx: WorkflowContext,
+  outcome: WaitForChildrenOutcome
+): Promise<void> {
+  await client.spawnChildren(ctx.id, [...outcome.children], {
+    failure: outcome.failure,
+    fencingToken: ctx.fencingToken,
+    groupId: outcome.groupId,
+    leaseToken: ctx.leaseToken,
+    maxActiveMs: outcome.maxActiveMs,
+    onChildFailed: outcome.onChildFailed,
+    onParentClosed: outcome.onParentClosed,
+    partitionKey: ctx.partitionKey,
+    success: outcome.success,
+    valueRefs: outcome.valueRefs,
+    values: outcome.values,
+    wait: outcome.wait,
+    waitState: outcome.waitState
+  });
 }
 
 async function applyTransition(

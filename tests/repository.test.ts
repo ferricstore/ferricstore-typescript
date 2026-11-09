@@ -3,10 +3,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const testedServerVersion = "0.12.18";
+const testedServerVersion = "0.12.19";
 const testedServerImage =
-  "quay.io/ferricstore/ferricstore:0.12.18" +
-  "@sha256:e98e6ef91e028965598a2ed1b68981bab826a64749d97f6fecd6ecd4687bd3e1";
+  "quay.io/ferricstore/ferricstore:0.12.19" +
+  "@sha256:91364b8a9f1e20fc530154068c9a0dedbf11b2d134b92692b258feeb784eff7d";
 
 function workflowJob(source: string, name: string): string {
   const lines = source.split("\n");
@@ -144,7 +144,7 @@ describe("core compatibility CI", () => {
     for (const source of [testWorkflow, releaseWorkflow]) {
       const integration = workflowJob(source, "integration");
       expect(integration).toContain(skipExpression);
-      expect(integration).toContain("server: release-0.12.18");
+      expect(integration).toContain("server: release-0.12.19");
     }
 
     const historicalLanes = new Set(["release-0.11.4", "pinned-core"]);
@@ -152,12 +152,22 @@ describe("core compatibility CI", () => {
       true,
       true
     ]);
-    expect(["release-0.12.18", "future-release"].map((server) => historicalLanes.has(server))).toEqual([
+    expect(["release-0.12.19", "future-release"].map((server) => historicalLanes.has(server))).toEqual([
       false,
       false
     ]);
     expect(readFileSync(`${repositoryRoot}/tests/integration/live-rewind-reason.test.ts`, "utf8"))
       .toContain("FERRICSTORE_SKIP_REWIND_REASON_PERSISTENCE === \"true\"");
+  });
+
+  it("skips child-join fan-in only on the server lane that predates it", () => {
+    const skipExpression = "FERRICSTORE_SKIP_CHILD_JOIN_RESUME: ${{ matrix.server == 'release-0.11.4' }}";
+    for (const workflow of ["test.yml", "release.yml"]) {
+      const source = readFileSync(`${repositoryRoot}/.github/workflows/${workflow}`, "utf8");
+      expect(workflowJob(source, "integration")).toContain(skipExpression);
+    }
+    expect(readFileSync(`${repositoryRoot}/tests/integration/live-examples.test.ts`, "utf8"))
+      .toContain("FERRICSTORE_SKIP_CHILD_JOIN_RESUME === \"true\"");
   });
 
   it("compares generated TypeDoc output without depending on zlib bytes", () => {
@@ -206,10 +216,10 @@ describe("core compatibility CI", () => {
   });
 
   it("pins parity and pinned-core integration to the reviewed OSS revision", () => {
-    const revision = "6da3422fec2ab8ee89eb7de2007961c31026b117";
+    const revision = "8e019045e35b04fc9b685f7f629d267e80212360";
     const image =
       `quay.io/ferricstore/ferricstore:ci-${revision}` +
-      "@sha256:e28893e982daecd9c3e367fa03983648fced84374c8816816836fa186e441aa8";
+      "@sha256:2c5429a06277b7af439c737742d6046408d1830490010b1c7da070a321941c5a";
     const testWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/test.yml`, "utf8");
     const releaseWorkflow = readFileSync(`${repositoryRoot}/.github/workflows/release.yml`, "utf8");
 
@@ -232,7 +242,7 @@ describe("core compatibility CI", () => {
       "u"
     ).exec(compose)?.[0];
 
-    expect(coreRevision).toBe("6da3422fec2ab8ee89eb7de2007961c31026b117");
+    expect(coreRevision).toBe("8e019045e35b04fc9b685f7f629d267e80212360");
     expect(releaseImage).toBe(testedServerImage);
     expect(compose).toMatch(immutableImage);
     expect(integrationJob).toMatch(immutableImage);
