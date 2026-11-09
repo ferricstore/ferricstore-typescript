@@ -21,6 +21,12 @@ The format is based on Keep a Changelog, and this project follows semver once it
   README sections on fan-in, coming from Temporal, and testing workflows.
 - Live integration tests that run the fan-out and tenant-sync examples.
 
+### Changed
+
+- Test against the immutable FerricStore OSS 0.12.19 image (from 0.12.18),
+  and pin core routing parity and the pinned-core integration lane to core
+  `8e019045e`. The 0.11.4 compatibility floor remains unchanged.
+
 ### Fixed
 
 - `examples/fanout.ts` never created its children: it omitted the wait,
