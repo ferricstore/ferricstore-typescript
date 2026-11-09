@@ -6,6 +6,27 @@ The format is based on Keep a Changelog, and this project follows semver once it
 
 ## [Unreleased]
 
+### Added
+
+- `waitForChildren(children, { waitState, success, failure })`, a workflow
+  outcome that spawns a child group and parks the parent in one fenced
+  command. Spawning with `ctx.flow.spawnChildren()` and then returning a
+  transition raced with children that finished first.
+- `client.childResults(parentId, options)` and `ctx.flow.childResults(groupId)`
+  read a child group's summary and each child's status and decoded result or
+  error, in one `FLOW.GET` and one `FLOW.VALUE.MGET`.
+- `FlowRecord.result`: a terminal Flow's decoded result when the read returns
+  it, as `get(id, { full: true })` does.
+- `examples/tenant-sync.ts`, a Temporal workflow ported to FerricFlow, and
+  README sections on fan-in, coming from Temporal, and testing workflows.
+- Live integration tests that run the fan-out and tenant-sync examples.
+
+### Fixed
+
+- `examples/fanout.ts` never created its children: it omitted the wait,
+  success, and failure states the server requires, and the worker recorded
+  the rejection as a retry.
+
 ## [0.14.1] - 2026-11-07
 
 ### Changed

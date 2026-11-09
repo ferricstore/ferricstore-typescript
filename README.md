@@ -384,6 +384,7 @@ Handlers return explicit durable outcomes:
 - `complete({ result })`
 - `retry({ error })`
 - `fail({ error })`
+- `waitForChildren(children, { waitState, success, failure })` (see [Fan-Out And Fan-In](#fan-out-and-fan-in))
 
 FerricFlow does not replay TypeScript handler code. Workers claim a durable state, run normal code, then write the next state through the FerricFlow API.
 
@@ -485,6 +486,124 @@ Flow fencing tokens remain `number` values while safe and are returned as
 unchanged; all fenced mutation APIs accept the exported `FencingToken` type,
 and native compact claim and batch paths preserve its signed 64-bit value
 exactly.
+
+## Fan-Out And Fan-In
+
+A handler fans out by returning `waitForChildren()`. FerricStore creates the
+child Flows and parks the parent in `waitState` in one fenced command, so the
+parent holds no lease or worker while its children run. When the group
+resolves, FerricStore moves the parent to `success` or `failure`, where any
+worker can claim it and read the children's results:
+
+```ts
+import { complete, waitForChildren } from "@ferricstore/ferricstore";
+
+image.state("received", (ctx) =>
+  waitForChildren(
+    ["small", "large"].map((size) => ({ id: `${ctx.id}:${size}`, payload: { size }, type: "resize" })),
+    { failure: "resize_failed", groupId: "resizes", success: "resized", waitState: "waiting_for_resizes" }
+  )
+);
+
+image.state("resized", async (ctx) => {
+  const resizes = await ctx.flow.childResults<{ url: string }>("resizes");
+  return complete({ result: { urls: resizes.children.map((child) => child.result?.url) } });
+});
+```
+
+- `wait: "all"` (the default) resolves the group when every child is terminal.
+  `wait: "any"` resolves it when the first child completes.
+- `onChildFailed: "fail_parent"` (the default) resolves the group to `failure`
+  at the first failed or cancelled child. `"ignore"` waits for the group and
+  lets the `success` handler decide what a failed child means.
+- When a group resolves while children are still running, FerricStore cancels
+  them, unless `onParentClosed: "abandon_children"` was set.
+- `ctx.flow.childResults(groupId)` returns the group's summary and each child's
+  id, status, and decoded result or error, ordered by child id. It costs one
+  `FLOW.GET` and one `FLOW.VALUE.MGET`. `client.childResults(parentId, options)`
+  reads any parent's group.
+- If the spawn response is lost and the same group is sent again, the server
+  treats it as already applied instead of creating a second set of children.
+
+[examples/fanout.ts](examples/fanout.ts) is the complete program.
+
+## Coming From Temporal
+
+FerricFlow is a durable state machine, not a durable-execution engine. Temporal
+replays your workflow function to rebuild its local variables; FerricFlow never
+replays code. A handler runs one named state, returns an outcome, and the
+outcome is committed. Any worker can then run the next state.
+
+| Temporal | FerricFlow in this SDK |
+| --- | --- |
+| Workflow function | A workflow type with one handler per named state |
+| `await` on an activity | A state whose handler calls the activity and returns `transition()` |
+| Local variables across `await` | Named values: `transition("next", { values })`, read with `ctx.value()` |
+| `executeChild` / `Promise.all` of children | `waitForChildren()` plus `ctx.flow.childResults()` |
+| Signals | `client.signal(id, { signal, ifState, transitionTo, idempotencyKey })` |
+| Queries | `client.get(id)` for state and values, FQL1 with `client.query()` |
+| Search attributes | Policy-indexed attributes and FQL1 |
+| `sleep` / durable timers | `transition("next", { runAtMs })` |
+| Retry policies | Per-type and per-state retry policies with backoff and exhaustion routing |
+| Activity heartbeats and timeouts | Leases, renewed automatically while the handler runs |
+| Workflow execution timeout | `maxActiveMs` |
+| Cron workflows and schedules | Durable schedules: cron, interval, one-shot, overlap and catch-up policies |
+| `continueAsNew` | Not needed: nothing is replayed. History is capped per Flow (100,000 events by default) |
+| `patched()` and versioning | Not needed for code changes. Keep a handler for every state that in-flight Flows can still be in |
+| Temporal UI and CLI | The operations dashboard and the [`ferric` CLI](https://github.com/ferricstore/command-line) |
+
+[examples/tenant-sync.ts](examples/tenant-sync.ts) ports a Temporal workflow
+that runs integrations in parallel, waits for all of them, and branches twice
+on the results. The Temporal original is in the file's header comment.
+
+What to expect when porting:
+
+- **It is a rewrite of the orchestration, not a port of the code.** Each
+  `await` that must survive a crash becomes a named state. Activities stay
+  ordinary async functions.
+- **Handler code runs at least once; committed outcomes apply once.** A worker
+  can crash after an activity ran but before its outcome was committed, so
+  activities still need idempotency keys, as Temporal activities do. Each
+  outcome is fenced by the claim's lease and fencing token, so a stale or
+  duplicate worker cannot apply a second transition. `step()` stores an
+  activity's result with the transition, so a retried handler gets the stored
+  result instead of calling the activity again.
+- **There is no replay history to outgrow.** History is an audit log, capped
+  per Flow, and never replayed, so a long-running Flow does not get slower to
+  resume. Requests are still bounded: 16 MB per native frame by default
+  (`native_max_frame_bytes`), and `get()` returns payloads inline up to 64 KiB
+  (`flow_payload_return_max_bytes`). Keep large data in object storage and
+  store a reference in a named value.
+- **Workflows that are mostly code-shaped logic** (many sequential awaits,
+  loops over awaits, deep conditional trees) fit Temporal's model better.
+  Queue-shaped and multi-service state-machine workflows fit FerricFlow's.
+  Porting one such workflow first, beside the existing ones, is the
+  lowest-risk way to evaluate it.
+
+## Testing Workflows
+
+Test against a real single-node server instead of a mock: start one with
+`npm run integration:up` (Docker), or with the `docker run` command above.
+
+- **Drive workers yourself.** `worker().runOnce()` claims and runs one batch
+  and returns. Call it until the Flow is terminal, as
+  [examples/drive-workers.ts](examples/drive-workers.ts) does.
+- **Pass activities in.** Define workflows in a function that takes the
+  activities, as [examples/tenant-sync.ts](examples/tenant-sync.ts) does, and
+  give tests fakes that record their calls.
+- **Skip time without waiting.** A worker created with `nowMs` claims work as
+  if that were the current time, so a one-hour timer fires immediately:
+
+```ts
+trial.state("started", () => transition("reminder_due", { runAtMs: Date.now() + 3_600_000 }));
+
+await trial.worker({ states: ["started"] }).runOnce();
+// Due in an hour: a worker at the real time finds nothing to claim.
+await trial.worker({ nowMs: Date.now() + 3_600_001, states: ["reminder_due"] }).runOnce();
+```
+
+[tests/integration/live-examples.test.ts](tests/integration/live-examples.test.ts)
+runs the fan-out and tenant-sync examples this way, against a live server, in CI.
 
 ## Low-Level Flow Commands
 
@@ -720,11 +839,17 @@ The throughput profile uses compact claims, a larger batch ceiling, and concurre
 
 ## Examples
 
-Runnable examples live in the `examples/` directory:
+Runnable examples live in the `examples/` directory. Start a server, then run
+one with [tsx](https://tsx.is):
+
+```bash
+FERRICSTORE_URL=ferric://127.0.0.1:6388 npx tsx examples/tenant-sync.ts
+```
 
 - [durable-queue.ts](examples/durable-queue.ts)
 - [order-workflow.ts](examples/order-workflow.ts)
-- [fanout.ts](examples/fanout.ts)
+- [fanout.ts](examples/fanout.ts): fan-out to child Flows and fan-in of their results
+- [tenant-sync.ts](examples/tenant-sync.ts): a Temporal workflow ported to FerricFlow
 - [signals.ts](examples/signals.ts)
 - [value-refs.ts](examples/value-refs.ts)
 - [kv-store.ts](examples/kv-store.ts)
