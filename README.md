@@ -538,6 +538,7 @@ outcome is committed. Any worker can then run the next state.
 | --- | --- |
 | Workflow function | A workflow type with one handler per named state |
 | `await` on an activity | A state whose handler calls the activity and returns `transition()` |
+| Activity result recorded in history | `ctx.step({ name, run, toState })`: stores the result with the move to `toState`; a reclaimed Flow reads it instead of calling the activity again |
 | Local variables across `await` | Named values: `transition("next", { values })`, read with `ctx.value()` |
 | `executeChild` / `Promise.all` of children | `waitForChildren()` plus `ctx.flow.childResults()` |
 | Signals | `client.signal(id, { signal, ifState, transitionTo, idempotencyKey })` |
@@ -560,7 +561,10 @@ What to expect when porting:
 
 - **It is a rewrite of the orchestration, not a port of the code.** Each
   `await` that must survive a crash becomes a named state. Activities stay
-  ordinary async functions.
+  ordinary async functions. The registration API looks like Temporal's, but a
+  Flow resumes at its last committed state, not inside a function: if a
+  handler runs `step()` twice and the worker dies between them, the Flow
+  resumes in the first step's `toState`, so that state needs a handler.
 - **Handler code runs at least once; committed outcomes apply once.** A worker
   can crash after an activity ran but before its outcome was committed, so
   activities still need idempotency keys, as Temporal activities do. Each

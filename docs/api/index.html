@@ -347,6 +347,10 @@ outcome is committed. Any worker can then run the next state.</p>
 <td>A state whose handler calls the activity and returns <code>transition()</code></td>
 </tr>
 <tr>
+<td>Activity result recorded in history</td>
+<td><code>ctx.step({ name, run, toState })</code>: stores the result with the move to <code>toState</code>; a reclaimed Flow reads it instead of calling the activity again</td>
+</tr>
+<tr>
 <td>Local variables across <code>await</code></td>
 <td>Named values: <code>transition(&quot;next&quot;, { values })</code>, read with <code>ctx.value()</code></td>
 </tr>
@@ -407,7 +411,10 @@ on the results. The Temporal original is in the file's header comment.</p>
 <ul>
 <li><strong>It is a rewrite of the orchestration, not a port of the code.</strong> Each
 <code>await</code> that must survive a crash becomes a named state. Activities stay
-ordinary async functions.</li>
+ordinary async functions. The registration API looks like Temporal's, but a
+Flow resumes at its last committed state, not inside a function: if a
+handler runs <code>step()</code> twice and the worker dies between them, the Flow
+resumes in the first step's <code>toState</code>, so that state needs a handler.</li>
 <li><strong>Handler code runs at least once; committed outcomes apply once.</strong> A worker
 can crash after an activity ran but before its outcome was committed, so
 activities still need idempotency keys, as Temporal activities do. Each
