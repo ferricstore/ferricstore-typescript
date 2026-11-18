@@ -328,9 +328,12 @@ describe("workflow supply-chain security", () => {
       "utf8"
     );
 
-    const pinnedAudit = "npx --yes npm@11.6.2 audit --audit-level=high";
-    expect(workflowJob(testWorkflow, "package")).toContain(pinnedAudit);
-    expect(workflowJob(releaseWorkflow, "npm")).toContain(pinnedAudit);
+    const audit = "node scripts/audit-dependencies.mjs";
+    expect(workflowJob(testWorkflow, "package")).toContain(audit);
+    expect(workflowJob(releaseWorkflow, "npm")).toContain(audit);
+    const auditScript = readFileSync(`${repositoryRoot}/scripts/audit-dependencies.mjs`, "utf8");
+    expect(auditScript).toContain('"npm@11.6.2", "audit", "--json"');
+    expect(auditScript).toContain('new Set(["high", "critical"])');
   });
 
   it("pins every third-party action in every workflow", () => {

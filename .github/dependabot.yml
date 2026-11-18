@@ -12,6 +12,13 @@ updates:
         dependency-type: development
       npm-runtime:
         dependency-type: production
+    ignore:
+      # Types must match the oldest supported Node in engines.node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # TypeDoc 0.28 supports TypeScript up to 6.0; lift this when it accepts 7.
+      - dependency-name: typescript
+        versions: [">=7"]
 
   - package-ecosystem: github-actions
     directory: /

@@ -91,7 +91,7 @@
 <div class="tsd-signature"><span class="tsd-kind-property">serde</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">SerializerProtocol</span></div><aside class="tsd-sources">
 <p>Inherited from BaseCheckpointSaver.serde</p>
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/src/../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts#L58">../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts:58</a></li></ul></aside></section></section></details>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/src/../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts#L85">../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts:85</a></li></ul></aside></section></section></details>
 <details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Methods"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
 <h2 class="tsd-anchor-link" id="methods-1">Methods<a href="#methods-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
 <section>
@@ -126,7 +126,7 @@
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">Checkpoint</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">&gt;</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">undefined</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <p>Inherited from BaseCheckpointSaver.get</p>
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/src/../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts#L65">../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts:65</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/src/../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts#L92">../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts:92</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited tsd-is-external">
 <h3 class="tsd-anchor-link" id="getdeltachannelhistory"><span>get<wbr/>Delta<wbr/>Channel<wbr/>History</span><a href="#getdeltachannelhistory" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited tsd-is-external">
@@ -144,6 +144,14 @@ omitted from that channel's entry — the consumer treats the absence as
 &quot;start empty&quot;.</p>
 <p>Walks the parent chain (not <code>list({ before })</code>): for forked threads, only
 on-path ancestors contribute.</p>
+<p>Within a single checkpoint, writes are ordered by <code>writesSortKey</code> —
+<code>(task_path, task_id, idx)</code> — the order live execution applies a
+superstep's task writes in. This default walk cannot sort by path itself
+(<code>CheckpointPendingWrite</code> carries no path), so it relies on <code>getTuple</code>
+returning <code>pendingWrites</code> already in <code>writesSortKey</code> order, which the
+contract above requires of every saver. Writes stored without a
+<code>task_path</code> (graph input, <code>Command</code> updates, rows predating the
+column) sort first, by <code>task_id</code>.</p>
 <p>The default implementation walks <code>getTuple</code> + <code>parentConfig</code> once for all
 channels — each ancestor visited once, not once per channel. Savers with
 direct storage access (e.g. <code>MemorySaver</code>) override for performance; the
@@ -173,7 +181,7 @@ implementation will continue to work against the public
 </div></div><aside class="tsd-sources">
 <p>Inherited from BaseCheckpointSaver.getDeltaChannelHistory</p>
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/src/../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts#L107">../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts:107</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/src/../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts#L152">../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts:152</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member tsd-is-inherited tsd-is-external">
 <h3 class="tsd-anchor-link" id="getnextversion"><span>get<wbr/>Next<wbr/>Version</span><a href="#getnextversion" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures tsd-is-inherited tsd-is-external">
@@ -191,7 +199,7 @@ as long as they are monotonically increasing.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">number</span></h4><aside class="tsd-sources">
 <p>Inherited from BaseCheckpointSaver.getNextVersion</p>
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/src/../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts#L117">../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts:117</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/src/../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts#L162">../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts:162</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="gettuple"><span>get<wbr/>Tuple</span><a href="#gettuple" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -245,6 +253,14 @@ as long as they are monotonically increasing.</p>
 <div class="tsd-signature tsd-anchor-link" id="putwrites-1"><span class="tsd-kind-call-signature">putWrites</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">config</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">RunnableConfig</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">writes</span><span class="tsd-signature-symbol">:</span> <a href="../types/langgraph.LangGraphPendingWrite.html" class="tsd-signature-type tsd-kind-type-alias">LangGraphPendingWrite</a><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">taskId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span><a href="#putwrites-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
 <div class="tsd-comment tsd-typography"><p>Store intermediate writes linked to a checkpoint.</p>
+<p><code>taskPath</code> is the serialized path of the task creating the writes (see
+<code>writesSortKey</code>). Implementations should persist it when they can, and
+must return <code>pendingWrites</code> from <code>getTuple</code>/<code>list</code> in <code>writesSortKey</code>
+order — live execution applies a superstep's writes in that order, so
+replaying in any other order can rebuild a different value for an
+order-sensitive reducer. Writes stored without a path (rows predating it,
+savers that don't persist one) sort first by <code>taskId</code>, which is also the
+order live execution applies input in.</p>
 </div>
 <div class="tsd-parameters">
 <h4 class="tsd-parameters-title">Parameters</h4>
@@ -268,7 +284,7 @@ timers) when a checkpointer is present in runnable <code>configurable</code>.</p
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">string</span></h4><aside class="tsd-sources">
 <p>Inherited from BaseCheckpointSaver.toJSON</p>
 <ul>
-<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/src/../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts#L64">../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts:64</a></li></ul></aside></div></li></ul></section></section></details></div>
+<li>Defined in <a href="https://github.com/ferricstore/ferricstore-typescript/blob/main/src/../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts#L91">../node_modules/@langchain/langgraph-checkpoint/dist/base.d.ts:91</a></li></ul></aside></div></li></ul></section></section></details></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">
