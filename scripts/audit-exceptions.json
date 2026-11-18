@@ -1,0 +1,10 @@
+{
+  "advisories": [
+    {
+      "url": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "expires": "2026-12-18",
+      "reason": "No fixed picomatch exists yet (affects every release through 4.0.7, the latest). Only Vitest, Vite and tsup use it, with glob patterns from this repository; the published package does not depend on it."
+    }
+  ]
+}
